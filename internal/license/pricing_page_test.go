@@ -11,22 +11,31 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-// TestTheGateMapIsWhatThePricingPageSells pins which tier each paid feature needs, and Pro's
-// policy cap, to the tier cards a buyer reads. Moving a feature between tiers or changing the cap
-// fails here until the pricing page and this table change together.
+// TestTheGateMapIsWhatThePricingPageSells pins which tier each paid feature needs, which add-on
+// sells a feature below that tier, and Pro's policy cap, to the tier cards a buyer reads. Moving a
+// feature between tiers, selling it as an add-on, or changing the cap fails here until the pricing
+// page and this table change together.
 func TestTheGateMapIsWhatThePricingPageSells(t *testing.T) {
 	t.Parallel()
 	want := map[Feature]string{
-		FeatureSSO:          TierPro,
-		FeaturePolicyFull:   TierTeam,
-		FeaturePolicyRules:  TierPro,
-		FeatureRegister:     TierTeam,
-		FeatureWorkers:      TierTeam,
-		FeaturePostgresInit: TierTeam,
-		FeatureReconcile:    TierTeam,
+		FeatureSSO:           TierPro,
+		FeaturePolicyFull:    TierTeam,
+		FeaturePolicyRules:   TierPro,
+		FeatureRegister:      TierTeam,
+		FeatureWorkers:       TierTeam,
+		FeaturePostgresInit:  TierTeam,
+		FeatureReconcile:     TierTeam,
+		FeatureHostedWitness: TierEnterprise,
 	}
 	if diff := cmp.Diff(want, featureTier); diff != "" {
 		t.Errorf("the gate map moved; update the pricing page with it (-want +got):\n%s", diff)
+	}
+	wantAddons := map[Feature]string{FeatureHostedWitness: AddonHostedWitness}
+	if diff := cmp.Diff(wantAddons, featureAddon); diff != "" {
+		t.Errorf("the add-on map moved; update the pricing page with it (-want +got):\n%s", diff)
+	}
+	if addonTier != TierTeam {
+		t.Errorf("add-ons are sold from %s, and the pricing page sells them on Team", addonTier)
 	}
 	if proPolicyCap != 5 {
 		t.Errorf("Pro holds %d policies, and the pricing page sells five", proPolicyCap)
@@ -55,6 +64,10 @@ func TestTheGateMapIsWhatThePricingPageSells(t *testing.T) {
 		Tier: "Team", WantPhrase: "<b>One-click drift reconcile</b>",
 	}, { // Test 7: FeaturePolicyRules, which Pro sells and the gate names in the same words.
 		Tier: "Pro", WantPhrase: "<b>Deny rules and risk and reversibility floors</b>",
+	}, { // Test 8: FeatureHostedWitness, which Team buys as an add-on.
+		Tier: "Team", WantPhrase: "<b>Hosted witness add-on</b>, $3,000 a year",
+	}, { // Test 9: FeatureHostedWitness, which Enterprise includes.
+		Tier: "Enterprise", WantPhrase: "<b>Hosted witness, included</b>",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

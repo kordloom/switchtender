@@ -2,7 +2,9 @@ package outcome_test
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -10,12 +12,122 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/receipt"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
+
+// receiptKey derives the binding key an install signing with id seals its rows under, the way the
+// command and the server derive it, so the dispatchers here seal what a receipt is held to.
+func receiptKey(t *testing.T, id audit.Identity) *binding.Key {
+	t.Helper()
+	seed, err := hex.DecodeString(id.Seed)
+	if err != nil {
+		t.Fatalf("decode the identity seed: %v", err)
+	}
+	key, err := binding.DeriveKey(seed)
+	if err != nil {
+		t.Fatalf("DeriveKey() error = %v", err)
+	}
+	return key
+}
+
+// keyedReceipt returns opts carrying the verifier a keyed install holds a receipt's approvers to,
+// over runs and audits under the key id derives.
+func keyedReceipt(t *testing.T, runs run.Store, audits audit.Store, id audit.Identity,
+	opts receipt.Options) receipt.Options {
+	t.Helper()
+	opts.Binder = dispatch.NewBindingVerifier(runs, audits, receiptKey(t, id))
+	return opts
+}
+
+// approveSealed records an approval of the stored held run runID by by, settles the run into
+// settle with that decision, stamps what was approved, and seals it the way the dispatcher seals an
+// approved run. It returns the run as stored.
+func approveSealed(t *testing.T, runs run.Store, audits audit.Store, id audit.Identity, runID string,
+	by outcome.Decider, settle run.DecisionSettle) *run.Run {
+	t.Helper()
+	ctx := context.Background()
+	r, err := runs.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	decisionID := audit.NewID()
+	digest, err := outcome.CommitDecisionWith(ctx, audits, r, outcome.StepApproved, by, time.Now,
+		outcome.DecisionExtras{ID: decisionID})
+	if err != nil {
+		t.Fatalf("CommitDecisionWith() error = %v", err)
+	}
+	if ok, err := runs.ClaimDecision(ctx, runID, decisionID, "claim"); err != nil || !ok {
+		t.Fatalf("ClaimDecision() = %v, %v", ok, err)
+	}
+	if ok, err := runs.SettleDecision(ctx, runID, decisionID, settle); err != nil || !ok {
+		t.Fatalf("SettleDecision() = %v, %v", ok, err)
+	}
+	if r, err = runs.Get(ctx, runID); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	r.ApprovedSpecDigest = digest
+	if r.ApprovedSpecBinding, err = outcome.SpecBinding(r); err != nil {
+		t.Fatalf("SpecBinding() error = %v", err)
+	}
+	if err := runs.Save(ctx, r); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	return sealAsKeyed(t, runs, audits, id, runID)
+}
+
+// sealAsKeyed seals the stored row runID as a keyed process seals it, under the key id derives: a
+// top-level run as submitted, or to the DECISION entry it names, and an approval step to the
+// workflow state it was decided on and its DECISION entry. It returns the row as stored.
+func sealAsKeyed(t *testing.T, runs run.Store, audits audit.Store, id audit.Identity,
+	runID string) *run.Run {
+	t.Helper()
+	ctx := context.Background()
+	r, err := runs.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("Get(%s) error = %v", runID, err)
+	}
+	root := func() binding.Root {
+		entry, eerr := audits.Entry(ctx, r.DecisionID)
+		if eerr != nil {
+			t.Fatalf("Entry(%s) error = %v", r.DecisionID, eerr)
+		}
+		return binding.RootOf(entry)
+	}
+	var rec binding.Record
+	switch {
+	case r.ParentID == nil && r.DecisionID == "":
+		rec, err = binding.SubmitRecord(r)
+	case r.ParentID == nil:
+		rec, err = binding.RunRecord(r, root())
+	default:
+		parent, perr := runs.Get(ctx, *r.ParentID)
+		if perr != nil {
+			t.Fatalf("Get(%s) error = %v", *r.ParentID, perr)
+		}
+		state, serr := outcome.StepStateOf(ctx, runs, parent, r)
+		if serr != nil {
+			t.Fatalf("StepStateOf() error = %v", serr)
+		}
+		stateBinding, berr := state.Binding()
+		if berr != nil {
+			t.Fatalf("Binding() error = %v", berr)
+		}
+		rec, err = binding.GateRecord(parent, r, stateBinding, root())
+	}
+	if err != nil {
+		t.Fatalf("record of %s: %v", runID, err)
+	}
+	r.SpecSeal = receiptKey(t, id).Seal(rec)
+	if err := runs.Save(ctx, r); err != nil {
+		t.Fatalf("Save(%s) error = %v", runID, err)
+	}
+	return r
+}
 
 // gatedReceipt runs a workflow with one approval step through a real dispatcher and a real chain,
 // approves the step, and returns what a receipt needs once the workflow has finished.
@@ -84,6 +196,11 @@ func gatedReceiptWithStep(t *testing.T, gate string) (run.Store, audit.Store, au
 			if got.Status != run.StatusSucceeded {
 				t.Fatalf("workflow status = %q (%s), want succeeded", got.Status, got.Error)
 			}
+			// The workflow and its approval step are sealed as a keyed process seals them, so a
+			// receipt holds the step's approver to its seal. A keyed walk would also record a
+			// RELEASE entry for each step, which this receipt does not need to carry.
+			sealAsKeyed(t, runs, audits, id, parent.ID)
+			sealAsKeyed(t, runs, audits, id, node.ID)
 			return runs, audits, id, parent.ID
 		}
 		time.Sleep(5 * time.Millisecond)
@@ -95,8 +212,9 @@ func gatedReceiptWithStep(t *testing.T, gate string) (run.Store, audit.Store, au
 // TestAWorkflowReceiptDisclosesItsApprovalStep pins the evidence an approval step leaves. The
 // workflow's receipt discloses the step's request and its approval beside the digests the chain
 // committed, each binding the workflow's own spec digest, and the approval reads as recorded before
-// the workflow's outcome. A step record that changes after the fact rebuilds a body the chain
-// refuses, so the receipt reports the tamper rather than vouching for it.
+// the workflow's outcome. A step record that changes after the fact moves the state the approval
+// step was sealed over, so the receipt is refused before it names the approver rather than vouching
+// for it.
 //
 // It does not run in parallel: it pins the audit key environment for the identity it signs with.
 func TestAWorkflowReceiptDisclosesItsApprovalStep(t *testing.T) {
@@ -105,10 +223,13 @@ func TestAWorkflowReceiptDisclosesItsApprovalStep(t *testing.T) {
 		Tamper bool
 		// WantDecisions reports whether the disclosed decisions verify.
 		WantDecisions bool
+		// WantRefused reports whether the receipt is refused as naming an approver the step's
+		// seal no longer covers.
+		WantRefused bool
 	}{{ // Test 0: An untouched workflow's receipt verifies with both step entries disclosed.
 		Tamper: false, WantDecisions: true,
-	}, { // Test 1: A step output rewritten after the approval breaks the disclosed decision.
-		Tamper: true, WantDecisions: false,
+	}, { // Test 1: A step output rewritten after the approval is refused under the step's seal.
+		Tamper: true, WantRefused: true,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -128,7 +249,15 @@ func TestAWorkflowReceiptDisclosesItsApprovalStep(t *testing.T) {
 					}
 				}
 			}
-			res, err := receipt.Build(ctx, runs, audits, id, "v-test", runID, receipt.Options{})
+			res, err := receipt.Build(ctx, runs, audits, id, "v-test", runID,
+				keyedReceipt(t, runs, audits, id, receipt.Options{}))
+			if test.WantRefused {
+				if !errors.Is(err, receipt.ErrUnattested) || !errors.Is(err, binding.ErrDrift) {
+					t.Fatalf("receipt.Build() error = %v, want the approver refused as no longer "+
+						"matching the step's seal", err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("receipt.Build() error = %v", err)
 			}
@@ -165,14 +294,16 @@ func TestAWorkflowReceiptWithAnApprovalStepVerifiesInLoomSeal(t *testing.T) {
 	repo := loomsealRepo(t)
 	ctx := context.Background()
 	runs, audits, id, runID := gatedReceipt(t)
-	res, err := receipt.Build(ctx, runs, audits, id, "v-test", runID, receipt.Options{})
+	res, err := receipt.Build(ctx, runs, audits, id, "v-test", runID,
+		keyedReceipt(t, runs, audits, id, receipt.Options{}))
 	if err != nil {
 		t.Fatalf("receipt.Build() error = %v", err)
 	}
 	if report := verifyWithLoomSeal(t, repo, res.Signed); !report.OK {
 		t.Fatalf("loomseal refused a workflow receipt with an approval step: %v", report.Problems)
 	}
-	sparse, err := receipt.Build(ctx, runs, audits, id, "v-test", runID, receipt.Options{Sparse: true})
+	sparse, err := receipt.Build(ctx, runs, audits, id, "v-test", runID,
+		keyedReceipt(t, runs, audits, id, receipt.Options{Sparse: true}))
 	if err != nil {
 		t.Fatalf("receipt.Build(sparse) error = %v", err)
 	}
@@ -209,7 +340,8 @@ func TestAStepNameHoldingAnAssignmentIsDisclosedAsCommitted(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			ctx := context.Background()
 			runs, audits, id, runID := gatedReceiptWithStep(t, test.Name)
-			res, err := receipt.Build(ctx, runs, audits, id, "v-test", runID, receipt.Options{})
+			res, err := receipt.Build(ctx, runs, audits, id, "v-test", runID,
+				keyedReceipt(t, runs, audits, id, receipt.Options{}))
 			if err != nil {
 				t.Fatalf("receipt.Build() error = %v", err)
 			}
@@ -241,7 +373,8 @@ func TestAReceiptDisclosingAnAssembledBodyStillVerifies(t *testing.T) {
 	const name = "release password=hunter2-step-secret"
 	ctx := context.Background()
 	runs, audits, id, runID := gatedReceiptWithStep(t, name)
-	res, err := receipt.Build(ctx, runs, audits, id, "v-test", runID, receipt.Options{})
+	res, err := receipt.Build(ctx, runs, audits, id, "v-test", runID,
+		keyedReceipt(t, runs, audits, id, receipt.Options{}))
 	if err != nil {
 		t.Fatalf("receipt.Build() error = %v", err)
 	}

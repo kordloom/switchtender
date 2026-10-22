@@ -46,6 +46,9 @@ const (
 	// recordCorrection is a correction to a decision's reason, an entry of MethodReason at the path
 	// a correction is recorded at.
 	recordCorrection = "correction"
+	// recordRelease is the release of a workflow step, an entry of MethodRelease at the path a
+	// release is recorded at. It commits no reason.
+	recordRelease = "release"
 	// recordOutcome is a run's outcome, an entry of MethodRun at the path an outcome is recorded at.
 	recordOutcome = "outcome"
 )
@@ -71,10 +74,19 @@ func recordKindOf(payload map[string]any) string {
 	case method == MethodReason &&
 		pathMatches("/runs/{run}/decisions/{decision}/corrections/{correction}", path):
 		return recordCorrection
+	case method == MethodRelease && isReleasePath(path):
+		return recordRelease
 	case method == MethodRun && pathMatches("/runs/{run}/outcome/{status}", path):
 		return recordOutcome
 	}
 	return ""
+}
+
+// isReleasePath reports whether path is one ReleasePath writes, the path the format declares for a
+// release: /runs/{run}/steps/{step}/release.
+func isReleasePath(path string) bool {
+	_, _, ok := ParseReleasePath(path)
+	return ok
 }
 
 // pathMatches reports whether path fits pattern segment by segment, a {name} segment matching any
@@ -163,6 +175,9 @@ var knownDisclosures = map[string]map[string]disclosedMember{
 		"correction_body": {by: "the entry's content_digest", records: []string{recordCorrection}},
 		"correction_nonce": {by: "the entry's content_digest", with: "correction_body",
 			records: []string{recordCorrection}},
+		"release_body": {by: "the entry's content_digest", records: []string{recordRelease}},
+		"release_nonce": {by: "the entry's content_digest", with: "release_body",
+			records: []string{recordRelease}},
 		"reason_text": {by: "the reason_commitment its record body carries",
 			records: []string{recordDecision, recordCorrection}},
 		"reason_random": {by: "the reason_commitment its record body carries", with: "reason_text",

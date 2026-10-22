@@ -60,6 +60,10 @@ const chainHealthInterval = 15 * time.Second
 // 201,000 entries a walk took 1.53 s, so the 15 s floor still applies there.
 const chainHealthDuty = 10
 
+// chainHealthMaxInterval caps the stretched gap, so one walk that stalls behind a checkpoint or a
+// paused disk cannot leave a rewritten entry unreported for ten times the stall.
+const chainHealthMaxInterval = 10 * time.Minute
+
 // newChainHealth returns a tracker over the given chain. producer is the install identity the tree
 // profile's leaves bind to. It panics on a nil store, a programming error: the caller decides
 // whether the audit trail is configured, not this.
@@ -74,12 +78,13 @@ func newChainHealth(audits audit.Store, producer audit.Identity) *chainHealth {
 }
 
 // interval returns the gap the next walk waits for: the larger of minInterval and chainHealthDuty
-// times the last walk's duration, or zero when minInterval is zero.
+// times the last walk's duration, the stretch capped at chainHealthMaxInterval, or zero when
+// minInterval is zero.
 func (h *chainHealth) interval() time.Duration {
 	if h.minInterval == 0 {
 		return 0
 	}
-	return max(h.minInterval, chainHealthDuty*h.lastTook)
+	return max(h.minInterval, min(chainHealthDuty*h.lastTook, chainHealthMaxInterval))
 }
 
 // refresh re-verifies the chain unless a walk ran within the interval. A walk feeds a fresh scanner

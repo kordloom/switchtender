@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
@@ -145,6 +146,9 @@ func approveRunHandler(approver Approver, store run.Store, authz *authorizer,
 			// The dispatcher's own lock, reached only when an agent's decision got past the door.
 			respondError(w, log, http.StatusForbidden, err.Error())
 			return
+		case bindingRefused(err):
+			respondError(w, log, http.StatusConflict, err.Error())
+			return
 		case err != nil:
 			log.Error("server: approve run: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not approve run")
@@ -176,6 +180,14 @@ func decideRun(ctx context.Context, approver Approver, id string,
 // cannot record.
 var errReasonUnrecorded = errors.New("this server cannot record a decision's reason, so a " +
 	"decision carrying one is refused rather than recorded without it")
+
+// bindingRefused reports whether err is a decision refused by the binding check: a row, its parent,
+// or a chain entry it derives from no longer matches what the process sealed, or a read the check
+// depends on failed. Either way the decision recorded nothing, and the caller is told why rather than
+// shown a server error it would retry.
+func bindingRefused(err error) bool {
+	return errors.Is(err, binding.ErrDrift) || errors.Is(err, binding.ErrUnverified)
+}
 
 // reasonRefusal writes the answer to a decision refused over its reason: one the masker changed
 // that the approver has not confirmed, one a rule required and was not given, one over the cap, or
@@ -280,6 +292,9 @@ func decideStep(w http.ResponseWriter, r *http.Request, approver Approver, log *
 		errors.Is(err, dispatch.ErrStateMoved), errors.Is(err, dispatch.ErrNotApprovalStep):
 		respondError(w, log, http.StatusConflict, err.Error())
 		return
+	case bindingRefused(err):
+		respondError(w, log, http.StatusConflict, err.Error())
+		return
 	case err != nil:
 		log.Error("server: decide approval step: " + err.Error())
 		respondError(w, log, http.StatusInternalServerError, "could not decide the approval step")
@@ -363,6 +378,9 @@ func rejectRunHandler(approver Approver, store run.Store, authz *authorizer,
 				"a shard or step is decided through its parent, not on its own")
 			return
 		case errors.Is(err, dispatch.ErrStepPending):
+			respondError(w, log, http.StatusConflict, err.Error())
+			return
+		case bindingRefused(err):
 			respondError(w, log, http.StatusConflict, err.Error())
 			return
 		case err != nil:

@@ -128,6 +128,43 @@ func TestTreeBundleVerifiesInLoomSeal(t *testing.T) {
 	}
 }
 
+// TestAStartClaimVerifiesInLoomSeal pins that a run's START entry travels in a receipt as a plain
+// claim both LoomSeal verifiers accept: no record kind, a content digest in the exact form, and the
+// format's reference verifier agreeing with its Go one.
+func TestAStartClaimVerifiesInLoomSeal(t *testing.T) {
+	chain := treeChain(t, 6)
+	id := treeIdentity(t)
+	digest, nonce, err := audit.ExactDigestOf([]byte(`{"run_id":"run_demo","attempt":0,` +
+		`"spec_seal_digest":"sha256:` + strings.Repeat("ab", 32) + `"}`))
+	if err != nil {
+		t.Fatalf("ExactDigestOf() error = %v", err)
+	}
+	start := chain[3]
+	start.ID, start.Actor, start.ActorType = audit.StartID("run_demo", 0), "system:dispatcher", "system"
+	start.OnBehalfOf, start.Method, start.Path = "alice", audit.MethodStart, audit.StartPath("run_demo", 0)
+	start.ContentDigest, start.Nonce = digest, nonce
+	var prev *audit.Entry
+	for _, e := range chain {
+		audit.Link(prev, e)
+		prev = e
+	}
+	doc, err := audit.BuildTreeBundle(chain, map[int64]bool{start.Seq: true}, id, "v-test",
+		audit.BundleSubject{Type: "run", ID: "run_demo"}, time.Now())
+	if err != nil {
+		t.Fatalf("BuildTreeBundle() error = %v", err)
+	}
+	signed, err := audit.SignBundleDoc(doc, id.Private())
+	if err != nil {
+		t.Fatalf("SignBundleDoc() error = %v", err)
+	}
+	if !strings.Contains(string(signed), audit.StartPath("run_demo", 0)) {
+		t.Fatal("the receipt does not carry the START claim")
+	}
+	if report := verifyWithLoomSeal(t, signed); !report.OK {
+		t.Fatalf("loomseal refused a receipt holding a START claim: %v", report.Problems)
+	}
+}
+
 // TestTreeBundleRefusesABrokenChain checks a receipt is never drawn from a chain that does not hold
 // together. A tree built over a rewritten chain would verify against its own root, which is exactly
 // the reassuring lie this refuses to produce.

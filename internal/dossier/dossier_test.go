@@ -1,17 +1,144 @@
 package dossier
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
+	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/run"
 )
+
+// sealedInstall is a keyed install holding one run an approver released, sealed to the DECISION
+// entry recording the approval the way the dispatcher seals it.
+type sealedInstall struct {
+	// Runs is the run store.
+	Runs run.Store
+	// Audits is the chain as appended.
+	Audits audit.Store
+	// Key is the binding key the run was sealed under.
+	Key *binding.Key
+	// Run is the approved run as stored.
+	Run *run.Run
+	// DecisionID is the approval's chain entry.
+	DecisionID string
+}
+
+// newSealedInstall stores a run held for approval at at, records alice's approval of it, settles it
+// with that decision, and seals it under the install's key.
+func newSealedInstall(t *testing.T, runID string, at time.Time) *sealedInstall {
+	t.Helper()
+	ctx := context.Background()
+	key, err := binding.DeriveKey(bytes.Repeat([]byte{7}, 32))
+	if err != nil {
+		t.Fatalf("DeriveKey() error = %v", err)
+	}
+	in := &sealedInstall{Runs: run.NewMemStore(), Audits: audit.NewMemStore(), Key: key,
+		DecisionID: audit.NewID()}
+	ended := at.Add(time.Minute)
+	if err := in.Runs.Save(ctx, &run.Run{
+		ID: runID, Playbook: "site.yml", Inventory: "hosts.ini", Status: run.StatusPendingApproval,
+		CreatedAt: at, EndedAt: &ended, Actor: "deploy-bot", ApprovalRequested: true,
+		HeldByPolicy: "prod changes",
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := in.Audits.Append(ctx, &audit.Entry{ID: in.DecisionID, At: at, Actor: "alice",
+		ActorType: "session", Method: audit.MethodDecision,
+		Path: "/runs/" + runID + "/decision/approved", ContentDigest: "sha256:" +
+			strings.Repeat("ab", 32)}); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+	if ok, err := in.Runs.ClaimDecision(ctx, runID, in.DecisionID, "claim"); err != nil || !ok {
+		t.Fatalf("ClaimDecision() = %v, %v", ok, err)
+	}
+	settle := run.DecisionSettle{Status: run.StatusSucceeded, EndedAt: ended}
+	if ok, err := in.Runs.SettleDecision(ctx, runID, in.DecisionID, settle); err != nil || !ok {
+		t.Fatalf("SettleDecision() = %v, %v", ok, err)
+	}
+	r, err := in.Runs.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	entry, err := in.Audits.Entry(ctx, in.DecisionID)
+	if err != nil {
+		t.Fatalf("Entry() error = %v", err)
+	}
+	rec, err := binding.RunRecord(r, binding.RootOf(entry))
+	if err != nil {
+		t.Fatalf("RunRecord() error = %v", err)
+	}
+	r.SpecSeal = key.Seal(rec)
+	if err := in.Runs.Save(ctx, r); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	in.Run = r
+	return in
+}
+
+// verifier returns the checks a keyed process holds rows to, over audits.
+func (in *sealedInstall) verifier(audits audit.Store) *binding.Verifier {
+	return &binding.Verifier{Runs: in.Runs, Audits: audits, Key: in.Key,
+		SpecSeal: func(r *run.Run) string { return r.SpecSeal },
+		Entry: func(ctx context.Context, id string) (*audit.Entry, error) {
+			e, err := audits.Entry(ctx, id)
+			if errors.Is(err, audit.ErrEntryNotFound) {
+				return nil, nil
+			}
+			return e, err
+		}}
+}
+
+// actorRewritten is a chain on which a writer renamed the decider of one entry, read by id and
+// streamed alike, and linked every entry from it on again so the walk still verifies.
+type actorRewritten struct {
+	audit.Store
+	// id is the entry rewritten.
+	id string
+	// actor is the name the writer put on it.
+	actor string
+}
+
+// Entry reads an entry by id as the writer left it.
+func (c *actorRewritten) Entry(ctx context.Context, id string) (*audit.Entry, error) {
+	e, err := c.Store.Entry(ctx, id)
+	if err == nil && e != nil && e.ID == c.id {
+		e.Actor = c.actor
+	}
+	return e, err
+}
+
+// ChainScan streams the rewritten chain above afterSeq, linked again from the rewrite on.
+func (c *actorRewritten) ChainScan(ctx context.Context, afterSeq int64,
+	fn func(*audit.Entry) error) error {
+	prev, relinking := "", false
+	return c.Store.ChainScan(ctx, 0, func(e *audit.Entry) error {
+		cp := *e
+		if cp.ID == c.id {
+			cp.Actor = c.actor
+			relinking = true
+		}
+		if relinking {
+			cp.PrevHash = prev
+			cp.Hash = audit.EntryHash(&cp)
+		}
+		prev = cp.Hash
+		if cp.Seq <= afterSeq {
+			return nil
+		}
+		return fn(&cp)
+	})
+}
 
 // seedEvidence stores one approved run and the chain entries recording it, returning the stores.
 func seedEvidence(t *testing.T) (run.Store, audit.Store, string) {
@@ -623,5 +750,142 @@ func TestDossierSaysWhenNoActorWasRecorded(t *testing.T) {
 	}
 	if strings.Contains(html, "<td></td>") {
 		t.Error("dossier still renders an empty cell")
+	}
+}
+
+// TestDossierFlagsARewrittenDecider pins what the dossier says about a decider a writer of the
+// database renamed on the chain and re-linked. The chain walk passes, so only the seal over the run
+// the approval released catches it: the dossier shows the name with a note that it is not trusted,
+// drops its banner to not verified, and carries the finding in the JSON an agent reads. The honest
+// install shows the name plainly, and an install with no key says the name was not checked.
+func TestDossierFlagsARewrittenDecider(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC)
+	tests := []struct {
+		// Rewrite renames the approver on the chain.
+		Rewrite bool
+		// Unkeyed attaches the seals with no verifier.
+		Unkeyed bool
+		// WantStatus is the run's seal check.
+		WantStatus string
+		// WantActor is the decision row's decider as rendered.
+		WantActor string
+		// WantBanner is text the banner must carry, empty for no demand.
+		WantBanner string
+		// DenyBanner is text the banner must not carry.
+		DenyBanner string
+	}{{ // Test 0: An approval nobody touched holds and reads plainly.
+		WantStatus: SealHeld, WantActor: "alice", DenyBanner: "Not verified",
+	}, { // Test 1: The approver renamed on the chain is flagged and the banner drops.
+		Rewrite: true, WantStatus: SealDrifted,
+		WantActor: "mallory (the row&#39;s seal no longer matches this entry; the name is not " +
+			"trusted)",
+		WantBanner: "Not verified",
+	}, { // Test 2: An install with no key says the name was not checked.
+		Unkeyed: true, WantStatus: SealUnchecked,
+		WantActor:  "alice (unchecked: no seal was checked for this entry)",
+		DenyBanner: "Not verified",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			sealed := newSealedInstall(t, "run_sealed", at)
+			audits := sealed.Audits
+			if test.Rewrite {
+				audits = &actorRewritten{Store: audits, id: sealed.DecisionID, actor: "mallory"}
+			}
+			in, err := Collect(ctx, sealed.Runs, audits, audit.Identity{}, "run_sealed",
+				at.Add(time.Hour))
+			if err != nil {
+				t.Fatalf("Collect() error = %v", err)
+			}
+			if !in.ChainOK {
+				t.Fatal("the re-linked chain does not verify; the rewrite helper is wrong")
+			}
+			v := sealed.verifier(audits)
+			if test.Unkeyed {
+				v = nil
+			}
+			AttachSeals(ctx, in, v, sealed.Runs)
+			if len(in.Seals) != 1 || in.Seals[0].Status != test.WantStatus ||
+				in.Seals[0].EntryID != sealed.DecisionID {
+				t.Fatalf("seals = %+v, want one %s check of %s", in.Seals, test.WantStatus,
+					sealed.DecisionID)
+			}
+			raw, err := json.Marshal(in)
+			if err != nil {
+				t.Fatalf("Marshal() error = %v", err)
+			}
+			if !strings.Contains(string(raw), `"status":"`+test.WantStatus+`"`) {
+				t.Errorf("the JSON evidence does not carry the %s seal check: %s", test.WantStatus,
+					raw)
+			}
+			doc, err := Render(in)
+			if err != nil {
+				t.Fatalf("Render() error = %v", err)
+			}
+			html := string(doc)
+			if !strings.Contains(html, "<td>Approved</td><td>"+test.WantActor+"</td>") {
+				t.Errorf("the decision row does not read %q:\n%s", test.WantActor, html)
+			}
+			if test.WantBanner != "" && !strings.Contains(html, test.WantBanner) {
+				t.Errorf("the banner does not say %q", test.WantBanner)
+			}
+			if test.DenyBanner != "" && strings.Contains(html, test.DenyBanner) {
+				t.Errorf("the banner says %q", test.DenyBanner)
+			}
+		})
+	}
+}
+
+// TestReasonRowsNameTheSealedDecider pins that a decision's reason row and an agent's run's
+// approver line name who decided from the chain entry, which the seal covers, and not from the
+// decision record, which nothing covers. A record that agrees is not mentioned, including one whose
+// name the chain stored escaped, and one that disagrees is shown beside the entry's name.
+func TestReasonRowsNameTheSealedDecider(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC)
+	tests := []struct {
+		// RecordActor is the name the decision record carries.
+		RecordActor string
+		// EntryActor is the name the chain entry carries.
+		EntryActor string
+		// NoEntry leaves the chain without the record's entry.
+		NoEntry bool
+		// WantActor is the decider the reason row and the approver line show.
+		WantActor string
+	}{{ // Test 0: The record and the entry agree.
+		RecordActor: "alice", EntryActor: "alice", WantActor: "alice",
+	}, { // Test 1: The record was rewritten to another name.
+		RecordActor: "mallory", EntryActor: "alice",
+		WantActor: "alice (the decision record names mallory)",
+	}, { // Test 2: The chain stored the name escaped, which is not a disagreement.
+		RecordActor: "ops%team", EntryActor: "ops%25team", WantActor: "ops%25team",
+	}, { // Test 3: No entry among the run's, so the record names the decider.
+		RecordActor: "alice", NoEntry: true, WantActor: "alice",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			rec := &decision.Record{ID: "aud_dec", Kind: decision.KindDecision, RunID: "run_agent",
+				Verdict: "approved", At: at, Actor: test.RecordActor, ActorType: "session"}
+			var entries []*audit.Entry
+			if !test.NoEntry {
+				entries = append(entries, &audit.Entry{ID: "aud_dec", Actor: test.EntryActor,
+					ActorType: "session", Method: audit.MethodDecision,
+					Path: "/runs/run_agent/decision/approved"})
+			}
+			records := []*decision.Record{rec}
+			rows := reasonRows(records, entries, nil)
+			if len(rows) != 1 {
+				t.Fatalf("rows = %+v, want one", rows)
+			}
+			r := &run.Run{ID: "run_agent", Initiator: &run.Initiator{InitiatedBy: "deploy-bot"}}
+			got := []string{rows[0].Actor, agentIdentity(r, records, entries, nil).ApprovedBy}
+			if diff := cmp.Diff([]string{test.WantActor, test.WantActor}, got); diff != "" {
+				t.Errorf("deciders (-want +got):\n%s", diff)
+			}
+		})
 	}
 }

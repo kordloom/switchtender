@@ -38,8 +38,12 @@ func writeReasonedReceipt(t *testing.T, redact bool, alter func(*audit.Bundle)) 
 			return roundhouse.Result{ExitCode: 0}, nil
 		},
 	)
+	key, err := bindingKeyOf(&id)
+	if err != nil {
+		t.Fatalf("bindingKeyOf() error = %v", err)
+	}
 	d := dispatch.New(runs, runner, nil, dispatch.WithAudits(audits),
-		dispatch.WithDecisions(decisions), dispatch.WithNoJanitor())
+		dispatch.WithDecisions(decisions), dispatch.WithNoJanitor(), dispatch.WithBindingKey(key))
 	t.Cleanup(d.Close)
 	creation := &audit.Entry{ID: audit.NewID(), At: time.Now(), Actor: "deploy-bot",
 		ActorType: "agent", OnBehalfOf: "dev-lead", Method: "POST", Path: "/v1/runs"}
@@ -91,7 +95,7 @@ func writeReasonedReceipt(t *testing.T, redact bool, alter func(*audit.Bundle)) 
 		}
 	}
 	res, err := receipt.Build(ctx, runs, audits, id, "v-test", held.ID,
-		receipt.Options{Decisions: decisions})
+		receipt.Options{Decisions: decisions, Binder: dispatch.NewBindingVerifier(runs, audits, key)})
 	if err != nil {
 		t.Fatalf("receipt.Build() error = %v", err)
 	}

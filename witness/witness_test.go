@@ -1,12 +1,16 @@
 package witness
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/kordloom/switchtender/identity"
 )
@@ -377,5 +381,124 @@ func TestOneHostileFeedDoesNotBecomeAThousandFindings(t *testing.T) {
 	}
 	if len(findings) == 0 {
 		t.Error("a feed with 499 gaps raised nothing")
+	}
+}
+
+// priorCheckpoint is the checkpoint's shape before it carried a tree, the shape every state file a
+// pull witness already wrote was signed in.
+type priorCheckpoint struct {
+	// Server is the watched server's base URL.
+	Server string `json:"server"`
+	// LastBeat is the highest beat number observed.
+	LastBeat int64 `json:"last_beat"`
+	// LastSeq is the chain position of that beat.
+	LastSeq int64 `json:"last_seq"`
+	// LastHead is the hash of that beat.
+	LastHead string `json:"last_head"`
+	// Recent maps observed beat numbers to what they carried.
+	Recent map[int64]Observed `json:"recent"`
+	// Positions maps observed chain positions to the link seen there.
+	Positions map[int64]string `json:"positions,omitempty"`
+	// ObservedAt is when the checkpoint was taken.
+	ObservedAt time.Time `json:"observed_at"`
+	// PublicKey is the hex key that signed the checkpoint.
+	PublicKey string `json:"public_key,omitempty"`
+	// Sig is the hex signature over the canonical checkpoint content.
+	Sig string `json:"sig,omitempty"`
+}
+
+// TestAStateFileFromBeforeTheTreeStillLoads shows a pulled server's checkpoint signs the same bytes
+// it did before the checkpoint carried a tree, and that a state file signed in the earlier shape
+// loads under this one. A field that entered the signed bytes empty would fail every state file a
+// pull witness already holds, which is the error a replaced state file raises.
+func TestAStateFileFromBeforeTheTreeStillLoads(t *testing.T) {
+	t.Parallel()
+	id := testIdentity(t)
+	c, _, err := Check(nil, "https://st.example",
+		[]Beat{beat(1, 10, link("a")), beat(2, 20, link("b"))},
+		time.Date(2026, 10, 21, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("Check() error = %v", err)
+	}
+	prior := priorCheckpoint{Server: c.Server, LastBeat: c.LastBeat, LastSeq: c.LastSeq,
+		LastHead: c.LastHead, Recent: c.Recent, Positions: c.Positions, ObservedAt: c.ObservedAt}
+	want, err := json.Marshal(&prior)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	got, err := signedContent(c)
+	if err != nil {
+		t.Fatalf("signedContent() error = %v", err)
+	}
+	if diff := cmp.Diff(string(want), string(got)); diff != "" {
+		t.Errorf("a pulled checkpoint signs other bytes than it did (-before +now):\n%s", diff)
+	}
+	prior.PublicKey, prior.Sig = signBytes(id, want)
+	raw, err := json.MarshalIndent(&prior, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent() error = %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "state.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	loaded, err := Load(path, id.PublicKeyHex())
+	if err != nil {
+		t.Fatalf("Load() of a state file signed before the tree fields existed error = %v", err)
+	}
+	if loaded.InstallID != "" || loaded.Size != 0 || loaded.Root != "" {
+		t.Errorf("a pulled checkpoint loaded with tree memory %q, %d, %q; want none",
+			loaded.InstallID, loaded.Size, loaded.Root)
+	}
+}
+
+// TestTheTreeMemoryIsSigned shows an enrolled install's tree memory survives a save and a load, and
+// that the install, the size, and the root are each under the checkpoint's signature, so a state
+// file edited to hold another tree is refused like any other altered memory.
+func TestTheTreeMemoryIsSigned(t *testing.T) {
+	t.Parallel()
+	id := testIdentity(t)
+	honest := testLeaves(t, 4)
+	c, _, err := CheckPush(nil, testInstall, testPush(t, honest, 1, 4, 0),
+		time.Date(2026, 10, 21, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("CheckPush() error = %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "checkpoint.json")
+	if err := Save(path, c, id); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	loaded, err := Load(path, id.PublicKeyHex())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.InstallID != testInstall || loaded.Size != 4 || loaded.Root != testRoot(honest, 4) {
+		t.Fatalf("loaded tree memory %q, %d, %q; want %q, 4, %q", loaded.InstallID, loaded.Size,
+			loaded.Root, testInstall, testRoot(honest, 4))
+	}
+	tests := []struct {
+		Mutate func(c *Checkpoint)
+	}{{ // Test 0: Another install.
+		Mutate: func(c *Checkpoint) { c.InstallID = "in_ffffffffffffffffffffffffffffffff" },
+	}, { // Test 1: The install removed.
+		Mutate: func(c *Checkpoint) { c.InstallID = "" },
+	}, { // Test 2: A larger tree.
+		Mutate: func(c *Checkpoint) { c.Size++ },
+	}, { // Test 3: The size removed.
+		Mutate: func(c *Checkpoint) { c.Size = 0 },
+	}, { // Test 4: Another root.
+		Mutate: func(c *Checkpoint) { c.Root = testRoot(honest, 3) },
+	}, { // Test 5: The root removed.
+		Mutate: func(c *Checkpoint) { c.Root = "" },
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			altered := *loaded
+			test.Mutate(&altered)
+			if _, err := Verify(&altered); err == nil {
+				t.Error("Verify() accepted a checkpoint whose tree memory was edited")
+			}
+		})
 	}
 }

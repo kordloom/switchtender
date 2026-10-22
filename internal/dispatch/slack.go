@@ -23,6 +23,13 @@ type slackPayload struct {
 	Text string `json:"text"`
 }
 
+// SlackBody returns the JSON body a Slack incoming webhook expects for one message, an object whose
+// text member carries the message. The run notifications and the witness's findings both build
+// their Slack body here, so the shape Slack requires is written once.
+func SlackBody(text string) ([]byte, error) {
+	return json.Marshal(slackPayload{Text: text})
+}
+
 // notifySlack posts a finished or held top-level run to every configured Slack webhook.
 func (d *Dispatcher) notifySlack(r *run.Run) {
 	d.deliverSlackFormat(d.slackWebhooks, "slack", r)
@@ -35,7 +42,7 @@ func (d *Dispatcher) deliverSlackFormat(urls []string, label string, r *run.Run)
 	if len(urls) == 0 {
 		return
 	}
-	body, err := json.Marshal(slackPayload{Text: slackMessage(r)})
+	body, err := SlackBody(slackMessage(r))
 	if err != nil {
 		d.log.Error("dispatch: encode "+label+" notification: "+err.Error(), zap.String("run_id", r.ID))
 		return

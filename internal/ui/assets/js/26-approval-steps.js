@@ -84,6 +84,16 @@ function approvalStepEntry(step) {
 	who.className = "muted";
 	who.textContent = step.requested_by ? "Launched by " + step.requested_by : "";
 	head.appendChild(who);
+	// The step's workflow run is a row in the runs list, held for approval like the runs beside it,
+	// so the entry names that run. Without it a reader counting the held runs could not tell whether
+	// the step was one of them or one more.
+	if (!approvalStepsRunID && step.run_id) {
+		const run = document.createElement("span");
+		run.className = "muted mono";
+		run.title = step.run_id;
+		run.textContent = "Workflow run " + shortId(step.run_id);
+		head.appendChild(run);
+	}
 	entry.appendChild(head);
 
 	if (step.description) {

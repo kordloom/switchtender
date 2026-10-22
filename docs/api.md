@@ -32,7 +32,7 @@ with a message naming the feature rather than failing in some subtler way:
 
 | Endpoint | Tier | Note |
 |----------|------|------|
-| `GET /v1/audit/register` | Team | The period change register, covering the last 90 days unless `from` and `to` name another period, each a date or an RFC 3339 timestamp. Per-run dossiers, receipts, bundles, and `GET /v1/audit/verify` are free. |
+| `GET /v1/audit/register` | Team | The period change register, covering the last 90 days unless `from` and `to` name another period, each a date or an RFC 3339 timestamp, and the same rows as JSON with `format=json`. Per-run dossiers, receipts, bundles, and `GET /v1/audit/verify` are free. |
 | `POST /v1/drift/reconcile` | Team | One-click reconcile. Drift detection is free. |
 | `POST` and `PUT /v1/policies` | Pro or Team, past the free set | Deny rules and risk and reversibility floors are Pro. Actor and account scoping and distinct-approver separation of duties are Team. One require-approval policy or one exemption is Community, Pro holds five, Team is uncapped. The built-in hold on agent runs is not a stored policy and counts toward no limit. |
 | A named `queue` on `POST /v1/runs`, `POST /v1/pipelines`, and `POST` or `PUT` on `/v1/templates` and `/v1/inventories` | Team | Only a worker serves a named queue, and every worker is Team. The default queue is the server's own pool and is always allowed. A run that inherits a queue from its template or inventory is refused the same way. |
@@ -193,10 +193,11 @@ Two more are enforced somewhere other than the request:
 | DELETE | `/v1/policies/{id}`        | Delete an approval policy.                              |
 | POST   | `/v1/import/{format}`      | Import an AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins export. Format is awx, semaphore, chef, puppet, rundeck, or jenkins; any other format is refused. Chef and Puppet bring a fleet as an inventory rather than job definitions, and take no `?inventory=`. Rundeck and Jenkins take `?inventory=` to say which hosts their jobs target, since neither brings an inventory. Two formats accept a zip: the Jenkins body is one `config.xml` or a zip of a jobs directory, and the Rundeck body is a job export or a project archive, each told apart by content. The body is capped at 25 MiB and a larger one is refused with 413, which is lower than the CLI, where a project archive is bounded only by the archive reader's own limits. Previews by default; `?apply=true` writes the plan. A crontab imports from the CLI only, with `switchtender import cron`. Which objects each format carries is in [what each source brings over](migration.md#what-each-source-brings-over).|
 | GET    | `/v1/audit`                | A page of the mutation trail, admin only. `?limit=` up to 1000, default 100; `has_more` reports whether older entries remain. |
-| GET    | `/v1/audit/register`       | The change register as a self-contained HTML document, admin only. |
+| GET    | `/v1/audit/register`       | The change register as a self-contained HTML document, admin only. `format=json` returns the same rows as data, which the web interface's register page reads. |
 | GET    | `/v1/doctor`               | Install health checks and their findings, admin only, with the server's ansible-core version and the releases the inventory engine is tested against under `ansible`. |
 | GET    | `/v1/audit/verify`         | Verify the audit hash chain is intact.                  |
 | GET    | `/v1/audit/bundle`         | The audit chain as a signed LoomSeal bundle, verifiable offline or on the /verify page. |
+| GET    | `/v1/audit/witness`        | The install's standing with its push witness, admin only: the witness and its key id, the last countersigned beat, seq, and time, the queue, the last error, and the last refusal with its findings. 404 when the install is not enrolled. |
 | GET    | `/metrics`              | Prometheus series: run, fleet, queue-depth, and worker gauges, plus a run-duration histogram. |
 | GET    | `/healthz`              | Liveness.                                               |
 | GET    | `/readyz`               | Readiness: 200 once the store answers, 503 while it does not. A 200 carries `"degraded": true` with `reasons`, `last_write_failure` and `owed_ends` for five minutes after this process failed to write to the store, and while it holds run ends the store refused, which read as running until they land, and while a SQLite database's disk is under the `--min-free-mib` floor. |
@@ -304,7 +305,9 @@ verifier sees that the slice belongs to the chain.
 
 The chain gauges walk again at most every 15 seconds, or every ten times the last walk's duration
 when that is longer, so a long chain never keeps a read connection busy more than a tenth of the
-time. That interval is also how long an entry rewritten in place can go unreported. A scrape that
+time. The stretched interval is capped at 10 minutes, so one walk that stalls cannot hold the next
+one off longer than that. That interval is also how long an entry rewritten in place can go
+unreported. A scrape that
 arrives while another walk runs serves the last reading with `switchtender_audit_health_stale` at
 `1` instead of waiting, and the next scrape walks.
 

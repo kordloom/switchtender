@@ -11,7 +11,7 @@ import (
 
 // memStore is an in-memory audit Store guarded by a mutex.
 type memStore struct {
-	// mu guards entries and anchors.
+	// mu guards entries, anchors, and attestations.
 	mu sync.RWMutex
 	// entries holds every appended entry in chain order.
 	entries []*Entry
@@ -22,6 +22,8 @@ type memStore struct {
 	installID string
 	// anchors holds every recorded anchor.
 	anchors []*Anchor
+	// attestations holds every recorded witness attestation, at most one per seq, kind, and key id.
+	attestations []*WitnessAttestation
 }
 
 // SaveAnchor records one anchor.
@@ -66,6 +68,57 @@ func (m *memStore) DeleteAnchor(_ context.Context, id string) error {
 		}
 	}
 	return fmt.Errorf("delete anchor %s: %w", id, ErrAnchorNotFound)
+}
+
+// SaveAttestation records one witness attestation, first write wins. A record already held at the
+// same seq, kind, and key id is settled by ResolveHeldAttestation and never changed.
+func (m *memStore) SaveAttestation(_ context.Context, a *WitnessAttestation) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, held := range m.attestations {
+		if held.Seq == a.Seq && held.Kind == a.Kind && held.KeyID == a.KeyID {
+			return ResolveHeldAttestation(held, a)
+		}
+	}
+	cp := *a
+	m.attestations = append(m.attestations, &cp)
+	return nil
+}
+
+// Attestations returns every witness attestation at or below seq, oldest first with ties broken on
+// id. A seq of zero or less returns all.
+func (m *memStore) Attestations(_ context.Context, seq int64) ([]*WitnessAttestation, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]*WitnessAttestation, 0, len(m.attestations))
+	for _, a := range m.attestations {
+		if seq > 0 && a.Seq > seq {
+			continue
+		}
+		cp := *a
+		out = append(out, &cp)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Seq == out[j].Seq {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].Seq < out[j].Seq
+	})
+	return out, nil
+}
+
+// DeleteAttestation removes the witness attestation with the given id, or reports
+// ErrAttestationNotFound.
+func (m *memStore) DeleteAttestation(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, a := range m.attestations {
+		if a.ID == id {
+			m.attestations = append(m.attestations[:i], m.attestations[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("delete attestation %s: %w", id, ErrAttestationNotFound)
 }
 
 // NewMemStore returns an empty in-memory audit Store.
@@ -210,6 +263,19 @@ func (m *memStore) List(_ context.Context, limit int) ([]*Entry, error) {
 		out = out[:limit]
 	}
 	return out, nil
+}
+
+// Entry returns a copy of the entry with this id, or ErrEntryNotFound.
+func (m *memStore) Entry(_ context.Context, id string) (*Entry, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, e := range m.entries {
+		if e.ID == id {
+			cp := *e
+			return &cp, nil
+		}
+	}
+	return nil, fmt.Errorf("audit entry %s: %w", id, ErrEntryNotFound)
 }
 
 // Chain returns every entry in chain order, oldest first, for verification.

@@ -516,10 +516,34 @@ function appendRunRows(tbody, runs) {
 		tr.appendChild(playbookCellEl(r));
 		tr.appendChild(labelCellEl(r.labels));
 
-		tr.appendChild(tdTime(r.started_at || r.created_at));
-		tr.appendChild(td(fmtDuration(r.started_at, r.ended_at)));
+		tr.appendChild(runStartedCell(r));
+		tr.appendChild(runDurationCell(r, new Date()));
 		tbody.appendChild(tr);
 	}
+}
+
+// runStartedCell shows when a run started. A run held for approval or still queued has not, and the
+// cell used to show its submission time under the Started heading, so a run that never executed read
+// as started hours ago. It now says so, and keeps the submission time for the hover and for sorting.
+function runStartedCell(r) {
+	if (r.started_at || !r.created_at) return tdTime(r.started_at);
+	const cell = td("Not started", "muted");
+	cell.dataset.time = r.created_at;
+	cell.dataset.tip = "Submitted " + exactTime(r.created_at);
+	return cell;
+}
+
+// runDurationCell says how long a finished run took, and for one that has not finished, how long it
+// has waited for a decision or run so far. A held run has no end, so the cell was left empty, which
+// read as data the page failed to load rather than a run still waiting.
+function runDurationCell(r, now) {
+	if (r.ended_at) return td(fmtDuration(r.started_at, r.ended_at));
+	const at = now.toISOString();
+	if (r.status === "pending_approval" && r.created_at) {
+		return td("Waiting " + fmtDuration(r.created_at, at), "muted");
+	}
+	if (r.status === "running" && r.started_at) return td("Running " + fmtDuration(r.started_at, at), "muted");
+	return td("");
 }
 
 // runsHasMore remembers whether the server holds more rows than the table shows, which is what
@@ -600,10 +624,21 @@ function renderSummary(summary) {
 	// number, so the counts are now over what they can see and the card has to say so rather than
 	// calling a subset a total.
 	const scoped = summary.scope === "visible";
-	el.appendChild(statCard(summary.total || 0, scoped ? "Runs you can see" : "Total runs", ""));
-	el.appendChild(statCard(summary.succeeded || 0, "Succeeded", "ok"));
-	el.appendChild(statCard(summary.failed || 0, "Failed", "failed"));
-	el.appendChild(statCard(summary.active || 0, "Active", "running"));
+	const total = summary.total || 0;
+	const succeeded = summary.succeeded || 0;
+	const failed = summary.failed || 0;
+	const pending = summary.awaiting_approval || 0;
+	const active = summary.active || 0;
+	// The cards beneath the total have to add up to it. Runs held for a decision had no card, so a
+	// page with four of them read 38 total over 30, 4, and 0. Canceled, interrupted, and rejected
+	// runs are what remains, and their card appears only when there are any.
+	const stopped = Math.max(0, total - succeeded - failed - pending - active);
+	el.appendChild(statCard(total, scoped ? "Runs you can see" : "Total runs", ""));
+	el.appendChild(statCard(succeeded, "Succeeded", "ok"));
+	el.appendChild(statCard(failed, "Failed", "failed"));
+	el.appendChild(statCard(pending, "Pending approval", "changed"));
+	el.appendChild(statCard(active, "Active", "running"));
+	if (stopped) el.appendChild(statCard(stopped, "Canceled or rejected", ""));
 	el.hidden = false;
 }
 

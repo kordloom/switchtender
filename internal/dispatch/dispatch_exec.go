@@ -3,15 +3,19 @@ package dispatch
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -68,6 +72,14 @@ func (d *Dispatcher) executeLeased(base context.Context, r *run.Run) run.Status 
 // lease while it executes: a watcher renews it and honors cancel requests written to the store by
 // any process.
 func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
+	// Before anything reads the row, the row is held to the seal this process made over it and to
+	// the chain entry the seal names. The checks below compare the row with stamps on the same
+	// row, which a writer who rewrites both passes; the seal is keyed, so that writer cannot.
+	if reason := d.bindingRefusal(ctx, r); reason != "" {
+		d.finalize(r, run.StatusFailed, nil, reason)
+		d.publisher.CloseRun(r.ID)
+		return run.StatusFailed
+	}
 	// An approved run executes exactly the spec that was approved. The digest was committed to the
 	// chain when the decision was made and stamped on the run; a mismatch here means the row
 	// changed underneath the decision, so the run fails with that stated rather than executing
@@ -120,6 +132,99 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 		return d.executePlanGate(ctx, r, policies)
 	}
 	return d.executeRun(ctx, r)
+}
+
+// bindingRefusal checks r against the seal this process made over it and the chain entries the
+// seal names, and returns why r must not run, empty when it may. Every row is checked on a
+// dispatcher with a binding key, so a row stripped of its decision, its stamps, and its seal is
+// refused as carrying no seal. A dispatcher with no binding key checks nothing.
+//
+// The check reads under a context the run's own cancellation does not end, so a shutdown landing
+// during it is never recorded as a failure to verify. Its reads are bounded, and a shutdown still
+// stops the run at its fenced start.
+func (d *Dispatcher) bindingRefusal(ctx context.Context, r *run.Run) string {
+	if d.binder == nil {
+		return ""
+	}
+	err := d.binder.Executable(context.WithoutCancel(ctx), r)
+	if err == nil {
+		return ""
+	}
+	d.log.Error("dispatch: "+err.Error(), zap.String("run_id", r.ID))
+	return RefusalText(err)
+}
+
+// resultRefusal holds a finished step to the result seal its terminal write carried and returns why
+// its status and outputs must not enter a walk, empty when they may. A step that did not succeed
+// feeds nothing forward and is not held to a seal, and neither is any step on a dispatcher with no
+// binding key.
+func (d *Dispatcher) resultRefusal(ctx context.Context, child *run.Run) string {
+	if d.binder == nil {
+		return ""
+	}
+	err := d.binder.Result(context.WithoutCancel(ctx), child)
+	if err == nil {
+		return ""
+	}
+	d.log.Error("dispatch: "+err.Error(), zap.String("run_id", child.ID))
+	return RefusalText(err)
+}
+
+// CarriesSeal reports whether r carries a seal only a process holding a binding key makes: a spec
+// seal, a result seal, or a decision claim holding a release seal or a claim seal. A binary with no
+// binding key never writes one, so a row carrying one shows that keyed operation already began on
+// its install. A claim that does not decode carries no seal this can read.
+func CarriesSeal(r *run.Run) bool {
+	if r.SpecSeal != "" || r.ResultSeal != "" {
+		return true
+	}
+	if r.DecisionClaim == "" {
+		return false
+	}
+	var c decisionClaim
+	if err := json.Unmarshal([]byte(r.DecisionClaim), &c); err != nil {
+		return false
+	}
+	return c.Seal != "" || c.ClaimSeal != ""
+}
+
+// RefusalText returns the reason a run or a workflow records for a binding check that failed. A
+// drift is stated in its own words, which start "refused". A check that could not read what it
+// depends on is stated as "could not verify" with the row and the read, without the store's own
+// error: that text can carry words such as "connection refused", which on a run would read as
+// tampering. The store's error goes to the log, where the caller writes the whole error. The
+// dispatcher and the relay control node both record a refusal in these words.
+func RefusalText(err error) string {
+	if !errors.Is(err, binding.ErrUnverified) {
+		return err.Error()
+	}
+	var joined interface{ Unwrap() []error }
+	if errors.As(err, &joined) {
+		if errs := joined.Unwrap(); len(errs) == 2 && errs[0] == binding.ErrUnverified {
+			if text, ok := strings.CutSuffix(err.Error(), ": "+errs[1].Error()); ok {
+				return text
+			}
+		}
+	}
+	return binding.ErrUnverified.Error() + ": a read the check depends on failed"
+}
+
+// chainEntry reads one chain entry by id from the dispatcher's chain, as chainEntryOf does.
+func (d *Dispatcher) chainEntry(ctx context.Context, id string) (*audit.Entry, error) {
+	return chainEntryOf(d.audits)(ctx, id)
+}
+
+// chainEntryOf returns a reader of one entry of audits by id. It answers a nil entry and no error
+// when the chain holds none, which is how the binding verifier tells an entry that is gone from a
+// read that failed.
+func chainEntryOf(audits audit.Store) binding.EntryFunc {
+	return func(ctx context.Context, id string) (*audit.Entry, error) {
+		e, err := audits.Entry(ctx, id)
+		if errors.Is(err, audit.ErrEntryNotFound) {
+			return nil, nil
+		}
+		return e, err
+	}
 }
 
 // executeRun runs r's spec once, streaming output to the store, and finalizes it from the runner
@@ -201,6 +306,15 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
 	go d.watch(watchCtx, r.ID)
+
+	// On a keyed install the attempt's start is fixed on the chain before anything runs, after the
+	// lease watch is live so a slow chain cannot let the sweep take back a healthy start. A start
+	// the chain already holds, or one it could not record, runs nothing.
+	if refusal := d.startRefusal(ctx, r); refusal != "" {
+		d.finalize(r, run.StatusFailed, nil, refusal)
+		d.publisher.CloseRun(r.ID)
+		return run.StatusFailed
+	}
 
 	eventsPath, cleanup, eventsErr := d.eventsFile(r.ID)
 	defer cleanup()
@@ -849,11 +963,13 @@ func (d *Dispatcher) CancelWaiting(ctx context.Context, id string) (bool, error)
 // verify. When the write does not land, r keeps the status the store holds and the run is left for
 // the sweep to reclaim and mark interrupted, which is retryable.
 func (d *Dispatcher) finalize(r *run.Run, status run.Status, exitCode *int, failure string) {
+	seal := d.resultSeal(r, status)
 	fin := run.Finalization{
 		Status: status, ExitCode: exitCode, Error: failure, Image: r.Image,
 		CommitSHA: r.CommitSHA, PullCredentialID: r.PullCredentialID,
 		Outputs: r.Outputs, Warning: r.Warning, InventoryCheck: r.InventoryCheck,
-		ImageDigest: r.ImageDigest, ResolvedHosts: r.ResolvedHosts, EndedAt: d.now(),
+		ImageDigest: r.ImageDigest, ResolvedHosts: r.ResolvedHosts, ResultSeal: seal,
+		EndedAt: d.now(),
 	}
 	stored, recorded, err := d.recordTerminal(r, fin)
 	if err != nil {
@@ -871,6 +987,45 @@ func (d *Dispatcher) finalize(r *run.Run, status run.Status, exitCode *int, fail
 		return
 	}
 	d.afterTerminal(r)
+}
+
+// resultSeal returns the seal SealResult makes over how r ends with status, so a walk reading the
+// step back later can hold its status and outputs to what this process wrote. A dispatcher with no
+// binding key seals nothing.
+func (d *Dispatcher) resultSeal(r *run.Run, status run.Status) string {
+	if d.binder == nil {
+		return ""
+	}
+	seal, err := SealResult(d.binder.Key, r, status)
+	if err != nil {
+		// A step with no seal is refused by the walk that reads it back, so the workflow fails
+		// rather than feeding forward values this process could not seal.
+		d.log.Error("dispatch: seal a step's result: "+err.Error(), zap.String("run_id", r.ID))
+		return ""
+	}
+	return seal
+}
+
+// SealResult returns the result seal over how r ends with status, which the terminal write carries
+// beside the status and outputs it covers. Only a shard or a workflow step that succeeded is
+// sealed, since only a succeeded child's outputs feed a walk, so a nil key, a top-level run, or any
+// other status gets none. The dispatcher and the relay control node both seal a result here.
+//
+// r.Outputs is cleaned here, once, the way a store's terminal write cleans it, and r keeps the
+// cleaned map, so the values sealed and the values stored are the same values. Cleaning them on
+// each side apart could keep different values for two keys that clean to the same key.
+func SealResult(key *binding.Key, r *run.Run, status run.Status) (string, error) {
+	if key == nil || r.ParentID == nil || status != run.StatusSucceeded {
+		return "", nil
+	}
+	r.Outputs = util.SafeAnyMap(r.Outputs)
+	ended := *r
+	ended.Status = status
+	rec, err := binding.ResultRecord(&ended)
+	if err != nil {
+		return "", fmt.Errorf("seal run %s result: %w", r.ID, err)
+	}
+	return key.Seal(rec), nil
 }
 
 // afterTerminal wipes, commits and announces a run whose terminal record the store has accepted.
@@ -983,12 +1138,15 @@ func (d *Dispatcher) wipeSealed(r *run.Run) {
 	}
 }
 
-// applyFinalization copies a stored terminal record onto the run in memory.
+// applyFinalization copies a stored terminal record onto the run in memory. The result seal travels
+// with the status it covers, which is also how the fallback in recordTerminal, a whole-run save,
+// writes the seal beside the status.
 func applyFinalization(r *run.Run, fin run.Finalization) {
 	ended := fin.EndedAt
 	r.Status = fin.Status
 	r.ExitCode = fin.ExitCode
 	r.Error = fin.Error
+	r.ResultSeal = fin.ResultSeal
 	r.EndedAt = &ended
 }
 

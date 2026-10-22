@@ -21,6 +21,7 @@ const PAGE_DOCS = {
 	credentials: { slug: "secrets", label: "Secrets" },
 	users: { slug: "configuration", label: "Configuration" },
 	audit: { slug: "features", label: "Features" },
+	register: { slug: "compliance", label: "Compliance" },
 	policies: { slug: "features", label: "Features" },
 	doctor: { slug: "concepts", label: "Concepts" },
 	links: { slug: "pull-request-review", label: "Pull request review" },
@@ -96,8 +97,8 @@ function mountPageDocs() {
 // LIST_PAGES get the client-side row filter. The runs page is excluded because it searches on the
 // server, across every run rather than only the loaded page.
 const LIST_PAGES = ["jobtemplates", "credentials", "projects", "inventories", "sources",
-	"schedules", "users", "workers", "fleet", "tasks", "host", "policies", "drift", "audit", "doctor",
-	"compare", "notifications"];
+	"schedules", "users", "workers", "fleet", "tasks", "host", "policies", "drift", "audit", "register",
+	"doctor", "compare", "notifications"];
 
 // mountListFilter adds a search box above the main list table and filters its rows by text as you
 // type, so every list is searchable. It reads the rows live, so it works no matter when they load.

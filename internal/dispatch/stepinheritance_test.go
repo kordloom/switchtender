@@ -144,6 +144,10 @@ var stepFields = map[string]stepFieldRule{
 	"RequireReason":           notOnAStep,
 	"ApprovedSpecDigest":      notOnAStep,
 	"ApprovedSpecBinding":     notOnAStep,
+	// The parent's seals cover the parent's row and the parent's result. A step is sealed over its
+	// own record when the dispatcher saves it, and gets a result seal only when it finishes.
+	"SpecSeal":   notOnAStep,
+	"ResultSeal": notOnAStep,
 	// The decision that won the pipeline, and one still claiming it, are the pipeline's. A step is
 	// decided on its own, when it is an approval step, by a decision that claims that step.
 	"DecisionID":    notOnAStep,

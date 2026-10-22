@@ -130,6 +130,10 @@ type Store interface {
 	SpanBeats(ctx context.Context, limit int) ([]*Entry, error)
 	// List returns up to limit entries, newest first.
 	List(ctx context.Context, limit int) ([]*Entry, error)
+	// Entry returns the entry with this id, read by primary key, or ErrEntryNotFound when the chain
+	// holds none. It is how an executor starts a check from a chain entry it was told to expect,
+	// rather than from whatever rows it finds.
+	Entry(ctx context.Context, id string) (*Entry, error)
 	// Chain returns every entry in chain order, oldest first, for verification.
 	Chain(ctx context.Context) ([]*Entry, error)
 	// ChainScan streams every entry with a sequence above afterSeq in chain order, oldest first,
@@ -538,30 +542,23 @@ func redactSecrets(value any) any {
 	}
 }
 
-// Link normalizes e's hashed text, then fills its chain fields from prev, the current head of the
-// chain, or a genesis link when prev is nil. A store calls it once per append while holding the
-// append lock, so the chain stays linear and the entry it persists is the entry that was hashed.
-// BindEntryInstall stamps an entry with the install its chain belongs to, leaving an entry that
-// already names one alone. It must run before Link, since the id is folded into the hash. It is
-// exported for the store implementations, which live in their own packages.
-func BindEntryInstall(e *Entry, installID string) {
-	if e != nil && e.InstallID == "" {
-		e.InstallID = installID
-	}
-}
-
-func Link(prev, e *Entry) {
+// AsStored returns a copy of e as Link stores it: its hashed text escaped and its time truncated
+// to microseconds, with no chain field filled. A caller that commits to an entry before it is
+// appended commits to this form, the one the chain holds afterward. Link applies exactly this, so
+// the two cannot drift. The escape is not idempotent, so it applies to an entry not yet appended.
+func AsStored(e *Entry) *Entry {
+	cp := *e
 	// The text fields are escaped before anything commits to them, so the stored entry is valid
 	// UTF-8 and no two distinct requests can share a chain link. See escapeInvalidUTF8.
-	e.Actor = escapeInvalidUTF8(e.Actor)
-	e.Method = escapeInvalidUTF8(e.Method)
-	e.Path = escapeInvalidUTF8(e.Path)
+	cp.Actor = escapeInvalidUTF8(cp.Actor)
+	cp.Method = escapeInvalidUTF8(cp.Method)
+	cp.Path = escapeInvalidUTF8(cp.Path)
 	// The fields added after the first release are escaped on the same terms. An actor type or a
 	// delegated account carrying a raw invalid byte would otherwise hash to a value a verifier
 	// reading decoded JSON could not reproduce, which is the hole escapeInvalidUTF8 exists to close.
 	// The digest is generated hex and cannot carry one, so it is left alone.
-	e.ActorType = escapeInvalidUTF8(e.ActorType)
-	e.OnBehalfOf = escapeInvalidUTF8(e.OnBehalfOf)
+	cp.ActorType = escapeInvalidUTF8(cp.ActorType)
+	cp.OnBehalfOf = escapeInvalidUTF8(cp.OnBehalfOf)
 	// The install id is left alone on the same grounds as the digest. It is minted as "in_" plus
 	// hex, and the one path that does not mint it reads it out of a JSON file, which cannot yield
 	// an invalid byte either. Escaping it would only risk rewriting a percent somebody put there.
@@ -582,7 +579,24 @@ func Link(prev, e *Entry) {
 	// stored time bytes instead of parsing and re-serializing them, so a nanosecond entry verifies
 	// too. It stays because a relying party may be holding an older copy of the reference verifier,
 	// and because a microsecond timestamp survives every language a third party might check it in.
-	e.At = e.At.Truncate(time.Microsecond)
+	cp.At = cp.At.Truncate(time.Microsecond)
+	return &cp
+}
+
+// Link normalizes e's hashed text, then fills its chain fields from prev, the current head of the
+// chain, or a genesis link when prev is nil. A store calls it once per append while holding the
+// append lock, so the chain stays linear and the entry it persists is the entry that was hashed.
+// BindEntryInstall stamps an entry with the install its chain belongs to, leaving an entry that
+// already names one alone. It must run before Link, since the id is folded into the hash. It is
+// exported for the store implementations, which live in their own packages.
+func BindEntryInstall(e *Entry, installID string) {
+	if e != nil && e.InstallID == "" {
+		e.InstallID = installID
+	}
+}
+
+func Link(prev, e *Entry) {
+	*e = *AsStored(e)
 	if prev != nil {
 		e.Seq = prev.Seq + 1
 		e.PrevHash = prev.Hash

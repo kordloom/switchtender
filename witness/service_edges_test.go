@@ -25,7 +25,7 @@ var fixedClock = time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 // rawBody starts a feed answering exactly what body returns, with the given status.
 func rawBody(t *testing.T, status int, body []byte) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if status != 0 && status != http.StatusOK {
 			w.WriteHeader(status)
 		}
@@ -39,14 +39,11 @@ func rawBody(t *testing.T, status int, body []byte) *httptest.Server {
 // message, so a test can prove a refusal names nothing an anonymous caller should not see.
 func getStatus(t *testing.T, url string) (int, string) {
 	t.Helper()
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
-	}}
-	res, err := client.Get(url)
+	res, err := testClient().Get(url)
 	if err != nil {
 		t.Fatalf("GET %s error = %v", url, err)
 	}
-	defer func() { _ = res.Body.Close() }()
+	defer drain(res)
 	var body struct {
 		Error string `json:"error"`
 	}
@@ -189,7 +186,7 @@ func TestServiceOptionsInstallWhatTheyName(t *testing.T) {
 	}
 
 	// The token reaches the gate, so the read surface really is closed on this service.
-	api := httptest.NewServer(s.Handler())
+	api := newTestServer(s.Handler())
 	t.Cleanup(api.Close)
 	if code, _ := getStatus(t, api.URL+"/witness/servers"); code != http.StatusUnauthorized {
 		t.Errorf("GET /witness/servers without a token = %d, want 401", code)
@@ -204,7 +201,7 @@ func TestOpenServiceServesEveryRouteAnonymously(t *testing.T) {
 	t.Parallel()
 	feed := newFakeFeed(t, []Beat{beat(1, 10, link("a"))})
 	s, key := startedService(t, feed, t.TempDir(), testIdentity(t))
-	api := httptest.NewServer(s.Handler())
+	api := newTestServer(s.Handler())
 	t.Cleanup(api.Close)
 	for testNum, path := range []string{
 		"/healthz",
@@ -232,7 +229,7 @@ func TestUnknownServerKeysAreRefusedWithoutLeakingTheArchive(t *testing.T) {
 	feed := newFakeFeed(t, []Beat{beat(1, 10, link("a"))})
 	dir := t.TempDir()
 	s, _ := startedService(t, feed, dir, testIdentity(t))
-	api := httptest.NewServer(s.Handler())
+	api := newTestServer(s.Handler())
 	t.Cleanup(api.Close)
 	keys := []string{"nope", "..", "%2e%2e", strings.Repeat("k", 512), "-", "0123456789abcdef"}
 	routes := []string{"checkpoint", "attestation", "findings"}
@@ -266,7 +263,7 @@ func TestCheckpointRouteRefusesAMemoryItCannotVerify(t *testing.T) {
 	dir := t.TempDir()
 	id := testIdentity(t)
 	s, key := startedService(t, feed, dir, id)
-	api := httptest.NewServer(s.Handler())
+	api := newTestServer(s.Handler())
 	t.Cleanup(api.Close)
 
 	// The honest memory is served and it verifies.
@@ -302,7 +299,7 @@ func TestNothingWitnessedYetIsNotAnEmptyAttestation(t *testing.T) {
 	feed := newFakeFeed(t, nil)
 	feed.set(nil, http.StatusInternalServerError)
 	s, key := startedService(t, feed, t.TempDir(), testIdentity(t))
-	api := httptest.NewServer(s.Handler())
+	api := newTestServer(s.Handler())
 	t.Cleanup(api.Close)
 	for testNum, route := range []string{"checkpoint", "attestation"} {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -385,7 +382,7 @@ func TestFindingsAreServedPerServerAndBounded(t *testing.T) {
 	}
 
 	// The HTTP surface agrees with what tail computed.
-	api := httptest.NewServer(s.Handler())
+	api := newTestServer(s.Handler())
 	t.Cleanup(api.Close)
 	var served struct {
 		Findings []RecordedFinding `json:"findings"`
@@ -405,16 +402,16 @@ func TestFindingsAnswerIsAnEmptyListNotNull(t *testing.T) {
 	t.Parallel()
 	feed := newFakeFeed(t, []Beat{beat(1, 10, link("a"))})
 	s, key := startedService(t, feed, t.TempDir(), testIdentity(t))
-	api := httptest.NewServer(s.Handler())
+	api := newTestServer(s.Handler())
 	t.Cleanup(api.Close)
 	for testNum, path := range []string{"/witness/findings", "/witness/servers/" + key + "/findings"} {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			res, err := http.Get(api.URL + path)
+			res, err := testClient().Get(api.URL + path)
 			if err != nil {
 				t.Fatalf("GET %s error = %v", path, err)
 			}
-			defer func() { _ = res.Body.Close() }()
+			defer drain(res)
 			var raw map[string]json.RawMessage
 			if err := json.NewDecoder(res.Body).Decode(&raw); err != nil {
 				t.Fatalf("Decode() error = %v", err)
@@ -526,7 +523,7 @@ func TestFindingsRouteReportsAnUnreadableArchive(t *testing.T) {
 		t.Fatalf("Chmod() error = %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(filepath.Join(dir, findingsFile), 0o600) })
-	api := httptest.NewServer(s.Handler())
+	api := newTestServer(s.Handler())
 	t.Cleanup(api.Close)
 	for testNum, path := range []string{"/witness/findings", "/witness/servers/" + key + "/findings"} {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -572,7 +569,7 @@ func TestServerStateRoundTripsThroughTheAPI(t *testing.T) {
 	dir := t.TempDir()
 	id := testIdentity(t)
 	s, key := startedService(t, feed, dir, id)
-	api := httptest.NewServer(s.Handler())
+	api := newTestServer(s.Handler())
 	t.Cleanup(api.Close)
 	var listing struct {
 		Witness struct {
@@ -915,7 +912,7 @@ func TestFetchRefusesEveryDishonestAnswer(t *testing.T) { //nolint:funlen // Tes
 func TestFetchIsBoundedByItsContext(t *testing.T) {
 	t.Parallel()
 	release := make(chan struct{})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-release:
 		case <-r.Context().Done():
@@ -1012,7 +1009,7 @@ func TestTheApiIsReadOnly(t *testing.T) {
 	t.Parallel()
 	feed := newFakeFeed(t, []Beat{beat(1, 10, link("a"))})
 	s, key := startedService(t, feed, t.TempDir(), testIdentity(t))
-	api := httptest.NewServer(s.Handler())
+	api := newTestServer(s.Handler())
 	t.Cleanup(api.Close)
 	paths := []string{"/witness/servers", "/witness/findings",
 		"/witness/servers/" + key + "/checkpoint", "/witness/servers/" + key + "/attestation"}
@@ -1026,11 +1023,11 @@ func TestTheApiIsReadOnly(t *testing.T) {
 				if err != nil {
 					t.Fatalf("NewRequest() error = %v", err)
 				}
-				res, err := http.DefaultClient.Do(req)
+				res, err := testClient().Do(req)
 				if err != nil {
 					t.Fatalf("%s %s error = %v", method, path, err)
 				}
-				_ = res.Body.Close()
+				drain(res)
 				if res.StatusCode == http.StatusOK {
 					t.Errorf("%s %s = 200; the witness API has no mutating surface", method, path)
 				}
@@ -1053,7 +1050,7 @@ func TestConcurrentReadsAgainstALiveSweep(t *testing.T) {
 		feeds = append(feeds, f)
 		urls = append(urls, f.srv.URL)
 	}
-	s, err := NewService(testIdentity(t), t.TempDir(), 10*time.Second, urls, nil, nil,
+	s, err := NewService(testIdentity(t), t.TempDir(), 10*time.Second, urls, nil, testClient(),
 		WithServiceClock(func() time.Time { return fixedClock }),
 		WithServiceNotify(func(string, Finding) {}))
 	if err != nil {
@@ -1063,7 +1060,7 @@ func TestConcurrentReadsAgainstALiveSweep(t *testing.T) {
 		t.Fatalf("Start() error = %v", err)
 	}
 	t.Cleanup(s.Close)
-	api := httptest.NewServer(s.Handler())
+	api := newTestServer(s.Handler())
 	t.Cleanup(api.Close)
 
 	var wg sync.WaitGroup
@@ -1088,12 +1085,12 @@ func TestConcurrentReadsAgainstALiveSweep(t *testing.T) {
 						return
 					}
 				}
-				res, err := http.Get(api.URL + "/witness/servers")
+				res, err := testClient().Get(api.URL + "/witness/servers")
 				if err != nil {
 					t.Errorf("GET error = %v", err)
 					return
 				}
-				_ = res.Body.Close()
+				drain(res)
 			}
 		}()
 	}

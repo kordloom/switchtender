@@ -75,6 +75,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	actor_type TEXT NOT NULL DEFAULT '',
 	approved_spec_digest TEXT NOT NULL DEFAULT '',
 	approved_spec_binding TEXT NOT NULL DEFAULT '',
+	spec_seal TEXT NOT NULL DEFAULT '',
+	result_seal TEXT NOT NULL DEFAULT '',
 	distinct_approver INTEGER NOT NULL DEFAULT 0,
 	pinned_commit TEXT NOT NULL DEFAULT '',
 	policy_set TEXT NOT NULL DEFAULT '',
@@ -570,6 +572,25 @@ CREATE TABLE IF NOT EXISTS audit_anchors (
 	install_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_audit_anchor_seq ON audit_anchors(seq);
+-- A witness attestation is one countersignature a hosted witness returned for a pushed beat. The
+-- store holds one per seq, kind, and witness key, and the first written wins. Every column but the
+-- id carries a default so the table stays healable column by column.
+CREATE TABLE IF NOT EXISTS audit_attestations (
+	id         TEXT PRIMARY KEY,
+	seq        INTEGER NOT NULL DEFAULT 0,
+	kind       TEXT NOT NULL DEFAULT '',
+	key_id     TEXT NOT NULL DEFAULT '',
+	link       TEXT NOT NULL DEFAULT '',
+	size       INTEGER NOT NULL DEFAULT 0,
+	root       TEXT NOT NULL DEFAULT '',
+	public_key TEXT NOT NULL DEFAULT '',
+	role       TEXT NOT NULL DEFAULT '',
+	at         TEXT NOT NULL DEFAULT '',
+	sig        TEXT NOT NULL DEFAULT '',
+	witness    TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_attestation_coord
+	ON audit_attestations(seq, kind, key_id);
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_entries(at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_seq ON audit_entries(seq);
 -- Span beats are a narrow slice of the chain selected by actor and method and ordered by seq.
@@ -1098,7 +1119,7 @@ func migrateRuns(db *sql.DB) error {
 		"dry_run_scans", "hold_note", "sealed_digests", "policy_notes", "inventory_check",
 		"initiator", "require_reason", "inventory_snapshot", "inventory_sealed", "resolved_hosts",
 		"plan_sha256", "plan_sealed", "image_digest", "decision_id", "decision_claim",
-		"drift_plan_sealed", "account"} {
+		"drift_plan_sealed", "account", "spec_seal", "result_seal"} {
 		if _, err := db.Exec(
 			"ALTER TABLE runs ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {

@@ -118,6 +118,10 @@ var approvalPaths = map[string]approvalPath{
 	"internal/dispatch/approvals_step.go:Dispatcher.openApprovalStep:SettleHeld": {
 		Surface: "system", Why: "fails a step whose request could not be recorded, taking its deny " +
 			"path"},
+	"internal/dispatch/approvals_step.go:Dispatcher.refuseWaiting:TransitionStatusAndClaim": {
+		Surface: "system", Why: "takes a workflow whose timeout was refused under a lease only to " +
+			"fail it with the reason, withdrawing its waiting steps, so neither path runs " +
+			"(TestAForgedTimeoutIsNotTimedOut)"},
 	"internal/dispatch/approvals_step.go:Dispatcher.resumeParked:TransitionStatusAndClaim": {
 		Surface: "system", Why: "resumes a workflow only after DecideStep or timeOutStep settled its " +
 			"step, and decides nothing itself"},
@@ -132,6 +136,20 @@ var approvalPaths = map[string]approvalPath{
 	"internal/storetest/contract_approval.go:testSettleHeld:SettleHeld": {
 		Surface: "store contract", Why: "exercises the store with no decider and no route"},
 	"internal/storetest/contract_sealed.go:testSealedMaterialWipes:SettleHeld": {
+		Surface: "store contract", Why: "exercises the store with no decider and no route"},
+	"internal/storetest/contract_seal.go:testSealsStampApprovedSpec:StampApprovedSpec": {
+		Surface: "store contract", Why: "exercises the store with no decider and no route"},
+	"internal/storetest/contract_seal.go:testSealsTerminalWrite:SettleHeld": {
+		Surface: "store contract", Why: "exercises the store with no decider and no route"},
+	"internal/dispatch/adopt.go:adoptWriter.seal:SealAdopted": {Surface: "system",
+		Why: "seals a claim the process that made it left in flight across the upgrade, deciding " +
+			"nothing"},
+	"internal/dispatch/adopt.go:failUnsealedRow:SettleHeld": {Surface: "system",
+		Why: "adopt --fail-unsealed ends a held row it cannot vouch for as failed, deciding nothing " +
+			"and releasing nothing (TestFailUnsealedEndsTheLockout, TestFailUnsealedTrustsNoRow)"},
+	"internal/storetest/contract_seal.go:testSealAdoptedIsFenced:SealAdopted": {
+		Surface: "store contract", Why: "exercises the store with no decider and no route"},
+	"internal/storetest/contract_seal.go:testSealAdoptedIsFenced:ClaimDecision": {
 		Surface: "store contract", Why: "exercises the store with no decider and no route"},
 	"internal/storetest/contract_claim.go:testRunRacesUnderConcurrency:TransitionStatusAndClaim": {
 		Surface: "store contract", Why: "exercises the store with no decider and no route"},
@@ -159,13 +177,13 @@ var approvalPaths = map[string]approvalPath{
 // it moves a run out of pending_approval, which is read from its from argument. A decision is
 // prepared, claimed, and settled through calls of its own, and each of them is a primitive: the
 // entry a claim carries is what the chain records, the claim is what wins the run, and the settle
-// is what releases it.
+// is what releases it. Adoption's write is one too, since it stores the claim a finisher records.
 var approvalPrimitives = map[string]bool{
 	"Approve": true, "Reject": true, "DecideRun": true, "DecideStep": true, "approveRun": true,
 	"CommitDecision": true, "CommitDecisionWith": true, "CommitStepDecision": true,
 	"CommitStepDecisionWith": true, "SettleHeld": true, "StampApprovedSpec": true,
 	"DecisionEntry": true, "StepDecisionEntry": true, "ClaimDecision": true,
-	"SettleDecision": true,
+	"SettleDecision": true, "SealAdopted": true,
 }
 
 // scanApprovalCalls walks every non-test Go file under root and returns each call site reaching an

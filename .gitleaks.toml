@@ -55,3 +55,7 @@ paths = [
   '''internal/dispatch/reasons_test\.go''',
   '''test/migration/install_test\.go''',
 ]
+
+[[allowlists]]
+description = """The hosted witness's public key id. It is published on purpose so installs can pin it, and only this exact value is allowed."""
+regexes = ['''82047e9e6247134152a5ca482c61c1f642899586c6bc5562f1dbe3e110ca2804''']

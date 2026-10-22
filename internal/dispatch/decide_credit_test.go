@@ -28,7 +28,7 @@ func TestEveryReaderCreditsOnlyTheStoredWinner(t *testing.T) {
 	audits := audit.NewMemStore()
 	records := decision.NewMemStore()
 	d := New(store, &commandRecorder{}, nil, WithNoJanitor(), WithAudits(audits),
-		WithDecisions(records))
+		WithDecisions(records), WithBindingKey(bndKey(t)))
 	defer d.Close()
 	start := time.Now().Add(-time.Minute)
 	creation := &audit.Entry{ID: audit.NewID(), At: time.Now(), Actor: "requester",
@@ -88,7 +88,7 @@ func TestEveryReaderCreditsOnlyTheStoredWinner(t *testing.T) {
 	}
 
 	res, err := receipt.Build(ctx, store, audits, id, "test", held.ID,
-		receipt.Options{Decisions: records})
+		receipt.Options{Decisions: records, Binder: NewBindingVerifier(store, audits, bndKey(t))})
 	if err != nil {
 		t.Fatalf("receipt.Build() error = %v", err)
 	}

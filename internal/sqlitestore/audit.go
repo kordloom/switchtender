@@ -268,6 +268,24 @@ ORDER BY seq DESC LIMIT ?`
 	return scanAudit(rows)
 }
 
+// Entry returns the entry with this id, read by primary key, or audit.ErrEntryNotFound.
+func (s *auditStore) Entry(ctx context.Context, id string) (*audit.Entry, error) {
+	const q = `SELECT id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce, install_id FROM audit_entries
+WHERE id = ?`
+	rows, err := s.db.QueryContext(ctx, q, id)
+	if err != nil {
+		return nil, fmt.Errorf("read audit entry %s: %w", id, err)
+	}
+	entries, err := scanAudit(rows)
+	if err != nil {
+		return nil, fmt.Errorf("read audit entry %s: %w", id, err)
+	}
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("audit entry %s: %w", id, audit.ErrEntryNotFound)
+	}
+	return entries[0], nil
+}
+
 // Chain returns every entry in chain order, oldest first, for verification.
 func (s *auditStore) Chain(ctx context.Context) ([]*audit.Entry, error) {
 	const q = `SELECT id, at, actor, actor_type, on_behalf_of, method, path, content_digest, seq, prev_hash, hash, nonce, install_id FROM audit_entries

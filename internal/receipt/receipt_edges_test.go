@@ -14,6 +14,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/receipt"
 	"github.com/kordloom/switchtender/internal/run"
@@ -165,7 +166,8 @@ func TestReceiptRefusesAnUnreadableCreationReceipt(t *testing.T) {
 			if err := runs.Save(ctx, &broken); err != nil {
 				t.Fatalf("save: %v", err)
 			}
-			res, err := receipt.Build(ctx, runs, audits, id, "test", broken.ID, receipt.Options{})
+			res, err := receipt.Build(ctx, runs, audits, id, "test", broken.ID,
+				receipt.Options{Binder: binderOf(t, runs, audits, id)})
 			if err == nil {
 				t.Fatalf("%s: a receipt was built from a creation receipt of %q", test.Name,
 					test.Receipt)
@@ -198,7 +200,8 @@ func TestReceiptRefusesAnOutcomeRecordedBeforeItsCreation(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 
-	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID, receipt.Options{})
+	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)})
 	if err == nil {
 		t.Fatalf("a receipt was built for a run whose outcome precedes its creation: %+v", res)
 	}
@@ -217,6 +220,7 @@ func TestReceiptRefusesWhenTheAnchorsCannotBeRead(t *testing.T) {
 
 	for testNum, opts := range []receipt.Options{{}, {Sparse: true}} {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			opts.Binder = binderOf(t, runs, audits, id)
 			res, err := receipt.Build(ctx, runs, &anchorReadFails{Store: audits}, id, "test", r.ID, opts)
 			if err == nil {
 				t.Fatalf("sparse=%v: a receipt was built without reading the anchors: %+v",
@@ -241,7 +245,7 @@ func TestReceiptRefusesWhenTheChainCannotBeRead(t *testing.T) {
 	runs, audits, id, r := held(t, "approved")
 
 	res, err := receipt.Build(ctx, runs, &chainScanFails{Store: audits}, id, "test", r.ID,
-		receipt.Options{})
+		receipt.Options{Binder: binderOf(t, runs, audits, id)})
 	if err == nil {
 		t.Fatalf("a receipt was built from a chain that could not be read: %+v", res)
 	}
@@ -274,7 +278,8 @@ func TestReceiptRefusesARunItCannotFind(t *testing.T) {
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
-			res, err := receipt.Build(ctx, runs, audits, id, "test", test.RunID, receipt.Options{})
+			res, err := receipt.Build(ctx, runs, audits, id, "test", test.RunID,
+				receipt.Options{Binder: binderOf(t, runs, audits, id)})
 			if err == nil {
 				t.Fatalf("%s: a receipt was built for a run that does not exist: %+v", test.Name, res)
 			}
@@ -310,7 +315,8 @@ func TestReceiptAttachesTheAnchorsCoveringIt(t *testing.T) {
 		t.Fatalf("SaveAnchor: %v", err)
 	}
 
-	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID, receipt.Options{})
+	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)})
 	if err != nil {
 		t.Fatalf("Build with a satisfied anchor: %v", err)
 	}
@@ -357,7 +363,8 @@ func TestSparseReceiptUnderATreeAnchorIsNotFlaggedUnanchored(t *testing.T) {
 		t.Fatalf("SaveAnchor: %v", err)
 	}
 
-	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID, receipt.Options{Sparse: true})
+	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID,
+		receipt.Options{Sparse: true, Binder: binderOf(t, runs, audits, id)})
 	if err != nil {
 		t.Fatalf("Build sparse under a tree anchor: %v", err)
 	}
@@ -404,7 +411,7 @@ func TestSparseConsistencyWindow(t *testing.T) {
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID,
-				receipt.Options{Sparse: true, From: test.From})
+				receipt.Options{Sparse: true, From: test.From, Binder: binderOf(t, runs, audits, id)})
 			if test.WantRefusal {
 				if err == nil {
 					t.Fatalf("%s: From=%d produced a receipt instead of refusing", test.Name, test.From)
@@ -437,7 +444,8 @@ func TestSparseReceiptCarriesNoDisclosures(t *testing.T) {
 	ctx := context.Background()
 	runs, audits, id, r := held(t, "approved")
 
-	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID, receipt.Options{Sparse: true})
+	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID,
+		receipt.Options{Sparse: true, Binder: binderOf(t, runs, audits, id)})
 	if err != nil {
 		t.Fatalf("Build sparse: %v", err)
 	}
@@ -471,7 +479,7 @@ func TestReceiptNotesAnOutcomeItCannotRebuild(t *testing.T) {
 	runs, audits, id, r := held(t, "approved")
 
 	res, err := receipt.Build(ctx, &summariesUnreadable{Store: runs}, audits, id, "test", r.ID,
-		receipt.Options{})
+		receipt.Options{Binder: binderOf(t, runs, audits, id)})
 	if err != nil {
 		t.Fatalf("Build with unreadable summaries: %v", err)
 	}
@@ -497,10 +505,11 @@ func TestReceiptNotesAnOutcomeItCannotRebuild(t *testing.T) {
 	}
 }
 
-// TestReceiptWithholdsWhatItCannotCanonicalize pins the other degradation: a run whose spec cannot
-// be reduced to canonical bytes at all. Nothing that depends on those bytes may be disclosed, and
-// the receipt must still prove the chain and say what is missing, rather than disclosing a body
-// that no longer matches the digest the chain committed.
+// TestReceiptWithholdsWhatItCannotCanonicalize pins the other degradation: an approved run whose
+// spec cannot be reduced to canonical bytes at all. The approver is named only once the run is held
+// to its seal, and a seal over a spec that will not reduce cannot be recomputed, so nothing can be
+// said about who approved it. The receipt is refused as unattested, never as tampered, and never
+// signed naming an approver nothing stands behind.
 func TestReceiptWithholdsWhatItCannotCanonicalize(t *testing.T) {
 	ctx := context.Background()
 	runs, audits, id, r := held(t, "approved")
@@ -512,25 +521,17 @@ func TestReceiptWithholdsWhatItCannotCanonicalize(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 
-	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID, receipt.Options{})
-	if err != nil {
-		t.Fatalf("Build: %v", err)
+	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)})
+	if err == nil {
+		t.Fatalf("a receipt naming an approver whose seal cannot be recomputed was built: %d "+
+			"claims", res.Claims)
 	}
-	rep, err := audit.VerifyBundle(res.Signed, id.KeyID())
-	if err != nil {
-		t.Fatalf("VerifyBundle: %v", err)
+	if !errors.Is(err, receipt.ErrUnattested) || !errors.Is(err, binding.ErrUnverified) {
+		t.Fatalf("error = %v, want the approver refused as one the seal could not be checked for", err)
 	}
-	if !rep.SignatureOK || !rep.ChainOK {
-		t.Fatalf("the chain proof was lost: sig=%v chain=%v", rep.SignatureOK, rep.ChainOK)
-	}
-	if rep.OutcomePresent {
-		t.Error("an outcome was disclosed for a run whose canonical bytes cannot be produced")
-	}
-	if rep.DecisionsPresent != 0 {
-		t.Error("a decision was disclosed for a run whose canonical bytes cannot be produced")
-	}
-	if len(res.Notes) == 0 {
-		t.Error("the receipt disclosed nothing and said nothing about why")
+	if errors.Is(err, binding.ErrDrift) || strings.Contains(err.Error(), "no longer matches") {
+		t.Errorf("error = %q claims tampering for a spec that will not reduce", err)
 	}
 }
 
@@ -542,7 +543,8 @@ func TestReceiptForAnUngatedRunDisclosesNoDecision(t *testing.T) {
 	ctx := context.Background()
 	runs, audits, id, subject, _ := busyInstall(t)
 
-	res, err := receipt.Build(ctx, runs, audits, id, "test", subject.ID, receipt.Options{Sparse: true})
+	res, err := receipt.Build(ctx, runs, audits, id, "test", subject.ID,
+		receipt.Options{Sparse: true, Binder: binderOf(t, runs, audits, id)})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -569,7 +571,8 @@ func TestReceiptResultDescribesWhatItProduced(t *testing.T) {
 	ctx := context.Background()
 	runs, audits, id, r := held(t, "approved")
 
-	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID, receipt.Options{})
+	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -602,12 +605,13 @@ func TestReceiptBuildsConcurrentlyForTheSameRun(t *testing.T) {
 		err    error
 	}
 	out := make([]result, callers)
+	binder := binderOf(t, runs, audits, id)
 	var wg sync.WaitGroup
 	for i := range callers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			opts := receipt.Options{}
+			opts := receipt.Options{Binder: binder}
 			if i%2 == 1 {
 				opts.Sparse = true
 			}
@@ -658,7 +662,8 @@ func TestReceiptOnABusyInstallAttachesTheOutcomeToItsOwnEntry(t *testing.T) {
 	ctx := context.Background()
 	runs, audits, id, subject, other := busyInstall(t)
 
-	res, err := receipt.Build(ctx, runs, audits, id, "test", subject.ID, receipt.Options{})
+	res, err := receipt.Build(ctx, runs, audits, id, "test", subject.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -712,7 +717,8 @@ func TestSparseReceiptDoesNotDiscloseARunWhoseIDMerelyContainsThisOne(t *testing
 		t.Fatalf("CommitDecision for the neighbor: %v", err)
 	}
 
-	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID, receipt.Options{Sparse: true})
+	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID,
+		receipt.Options{Sparse: true, Binder: binderOf(t, runs, audits, id)})
 	if err != nil {
 		t.Fatalf("Build sparse: %v", err)
 	}
@@ -739,7 +745,8 @@ func TestReceiptOmitsADecisionRecordedAfterTheOutcome(t *testing.T) {
 		t.Fatalf("CommitDecision after the outcome: %v", err)
 	}
 
-	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID, receipt.Options{})
+	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -783,7 +790,8 @@ func TestAReceiptSurvivesARetriedApproval(t *testing.T) {
 		t.Fatalf("save run: %v", err)
 	}
 
-	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID, receipt.Options{})
+	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

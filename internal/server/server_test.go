@@ -2248,6 +2248,11 @@ func (f *failingAudits) Chain(context.Context) ([]*audit.Entry, error) { return 
 // ChainScan streams nothing.
 func (f *failingAudits) ChainScan(context.Context, int64, func(*audit.Entry) error) error { return nil }
 
+// Entry finds nothing.
+func (f *failingAudits) Entry(context.Context, string) (*audit.Entry, error) {
+	return nil, audit.ErrEntryNotFound
+}
+
 // TestMutationRefusedWhenItCannotBeAudited pins that a change which cannot be written to the audit
 // trail does not happen and is not reported as done.
 //

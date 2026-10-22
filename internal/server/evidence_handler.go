@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/dossier"
 	"github.com/kordloom/switchtender/internal/license"
@@ -19,9 +20,12 @@ import (
 // runEvidenceHandler renders one run's evidence dossier as a self-contained HTML document, so the
 // run page answers an auditor's sample request with one export instead of five screenshots.
 // producer is the install identity the tree profile's leaves bind to, which checking a tree anchor
-// requires.
+// requires. binder holds the run and its approval steps to their seals, so a name a writer put on a
+// decision entry is flagged rather than shown as the approver; nil, an install with no binding key,
+// marks every check unchecked.
 func runEvidenceHandler(store run.Store, audits audit.Store, producer audit.Identity,
-	decisions decision.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+	decisions decision.Store, binder *binding.Verifier, authz *authorizer,
+	log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: runEvidenceHandler: Store required")
 	}
@@ -53,6 +57,11 @@ func runEvidenceHandler(store run.Store, audits audit.Store, producer audit.Iden
 			// The reasons approvers gave travel with the evidence, with the random values that open
 			// their commitments, so the dossier can be checked against the chain offline.
 			err = dossier.AttachDecisions(r.Context(), in, decisions, store)
+		}
+		if err == nil {
+			// Held to the seals before the run is masked below, since a seal is made over the row
+			// as stored.
+			dossier.AttachSeals(r.Context(), in, binder, store)
 		}
 		if err != nil {
 			log.Error("server: collect run evidence: " + err.Error())
@@ -92,11 +101,14 @@ func runEvidenceHandler(store run.Store, audits audit.Store, producer audit.Iden
 }
 
 // auditRegisterHandler renders the period change register as a self-contained HTML document, the
-// change-management evidence a compliance review samples from. producer is the install identity the tree
-// profile's leaves bind to. from and to accept a date or an RFC 3339 time; the period defaults to
-// the last 90 days.
+// change-management evidence a compliance review samples from, or as JSON when format=json is asked
+// for. producer is the install identity the tree profile's leaves bind to. from and to accept a date
+// or an RFC 3339 time; the period defaults to the last 90 days.
+//
+// binder holds the row each approval released to its seal, so a rewritten approver is flagged on its
+// row and counted in the banner; nil marks every approval unchecked.
 func auditRegisterHandler(store run.Store, audits audit.Store, producer audit.Identity,
-	log *zap.Logger) http.HandlerFunc {
+	binder *binding.Verifier, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: auditRegisterHandler: Store required")
 	}
@@ -141,6 +153,22 @@ func auditRegisterHandler(store run.Store, audits audit.Store, producer audit.Id
 		if err != nil {
 			log.Error("server: collect change register: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not collect the register")
+			return
+		}
+		dossier.AttachRegisterSeals(r.Context(), in, binder, store)
+		// The register page in the web interface reads the same register as data. The form is
+		// chosen only here, after the license gate and the collection, so the JSON is gated and
+		// bounded exactly as the document is, and its rows come from the one builder the document
+		// renders, so the page and the download cannot disagree.
+		if r.URL.Query().Get("format") == "json" {
+			reg, err := dossier.BuildRegister(in)
+			if err != nil {
+				log.Error("server: build change register: " + err.Error())
+				respondError(w, log, http.StatusInternalServerError, "could not build the register")
+				return
+			}
+			releaseWalk(r.Context())
+			respondJSON(w, log, http.StatusOK, reg, wantsPretty(r))
 			return
 		}
 		doc, err := dossier.RenderRegister(in)

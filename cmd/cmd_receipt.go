@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/receipt"
 	"github.com/kordloom/switchtender/internal/util"
 )
@@ -82,8 +83,15 @@ func runReceipt(cmd *cobra.Command, args []string) error {
 	if err := refuseUnpublishableReceipt(cmd.Context(), store.Audits(), id); err != nil {
 		return err
 	}
+	// The key the install seals rows under derives from the identity that signs, so a receipt's
+	// approvers are held to the seals the serving process made over them.
+	key, err := bindingKeyOf(&id)
+	if err != nil {
+		return err
+	}
 	res, err := receipt.Build(cmd.Context(), store.Runs(), store.Audits(), id, resolveVersion(),
-		runID, receipt.Options{Sparse: receiptSparse, From: receiptFrom, Decisions: store.Decisions()})
+		runID, receipt.Options{Sparse: receiptSparse, From: receiptFrom, Decisions: store.Decisions(),
+			Binder: dispatch.NewBindingVerifier(store.Runs(), store.Audits(), key)})
 	if err != nil {
 		// A refusal from the builder is a statement about the chain, not about this run. The walk
 		// above catches the ordinary tamper; this catches what it does not cover, such as an entry

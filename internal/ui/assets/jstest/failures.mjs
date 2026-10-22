@@ -20,6 +20,7 @@ export async function settle(clock, rounds) {
 export const PLACEHOLDER_PAGES = [
 	{ page: "activity", text: "Loading activity.", load: (app) => app.loadActivityPage() },
 	{ page: "audit", text: "Loading audit trail.", load: (app) => app.loadAudit() },
+	{ page: "auditregister", text: "Loading the change register.", load: (app) => app.loadRegister() },
 	{ page: "compare", text: "Loading comparison.", load: (app) => app.loadCompare(),
 		vars: { RunID: "run_1" } },
 	{ page: "credentials", text: "Loading credentials.", load: (app) => app.loadCredentials() },

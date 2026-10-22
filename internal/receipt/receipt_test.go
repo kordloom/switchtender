@@ -2,11 +2,21 @@ package receipt_test
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/kordloom/loomseal/jcs"
+
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
+	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/receipt"
 	"github.com/kordloom/switchtender/internal/run"
@@ -48,8 +58,14 @@ func heldWith(t *testing.T, verdict string,
 		t.Fatalf("append creation: %v", err)
 	}
 
+	// An approval is settled the way the product settles one, out of pending_approval, so the run
+	// names the decision that won it and is sealed to it.
+	status := run.StatusRunning
+	if verdict == outcome.StepApproved {
+		status = run.StatusPendingApproval
+	}
 	r := &run.Run{
-		ID: "run_1", Status: run.StatusRunning, CreatedAt: time.Now(),
+		ID: "run_1", Status: status, CreatedAt: time.Now(),
 		Tool: run.ToolBash, Command: "deploy the thing", Actor: "casey", ActorType: "session",
 		HeldByPolicy: "deploys need a person", AuditReceipt: chainReceipt(creation),
 	}
@@ -70,6 +86,9 @@ func heldWith(t *testing.T, verdict string,
 		t.Fatalf("CommitDecision: %v", err)
 	}
 	r.ApprovedSpecDigest = specDigest
+	if verdict == outcome.StepApproved {
+		r = sealApproval(t, runs, audits, id, r)
+	}
 
 	// The run finishes and its outcome is committed, which is what makes it receiptable. It is
 	// committed the way every path that finishes a run commits it, so the store records the outcome
@@ -86,6 +105,102 @@ func heldWith(t *testing.T, verdict string,
 		t.Fatalf("CommitOwed outcome: %v", err)
 	}
 	return runs, audits, id, r
+}
+
+// keyOf derives the binding key an install signing with id seals its rows under, the way the
+// command and the server derive it.
+func keyOf(t *testing.T, id audit.Identity) *binding.Key {
+	t.Helper()
+	seed, err := hex.DecodeString(id.Seed)
+	if err != nil {
+		t.Fatalf("decode the identity seed: %v", err)
+	}
+	key, err := binding.DeriveKey(seed)
+	if err != nil {
+		t.Fatalf("DeriveKey: %v", err)
+	}
+	return key
+}
+
+// binderOf returns the verifier a keyed install holds a receipt's approvers to, over runs and
+// audits, under the key id derives.
+func binderOf(t *testing.T, runs run.Store, audits audit.Store, id audit.Identity) *binding.Verifier {
+	t.Helper()
+	return dispatch.NewBindingVerifier(runs, audits, keyOf(t, id))
+}
+
+// sealApproval settles the held run r with the approval the chain last recorded for it, stamps the
+// spec binding beside the digest it carries, and seals it as the dispatcher seals an approved run.
+// It returns the run as stored.
+func sealApproval(t *testing.T, runs run.Store, audits audit.Store, id audit.Identity,
+	r *run.Run) *run.Run {
+	t.Helper()
+	ctx := context.Background()
+	if r.ApprovedSpecBinding == "" {
+		b, err := outcome.SpecBinding(r)
+		if err != nil {
+			t.Fatalf("SpecBinding: %v", err)
+		}
+		r.ApprovedSpecBinding = b
+	}
+	if err := runs.Save(ctx, r); err != nil {
+		t.Fatalf("save held run: %v", err)
+	}
+	path := "/runs/" + r.ID + "/decision/" + outcome.StepApproved
+	decisionID := ""
+	err := audits.ChainScan(ctx, 0, func(e *audit.Entry) error {
+		if e.Method == audit.MethodDecision && e.Path == path {
+			decisionID = e.ID
+		}
+		return nil
+	})
+	if err != nil || decisionID == "" {
+		t.Fatalf("find the approval of %s: %q, %v", r.ID, decisionID, err)
+	}
+	decide(t, runs, r.ID, decisionID, run.DecisionSettle{Status: run.StatusRunning, Owner: "test"})
+	return sealRow(t, runs, audits, id, r.ID)
+}
+
+// sealRow seals the stored row runID to the DECISION entry it names, as the dispatcher seals an
+// approved top-level run or an approved workflow approval step, and returns it as stored.
+func sealRow(t *testing.T, runs run.Store, audits audit.Store, id audit.Identity,
+	runID string) *run.Run {
+	t.Helper()
+	ctx := context.Background()
+	r, err := runs.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("read %s: %v", runID, err)
+	}
+	entry, err := audits.Entry(ctx, r.DecisionID)
+	if err != nil {
+		t.Fatalf("read decision %s of %s: %v", r.DecisionID, runID, err)
+	}
+	var rec binding.Record
+	if r.ParentID == nil {
+		rec, err = binding.RunRecord(r, binding.RootOf(entry))
+	} else {
+		parent, perr := runs.Get(ctx, *r.ParentID)
+		if perr != nil {
+			t.Fatalf("read workflow of %s: %v", runID, perr)
+		}
+		state, serr := outcome.StepStateOf(ctx, runs, parent, r)
+		if serr != nil {
+			t.Fatalf("StepStateOf: %v", serr)
+		}
+		stateBinding, berr := state.Binding()
+		if berr != nil {
+			t.Fatalf("bind the step state: %v", berr)
+		}
+		rec, err = binding.GateRecord(parent, r, stateBinding, binding.RootOf(entry))
+	}
+	if err != nil {
+		t.Fatalf("record of %s: %v", runID, err)
+	}
+	r.SpecSeal = keyOf(t, id).Seal(rec)
+	if err := runs.Save(ctx, r); err != nil {
+		t.Fatalf("save sealed %s: %v", runID, err)
+	}
+	return r
 }
 
 // chainReceipt renders an entry's seq:link, the form a run stores.
@@ -114,7 +229,8 @@ func TestReceiptProvesWhoApprovedWhat(t *testing.T) {
 	runs, audits, id, r := held(t, "approved")
 	ctx := context.Background()
 
-	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID, receipt.Options{})
+	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -152,11 +268,160 @@ func TestReceiptProvesWhoApprovedWhat(t *testing.T) {
 	}
 }
 
+// deciderRewritten is an audit store whose copy of one entry names another decider than the one
+// appended, read by id and streamed alike, with every entry from it on linked again over the
+// rewrite, the chain a database writer can leave behind. Its digest is left alone.
+type deciderRewritten struct {
+	audit.Store
+	// id is the entry whose decider is rewritten.
+	id string
+	// edit rewrites the entry's decider.
+	edit func(e *audit.Entry)
+}
+
+// Entry reads an entry by id with its decider rewritten when it is the entry id names.
+func (s *deciderRewritten) Entry(ctx context.Context, id string) (*audit.Entry, error) {
+	e, err := s.Store.Entry(ctx, id)
+	if err == nil && e != nil && e.ID == s.id {
+		s.edit(e)
+	}
+	return e, err
+}
+
+// ChainScan streams the rewritten chain above afterSeq, linked again from the rewrite on.
+func (s *deciderRewritten) ChainScan(ctx context.Context, afterSeq int64,
+	fn func(*audit.Entry) error) error {
+	prev, relinking := "", false
+	return s.Store.ChainScan(ctx, 0, func(e *audit.Entry) error {
+		rewritten := *e
+		if rewritten.ID == s.id {
+			s.edit(&rewritten)
+			relinking = true
+		}
+		if relinking {
+			rewritten.PrevHash = prev
+			rewritten.Hash = audit.EntryHash(&rewritten)
+		}
+		prev = rewritten.Hash
+		if rewritten.Seq <= afterSeq {
+			return nil
+		}
+		return fn(&rewritten)
+	})
+}
+
+// TestReceiptRefusesARewrittenDecider covers the approver a writer of the database renames on the
+// chain. The links are public, so the rewritten chain verifies on its own, and a receipt drawn from
+// it would sign the writer's name as the approver. The run's seal covers the decider its DECISION
+// entry names, so the builder refuses the whole receipt and names the entry, in either shape. With
+// no key nothing stands behind the name, and a run that names no decision is held to no seal that
+// covers one, so both are refused too. TestReceiptProvesWhoApprovedWhat is the honest twin.
+//
+//nolint:funlen // Test function.
+func TestReceiptRefusesARewrittenDecider(t *testing.T) {
+	ctx := context.Background()
+	mallory := func(e *audit.Entry) { e.Actor, e.ActorType = "mallory", "human" }
+	tests := []struct {
+		// Name labels the row.
+		Name string
+		// Workflow builds the released workflow rather than the held run.
+		Workflow bool
+		// Sparse asks for the sparse shape.
+		Sparse bool
+		// Unkeyed builds with no verifier.
+		Unkeyed bool
+		// Rewrite returns the stores as the writer left them, given the subject's decision.
+		Rewrite func(runs run.Store, audits audit.Store, decisionID string) (run.Store, audit.Store)
+		// WantDrift reports whether the refusal says the entry no longer matches its seal.
+		WantDrift bool
+		// WantText is what the refusal must say.
+		WantText string
+	}{{ // Test 0: The approver renamed on the chain.
+		Name: "approver rewritten",
+		Rewrite: func(runs run.Store, audits audit.Store, id string) (run.Store, audit.Store) {
+			return runs, &deciderRewritten{Store: audits, id: id, edit: mallory}
+		},
+		WantDrift: true, WantText: "no longer matches the seal on run run_1",
+	}, { // Test 1: The approver renamed, receipted in the sparse shape.
+		Name: "approver rewritten, sparse", Sparse: true,
+		Rewrite: func(runs run.Store, audits audit.Store, id string) (run.Store, audit.Store) {
+			return runs, &deciderRewritten{Store: audits, id: id, edit: mallory}
+		},
+		WantDrift: true, WantText: "no longer matches the seal on run run_1",
+	}, { // Test 2: The account the approver acted for rewritten.
+		Name: "delegated account rewritten",
+		Rewrite: func(runs run.Store, audits audit.Store, id string) (run.Store, audit.Store) {
+			return runs, &deciderRewritten{Store: audits, id: id,
+				edit: func(e *audit.Entry) { e.OnBehalfOf = "mallory" }}
+		},
+		WantDrift: true, WantText: "no longer matches the seal on run run_1",
+	}, { // Test 3: The approval step's approver renamed on the chain.
+		Name: "step approver rewritten", Workflow: true,
+		Rewrite: func(runs run.Store, audits audit.Store, _ string) (run.Store, audit.Store) {
+			gate, err := runs.Get(context.Background(), "run_wf_gate")
+			if err != nil {
+				panic(err)
+			}
+			return runs, &deciderRewritten{Store: audits, id: gate.DecisionID, edit: mallory}
+		},
+		WantDrift: true, WantText: "no longer matches the seal on run run_wf_gate",
+	}, { // Test 4: The decision the run names cleared, so it is checked as submitted.
+		Name: "decision id cleared",
+		Rewrite: func(runs run.Store, audits audit.Store, _ string) (run.Store, audit.Store) {
+			return &decisionSwapped{Store: runs, id: "run_1"}, audits
+		},
+		WantText: "names no decision entry",
+	}, { // Test 5: An install with no key, nothing rewritten.
+		Name: "no key", Unkeyed: true,
+		WantText: "holds no binding key",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			var runs run.Store
+			var audits audit.Store
+			var id audit.Identity
+			var subject *run.Run
+			if test.Workflow {
+				runs, audits, id, subject, _, _ = releasedWorkflow(t, nil)
+			} else {
+				runs, audits, id, subject = held(t, "approved")
+			}
+			if test.Rewrite != nil {
+				runs, audits = test.Rewrite(runs, audits, subject.DecisionID)
+			}
+			opts := receipt.Options{Sparse: test.Sparse, Binder: binderOf(t, runs, audits, id)}
+			if test.Unkeyed {
+				opts.Binder = nil
+			}
+			res, err := receipt.Build(ctx, runs, audits, id, "test", subject.ID, opts)
+			if err == nil {
+				t.Fatalf("a receipt naming an approver its seal does not cover was built: %d claims",
+					res.Claims)
+			}
+			var unattested *receipt.UnattestedError
+			if !errors.As(err, &unattested) || !errors.Is(err, receipt.ErrUnattested) {
+				t.Fatalf("error = %v, want an UnattestedError", err)
+			}
+			if got := errors.Is(err, binding.ErrDrift); got != test.WantDrift {
+				t.Errorf("error is a drift = %t, want %t: %v", got, test.WantDrift, err)
+			}
+			if unattested.EntryID == "" || !strings.Contains(err.Error(), unattested.EntryID) {
+				t.Errorf("error = %q, want it to name the decision entry", err)
+			}
+			if !strings.Contains(err.Error(), test.WantText) {
+				t.Errorf("error = %q, want it to say %q", err, test.WantText)
+			}
+		})
+	}
+}
+
 // TestReceiptSurfacesASpecChangedAfterApproval covers the tamper the decision disclosure exists to
 // catch. The chain commits a digest of the decision body, and that body names the spec digest as it
 // stood when the approver decided. Editing the run afterward, which is what an operator would do to
-// slip a different change past a recorded approval, makes the rebuilt body disagree with the committed
-// digest, and the receipt says so rather than verifying.
+// slip a different change past a recorded approval, moves the seal the approved run carries, which
+// covers its spec beside the approver its decision names. The builder holds the run to that seal
+// before it names the approver, so it refuses the receipt rather than signing one an offline check
+// would have to catch.
 func TestReceiptSurfacesASpecChangedAfterApproval(t *testing.T) {
 	runs, audits, id, r := held(t, "approved")
 	ctx := context.Background()
@@ -167,20 +432,17 @@ func TestReceiptSurfacesASpecChangedAfterApproval(t *testing.T) {
 		t.Fatalf("save edited run: %v", err)
 	}
 
-	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID, receipt.Options{})
-	if err != nil {
-		t.Fatalf("Build: %v", err)
+	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)})
+	if err == nil {
+		t.Fatalf("a receipt for a run whose spec changed after approval was built: %d claims, so "+
+			"an edited change can be presented as an approved one", res.Claims)
 	}
-	rep, err := audit.VerifyBundle(res.Signed, id.KeyID())
-	if err != nil {
-		t.Fatalf("VerifyBundle: %v", err)
+	if !errors.Is(err, receipt.ErrUnattested) || !errors.Is(err, binding.ErrDrift) {
+		t.Fatalf("error = %v, want a refusal of the approver as no longer matching the seal", err)
 	}
-	if rep.OK() {
-		t.Fatal("a receipt for a run whose spec changed after approval verified clean, so an edited " +
-			"change can be presented as an approved one")
-	}
-	if rep.DecisionsOK && rep.SpecConsistent {
-		t.Error("neither the decision disclosure nor the spec check noticed the edit")
+	if !strings.Contains(err.Error(), "changed after it was approved") {
+		t.Errorf("error = %q, want it to say the run changed after it was approved", err)
 	}
 }
 
@@ -197,7 +459,8 @@ func TestReceiptRefusesWhatItCannotAttest(t *testing.T) {
 	if err := runs.Save(ctx, &noReceipt); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	if _, err := receipt.Build(ctx, runs, audits, id, "test", noReceipt.ID, receipt.Options{}); err == nil {
+	if _, err := receipt.Build(ctx, runs, audits, id, "test", noReceipt.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)}); err == nil {
 		t.Error("a run with no creation receipt produced a receipt anyway")
 	} else if !strings.Contains(err.Error(), "creation receipt") {
 		t.Errorf("error = %v, want it to name the missing creation receipt", err)
@@ -212,14 +475,16 @@ func TestReceiptRefusesWhatItCannotAttest(t *testing.T) {
 	if err := runs.Save(ctx, &running); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	if _, err := receipt.Build(ctx, runs, audits, id, "test", running.ID, receipt.Options{}); err == nil {
+	if _, err := receipt.Build(ctx, runs, audits, id, "test", running.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)}); err == nil {
 		t.Error("a run with no committed outcome produced a receipt")
 	} else if !strings.Contains(err.Error(), "finished") {
 		t.Errorf("error = %v, want it to say a receipt covers a finished run", err)
 	}
 
 	// Test 2: A run that does not exist at all.
-	if _, err := receipt.Build(ctx, runs, audits, id, "test", "run_missing", receipt.Options{}); err == nil {
+	if _, err := receipt.Build(ctx, runs, audits, id, "test", "run_missing",
+		receipt.Options{Binder: binderOf(t, runs, audits, id)}); err == nil {
 		t.Error("a receipt was built for a run that does not exist")
 	}
 }
@@ -240,7 +505,8 @@ func TestSparseReceiptDisclosesOnlyItsOwnRun(t *testing.T) {
 		t.Fatalf("append other: %v", err)
 	}
 
-	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID, receipt.Options{Sparse: true})
+	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID,
+		receipt.Options{Sparse: true, Binder: binderOf(t, runs, audits, id)})
 	if err != nil {
 		t.Fatalf("Build sparse: %v", err)
 	}
@@ -283,7 +549,7 @@ func TestSparseReceiptProvesTheLogOnlyAppended(t *testing.T) {
 	}
 
 	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID,
-		receipt.Options{Sparse: true, From: from})
+		receipt.Options{Sparse: true, From: from, Binder: binderOf(t, runs, audits, id)})
 	if err != nil {
 		t.Fatalf("Build with a consistency proof: %v", err)
 	}
@@ -305,7 +571,8 @@ func TestRejectedRunReceiptSaysItWasRejected(t *testing.T) {
 	runs, audits, id, r := held(t, "rejected")
 	ctx := context.Background()
 
-	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID, receipt.Options{})
+	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -332,7 +599,8 @@ func TestReceiptRefusesAChainItsAnchorsDisown(t *testing.T) {
 
 	// Verify the receipt builds while the anchors are satisfied, so the refusal below is the anchor's
 	// doing and not the fixture's.
-	if _, err := receipt.Build(ctx, runs, audits, id, "test", r.ID, receipt.Options{}); err != nil {
+	if _, err := receipt.Build(ctx, runs, audits, id, "test", r.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)}); err != nil {
 		t.Fatalf("Build before anchoring: %v", err)
 	}
 
@@ -355,7 +623,8 @@ func TestReceiptRefusesAChainItsAnchorsDisown(t *testing.T) {
 		t.Fatalf("SaveAnchor: %v", err)
 	}
 
-	_, err = receipt.Build(ctx, runs, audits, id, "test", r.ID, receipt.Options{})
+	_, err = receipt.Build(ctx, runs, audits, id, "test", r.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)})
 	if err == nil {
 		t.Fatal("a receipt was published from a chain that no longer satisfies an anchor recorded " +
 			"over it, so a truncated history was signed as an intact one")
@@ -363,4 +632,583 @@ func TestReceiptRefusesAChainItsAnchorsDisown(t *testing.T) {
 	if !strings.Contains(err.Error(), "anchor") {
 		t.Errorf("error = %v, want it to name the anchor the chain cannot reach", err)
 	}
+}
+
+// preSealOutcome is the outcome body a release before seals committed for the workflow
+// preSealWorkflow builds, byte for byte. It was captured from the outcome package as it stood
+// before the seal fields existed and is never regenerated, since what it pins is what an older
+// binary wrote to a chain that a newer one must still receipt.
+const preSealOutcome = `{"run_id":"run_presealed","status":"succeeded","exit_code":0,"tool":"bash",` +
+	`"started_at":"2026-10-01T12:00:00Z","ended_at":"2026-10-01T12:01:30Z",` +
+	`"log_sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",` +
+	`"spec_digest":"sha256:52eabe17c4cada51c92ad3999bc2ba8856e5c1891f9b825f8382ea8ec4c76c49",` +
+	`"children":[{"run_id":"run_presealed_build","name":"build","index":0,"attempt":1,` +
+	`"status":"succeeded","exit_code":0,` +
+	`"log_sha256":"45960edc3c59bf0464cb0f656ff22742eb452746bab1b7b13ddcedc8c55c5eb8"},` +
+	`{"run_id":"run_presealed_ship","name":"ship","index":1,"attempt":1,"status":"succeeded",` +
+	`"exit_code":0,` +
+	`"log_sha256":"74aef5540c514c97ecae2d2bff31ad8b4713ac0fc5e23ba441538e02dfcca86d"}]}`
+
+// preSealWorkflow builds a workflow that finished before seals existed: a pipeline whose parent and
+// both steps carry outputs, and whose rows carry no seal. Every input to its outcome is fixed, so
+// the body rebuilt from it is comparable byte for byte. It returns the stores and the workflow.
+func preSealWorkflow(t *testing.T) (run.Store, audit.Store, audit.Identity, *run.Run) {
+	t.Helper()
+	ctx := context.Background()
+	runs := run.NewMemStore()
+	audits := audit.NewMemStore()
+	t.Setenv("SWITCHTENDER_AUDIT_KEY", "")
+	id, err := audit.LoadIdentity(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadIdentity: %v", err)
+	}
+	creation := &audit.Entry{
+		ID: audit.NewID(), At: time.Now(), Actor: "casey", ActorType: "session",
+		Method: "POST", Path: "/v1/runs",
+	}
+	if err := audits.Append(ctx, creation); err != nil {
+		t.Fatalf("append creation: %v", err)
+	}
+	started := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	ended := started.Add(90 * time.Second)
+	code := 0
+	parent := &run.Run{
+		ID: "run_presealed", Kind: run.KindPipeline, Status: run.StatusRunning, CreatedAt: started,
+		Tool: run.ToolBash, Actor: "casey", ActorType: "session", AuditReceipt: chainReceipt(creation),
+		Steps: []run.PipelineStep{
+			{Name: "build", Tool: run.ToolBash, Command: "make"},
+			{Name: "ship", Tool: run.ToolBash, Command: "ship it", DependsOn: []string{"build"}},
+		},
+		StartedAt: &started,
+	}
+	if err := runs.Save(ctx, parent); err != nil {
+		t.Fatalf("save workflow: %v", err)
+	}
+	for i, s := range parent.Steps {
+		idx := i
+		child := &run.Run{
+			ID: "run_presealed_" + s.Name, ParentID: &parent.ID, StepIndex: &idx, StepName: s.Name,
+			Attempt: 1, Tool: s.Tool, Command: s.Command, Status: run.StatusRunning,
+			CreatedAt: started, AuditReceipt: parent.AuditReceipt,
+		}
+		if err := runs.Save(ctx, child); err != nil {
+			t.Fatalf("save step %s: %v", s.Name, err)
+		}
+		if err := runs.AppendLog(ctx, child.ID, []byte(s.Name+" output\n")); err != nil {
+			t.Fatalf("append log %s: %v", s.Name, err)
+		}
+		child.Status, child.ExitCode = run.StatusSucceeded, &code
+		child.Outputs = map[string]any{s.Name: "done"}
+		if err := runs.Save(ctx, child); err != nil {
+			t.Fatalf("save finished step %s: %v", s.Name, err)
+		}
+	}
+	parent.Status, parent.ExitCode, parent.EndedAt = run.StatusSucceeded, &code, &ended
+	parent.Outputs = map[string]any{"release": "1.2.3"}
+	if err := runs.Save(ctx, parent); err != nil {
+		t.Fatalf("save finished workflow: %v", err)
+	}
+	return runs, audits, id, parent
+}
+
+// TestReceiptForAWorkflowFinishedBeforeSealsVerifies covers the compatibility the seal fields
+// promise. A receipt rebuilds a run's outcome from the store when it is asked for, so an outcome
+// field that appeared on a row with no seal would rebuild every workflow an older binary finished
+// to bytes its chain never committed, and every one of their receipts would read as forged. The
+// outcome here is committed over the bytes the older binary committed, never over a body rebuilt
+// today, so the receipt is held to the chain an upgrade inherits.
+func TestReceiptForAWorkflowFinishedBeforeSealsVerifies(t *testing.T) {
+	runs, audits, id, wf := preSealWorkflow(t)
+	ctx := context.Background()
+
+	body, err := outcome.Body(ctx, runs, wf)
+	if err != nil {
+		t.Fatalf("outcome.Body: %v", err)
+	}
+	if diff := cmp.Diff(preSealOutcome, string(body)); diff != "" {
+		t.Errorf("an unsealed workflow rebuilds to other bytes than it was committed under "+
+			"(-want +got):\n%s", diff)
+	}
+	committed, err := outcome.Committed([]byte(preSealOutcome))
+	if err != nil {
+		t.Fatalf("outcome.Committed: %v", err)
+	}
+	digest, nonce, err := audit.ExactDigestOf(committed)
+	if err != nil {
+		t.Fatalf("ExactDigestOf: %v", err)
+	}
+	if err := audits.Append(ctx, &audit.Entry{
+		ID: audit.NewID(), At: time.Now(), Actor: "system:dispatcher", ActorType: "system",
+		OnBehalfOf: wf.Actor, Method: audit.MethodRun,
+		Path: audit.OutcomePath(wf.ID, string(wf.Status)), ContentDigest: digest, Nonce: nonce,
+	}); err != nil {
+		t.Fatalf("append outcome: %v", err)
+	}
+
+	res, err := receipt.Build(ctx, runs, audits, id, "test", wf.ID,
+		receipt.Options{Binder: binderOf(t, runs, audits, id)})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(res.Notes) != 0 {
+		t.Errorf("notes = %q, want none for a workflow nothing changed", res.Notes)
+	}
+	rep, err := audit.VerifyBundle(res.Signed, id.KeyID())
+	if err != nil {
+		t.Fatalf("VerifyBundle: %v", err)
+	}
+	if !rep.OK() || !rep.OutcomePresent || !rep.OutcomeDigestOK {
+		t.Fatalf("a receipt for a workflow finished before seals does not verify: ok=%v "+
+			"outcome present=%v digest ok=%v", rep.OK(), rep.OutcomePresent, rep.OutcomeDigestOK)
+	}
+}
+
+// decide claims and settles a held run or approval step with the decision decisionID, the only
+// writes that set the decision a row credits, and returns the row as the store then holds it.
+func decide(t *testing.T, runs run.Store, id, decisionID string, settle run.DecisionSettle) *run.Run {
+	t.Helper()
+	ctx := context.Background()
+	if ok, err := runs.ClaimDecision(ctx, id, decisionID, "claim"); err != nil || !ok {
+		t.Fatalf("ClaimDecision(%s) = %v, %v", id, ok, err)
+	}
+	if ok, err := runs.SettleDecision(ctx, id, decisionID, settle); err != nil || !ok {
+		t.Fatalf("SettleDecision(%s) = %v, %v", id, ok, err)
+	}
+	r, err := runs.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("read decided run %s: %v", id, err)
+	}
+	return r
+}
+
+// releasedWorkflow builds a held workflow an approver released, whose approval step an approver
+// approved and whose deploy step that approval released: the RELEASE entry, naming each decision by
+// the content digest its entry committed, is appended before the step's record is saved, the order
+// the product writes them in. tamper, when set, runs after the release and before the step
+// executes, the window a writer of the database has. It returns the stores, the workflow, the
+// release entry, and the deploy step's id.
+func releasedWorkflow(t *testing.T, tamper func(run.Store, string)) (run.Store, audit.Store,
+	audit.Identity, *run.Run, *audit.Entry, string) {
+	t.Helper()
+	ctx := context.Background()
+	runs := run.NewMemStore()
+	audits := audit.NewMemStore()
+	t.Setenv("SWITCHTENDER_AUDIT_KEY", "")
+	id, err := audit.LoadIdentity(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadIdentity: %v", err)
+	}
+	creation := &audit.Entry{
+		ID: audit.NewID(), At: time.Now(), Actor: "casey", ActorType: "session",
+		Method: "POST", Path: "/v1/runs",
+	}
+	if err := audits.Append(ctx, creation); err != nil {
+		t.Fatalf("append creation: %v", err)
+	}
+	wf := &run.Run{
+		ID: "run_wf", Kind: run.KindPipeline, Status: run.StatusPendingApproval, CreatedAt: time.Now(),
+		Tool: run.ToolBash, Actor: "casey", ActorType: "session", AuditReceipt: chainReceipt(creation),
+		HeldByPolicy: "deploys need a person",
+		Steps: []run.PipelineStep{
+			{Name: "gate", Type: run.StepApproval},
+			{Name: "deploy", Tool: run.ToolBash, Command: "deploy", DependsOn: []string{"gate"}},
+		},
+	}
+	approver := outcome.Decider{Name: "dana", Type: "session"}
+	if err := runs.Save(ctx, wf); err != nil {
+		t.Fatalf("save held workflow: %v", err)
+	}
+	wfDecision := audit.NewID()
+	spec, err := outcome.CommitDecisionWith(ctx, audits, wf, outcome.StepApproved, approver,
+		time.Now, outcome.DecisionExtras{ID: wfDecision})
+	if err != nil {
+		t.Fatalf("CommitDecisionWith: %v", err)
+	}
+	wf = decide(t, runs, wf.ID, wfDecision, run.DecisionSettle{Status: run.StatusRunning,
+		Owner: "test"})
+	wf.ApprovedSpecDigest = spec
+	if wf.ApprovedSpecBinding, err = outcome.SpecBinding(wf); err != nil {
+		t.Fatalf("SpecBinding: %v", err)
+	}
+	if err := runs.Save(ctx, wf); err != nil {
+		t.Fatalf("save approved workflow: %v", err)
+	}
+	wf = sealRow(t, runs, audits, id, wf.ID)
+
+	gateIndex, deployIndex := 0, 1
+	gate := &run.Run{
+		ID: "run_wf_gate", Kind: run.KindApproval, ParentID: &wf.ID, StepIndex: &gateIndex,
+		StepName: "gate", Attempt: 1, Status: run.StatusPendingApproval, CreatedAt: time.Now(),
+	}
+	if err := runs.Save(ctx, gate); err != nil {
+		t.Fatalf("save approval step: %v", err)
+	}
+	state, err := outcome.StepStateOf(ctx, runs, wf, gate)
+	if err != nil {
+		t.Fatalf("StepStateOf: %v", err)
+	}
+	gateDecision := audit.NewID()
+	if _, err := outcome.CommitStepDecisionWith(ctx, audits, state, outcome.StepApproved,
+		approver, time.Now, outcome.DecisionExtras{ID: gateDecision}); err != nil {
+		t.Fatalf("CommitStepDecisionWith: %v", err)
+	}
+	decide(t, runs, gate.ID, gateDecision, run.DecisionSettle{Status: run.StatusSucceeded,
+		EndedAt: time.Now()})
+	sealRow(t, runs, audits, id, gate.ID)
+
+	deploy := &run.Run{
+		ID: "run_wf_deploy", ParentID: &wf.ID, StepIndex: &deployIndex,
+		StepName: "deploy", Attempt: 1, Tool: run.ToolBash, Command: "deploy",
+		ExtraVars: map[string]any{"region": "east"}, Status: run.StatusPending,
+		CreatedAt: time.Now(), AuditReceipt: wf.AuditReceipt, SpecSeal: "bk1:sealed",
+	}
+	steps, err := runs.Steps(ctx, wf.ID)
+	if err != nil {
+		t.Fatalf("Steps: %v", err)
+	}
+	roots := outcome.RootsOf(outcome.ReleaseRoots(wf, deploy, steps), func(id string) string {
+		return chainDigest(t, audits, id)
+	})
+	release, err := outcome.ReleaseEntry(deploy, roots,
+		outcome.Decider{Name: "system:dispatcher", Type: "system", OnBehalfOf: wf.Actor}, time.Now)
+	if err != nil {
+		t.Fatalf("ReleaseEntry: %v", err)
+	}
+	if err := audits.Append(ctx, release); err != nil {
+		t.Fatalf("append release: %v", err)
+	}
+	if err := runs.Save(ctx, deploy); err != nil {
+		t.Fatalf("save released step: %v", err)
+	}
+	if tamper != nil {
+		tamper(runs, deploy.ID)
+	}
+
+	code := 0
+	if err := runs.AppendLog(ctx, deploy.ID, []byte("deployed\n")); err != nil {
+		t.Fatalf("append log: %v", err)
+	}
+	deploy, err = runs.Get(ctx, deploy.ID)
+	if err != nil {
+		t.Fatalf("read released step: %v", err)
+	}
+	deploy.Status, deploy.ExitCode = run.StatusSucceeded, &code
+	if err := runs.Save(ctx, deploy); err != nil {
+		t.Fatalf("save finished step: %v", err)
+	}
+	ended := time.Now()
+	wf.Status, wf.ExitCode, wf.EndedAt = run.StatusSucceeded, &code, &ended
+	if err := runs.Save(ctx, wf); err != nil {
+		t.Fatalf("save finished workflow: %v", err)
+	}
+	if err := outcome.CommitOwed(ctx, audits, runs, wf, "system:test", nil); err != nil {
+		t.Fatalf("CommitOwed: %v", err)
+	}
+	return runs, audits, id, wf, release, deploy.ID
+}
+
+// chainDigest returns the content digest the entry id committed, read from the chain audits
+// streams, or the empty string when the chain holds no entry under id.
+func chainDigest(t *testing.T, audits audit.Store, id string) string {
+	t.Helper()
+	digest := ""
+	err := audits.ChainScan(context.Background(), 0, func(e *audit.Entry) error {
+		if e.ID == id {
+			digest = e.ContentDigest
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("ChainScan: %v", err)
+	}
+	return digest
+}
+
+// releaseClaimOf returns the payload of the claim a signed receipt carries for the release entry
+// at path, nil when the receipt carries none.
+func releaseClaimOf(t *testing.T, signed []byte, path string) map[string]any {
+	t.Helper()
+	var doc audit.Bundle
+	if err := json.Unmarshal(signed, &doc); err != nil {
+		t.Fatalf("parse the receipt: %v", err)
+	}
+	for _, c := range doc.Claims {
+		method, _ := c.Payload["method"].(string)
+		gotPath, _ := c.Payload["path"].(string)
+		if method == audit.MethodRelease && gotPath == path {
+			return c.Payload
+		}
+	}
+	return nil
+}
+
+// TestReceiptDisclosesWhatADecisionReleased covers the release disclosure. A gated step's RELEASE
+// entry commits the step a decision released, and the receipt discloses that body beside the entry,
+// rebuilt from the stored step, so a reader can prove the chain committed it and hold it to the
+// step the workflow's outcome says ran. Each decision that released the step is named by the
+// content digest its entry holds in the receipt's segment, and by an empty digest when the segment
+// holds no such entry. A step rewritten after its release, a decision swapped on the approval step
+// that released it, or that decision's entry rewritten on the chain rebuilds to a body the
+// committed digest refuses, and the body is disclosed anyway rather than dropped.
+//
+//nolint:funlen // Test function.
+func TestReceiptDisclosesWhatADecisionReleased(t *testing.T) {
+	tests := []struct {
+		Tamper       func(run.Store, string)
+		Wrap         func(run.Store) run.Store
+		WrapAudits   func(run.Store, audit.Store) audit.Store
+		Name         string
+		WantVerifies bool
+	}{{ // Test 0: Nothing changed, so the disclosed release is the one the chain committed.
+		Name: "untouched", WantVerifies: true,
+	}, { // Test 1: The step's command is rewritten after its release and before it runs.
+		Name: "step rewritten", Tamper: rewriteStep(func(c *run.Run) {
+			c.Command = "deploy --everywhere"
+		}),
+	}, { // Test 2: The step's inputs are rewritten after its release and before it runs.
+		Name: "inputs rewritten", Tamper: rewriteStep(func(c *run.Run) {
+			c.ExtraVars = map[string]any{"region": "west"}
+		}),
+	}, { // Test 3: The approval step is made to name another decision than the one that released.
+		Name: "gate decision swapped", Wrap: func(runs run.Store) run.Store {
+			return &decisionSwapped{Store: runs, id: "run_wf_gate", decisionID: audit.NewID()}
+		},
+	}, { // Test 4: The approval step's decision entry is rewritten on the chain after the release.
+		Name: "gate decision entry rewritten",
+		WrapAudits: func(runs run.Store, audits audit.Store) audit.Store {
+			gate, err := runs.Get(context.Background(), "run_wf_gate")
+			if err != nil {
+				panic(err)
+			}
+			return &digestRewritten{Store: audits, id: gate.DecisionID,
+				digest: "sha256s:" + strings.Repeat("0", 64)}
+		},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			runs, audits, id, wf, release, deployID := releasedWorkflow(t, test.Tamper)
+			ctx := context.Background()
+			if test.Wrap != nil {
+				runs = test.Wrap(runs)
+			}
+			if test.WrapAudits != nil {
+				audits = test.WrapAudits(runs, audits)
+			}
+
+			res, err := receipt.Build(ctx, runs, audits, id, "test", wf.ID,
+				receipt.Options{Binder: binderOf(t, runs, audits, id)})
+			if err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+			rep, err := audit.VerifyBundle(res.Signed, id.KeyID())
+			if err != nil {
+				t.Fatalf("VerifyBundle: %v", err)
+			}
+			if test.WantVerifies && !rep.OK() {
+				t.Fatalf("a receipt carrying a release does not verify: %+v", rep)
+			}
+			claim := releaseClaimOf(t, res.Signed, release.Path)
+			if claim == nil {
+				t.Fatal("the receipt carries no claim for the release entry, which lies inside the " +
+					"workflow's segment")
+			}
+			if nonce, _ := claim["release_nonce"].(string); nonce != release.Nonce {
+				t.Errorf("release_nonce = %q, want the entry's nonce", nonce)
+			}
+			bodyObj, ok := claim["release_body"].(map[string]any)
+			if !ok {
+				t.Fatalf("the release claim discloses no release body: %v", claim)
+			}
+			raw, err := json.Marshal(bodyObj)
+			if err != nil {
+				t.Fatalf("marshal release_body: %v", err)
+			}
+			canonical, err := jcs.Canonicalize(raw)
+			if err != nil {
+				t.Fatalf("canonicalize release_body: %v", err)
+			}
+			verifies := audit.VerifyCanonicalDigest(release.ContentDigest, release.Nonce, canonical)
+			if verifies != test.WantVerifies {
+				t.Errorf("the disclosed release verifies = %v, want %v: %s", verifies,
+					test.WantVerifies, canonical)
+			}
+
+			// The release names each decision the stored rows name by the digest the chain holds
+			// for it, read here straight from the chain rather than through the receipt.
+			var rel outcome.ReleaseRecord
+			if err := json.Unmarshal(raw, &rel); err != nil {
+				t.Fatalf("decode release_body: %v", err)
+			}
+			gate, err := runs.Get(ctx, "run_wf_gate")
+			if err != nil {
+				t.Fatalf("read approval step: %v", err)
+			}
+			var wantRoots []outcome.ReleaseRoot
+			for _, did := range []string{wf.DecisionID, gate.DecisionID} {
+				wantRoots = append(wantRoots, outcome.ReleaseRoot{ID: did,
+					ContentDigest: chainDigest(t, audits, did)})
+			}
+			slices.SortFunc(wantRoots, func(a, b outcome.ReleaseRoot) int {
+				return strings.Compare(a.ID, b.ID)
+			})
+			if diff := cmp.Diff(wantRoots, rel.Roots); diff != "" {
+				t.Errorf("release roots mismatch (-want +got):\n%s", diff)
+			}
+			if !test.WantVerifies {
+				return
+			}
+
+			// The release names the step the outcome says ran, by the spec digest both carry.
+			text := disclosedOutcomeText(t, res.Signed, wf.ID)
+			rec, err := outcome.Parse([]byte(text))
+			if err != nil {
+				t.Fatalf("parse disclosed outcome: %v", err)
+			}
+			at := slices.IndexFunc(rec.Children, func(c outcome.RecordChild) bool {
+				return c.RunID == deployID
+			})
+			if at < 0 {
+				t.Fatalf("the outcome does not name the released step: %s", text)
+			}
+			if got := rec.Children[at].SpecDigest; got == "" || got != rel.SpecDigest {
+				t.Errorf("the outcome names the released step with spec digest %q, want the "+
+					"release's %q", got, rel.SpecDigest)
+			}
+		})
+	}
+}
+
+// rewriteStep returns a tamper that rewrites the released step's row through an ordinary save, the
+// write a database writer has.
+func rewriteStep(edit func(*run.Run)) func(run.Store, string) {
+	return func(runs run.Store, id string) {
+		ctx := context.Background()
+		c, err := runs.Get(ctx, id)
+		if err != nil {
+			panic(err)
+		}
+		edit(c)
+		if err := runs.Save(ctx, c); err != nil {
+			panic(err)
+		}
+	}
+}
+
+// decisionSwapped is a run store whose copy of one row names another decision than the one that
+// won it, the column a database writer can rewrite where no save of this product can.
+type decisionSwapped struct {
+	run.Store
+	// id is the row whose decision is swapped.
+	id string
+	// decisionID is the decision the row is made to name.
+	decisionID string
+}
+
+// Get returns the row with its decision swapped when it is the row id names.
+func (s *decisionSwapped) Get(ctx context.Context, id string) (*run.Run, error) {
+	r, err := s.Store.Get(ctx, id)
+	if err == nil && r.ID == s.id {
+		r.DecisionID = s.decisionID
+	}
+	return r, err
+}
+
+// Steps returns a workflow's step rows with the one id names carrying the swapped decision.
+func (s *decisionSwapped) Steps(ctx context.Context, parentID string) ([]*run.Run, error) {
+	steps, err := s.Store.Steps(ctx, parentID)
+	for _, r := range steps {
+		if r.ID == s.id {
+			r.DecisionID = s.decisionID
+		}
+	}
+	return steps, err
+}
+
+// digestRewritten is an audit store whose copy of one entry commits another content digest than the
+// one appended, with every entry from it on linked again over the rewrite, the chain a database
+// writer can leave behind. The links are plain hashes, so the rewritten chain verifies on its own,
+// and only the bodies committed before the rewrite still name the digest it replaced.
+type digestRewritten struct {
+	audit.Store
+	// id is the entry whose digest is rewritten.
+	id string
+	// digest is the content digest the entry is made to commit.
+	digest string
+}
+
+// ChainScan streams the rewritten chain above afterSeq. It reads from the start, since each link
+// is computed over the one before it.
+func (s *digestRewritten) ChainScan(ctx context.Context, afterSeq int64,
+	fn func(*audit.Entry) error) error {
+	prev, relinking := "", false
+	return s.Store.ChainScan(ctx, 0, func(e *audit.Entry) error {
+		rewritten := *e
+		if rewritten.ID == s.id {
+			rewritten.ContentDigest = s.digest
+			relinking = true
+		}
+		if relinking {
+			rewritten.PrevHash = prev
+			rewritten.Hash = audit.EntryHash(&rewritten)
+		}
+		prev = rewritten.Hash
+		if rewritten.Seq <= afterSeq {
+			return nil
+		}
+		return fn(&rewritten)
+	})
+}
+
+// TestSparseReceiptCarriesTheReleaseWithoutItsBody covers the other shape. A sparse receipt
+// discloses this run's own entries, and a release's path names the workflow, so the release travels
+// proved by its audit path; nothing is added beside it, since a tree leaf commits its whole claim.
+func TestSparseReceiptCarriesTheReleaseWithoutItsBody(t *testing.T) {
+	runs, audits, id, wf, release, _ := releasedWorkflow(t, nil)
+	ctx := context.Background()
+
+	res, err := receipt.Build(ctx, runs, audits, id, "test", wf.ID,
+		receipt.Options{Sparse: true, Binder: binderOf(t, runs, audits, id)})
+	if err != nil {
+		t.Fatalf("Build sparse: %v", err)
+	}
+	rep, err := audit.VerifyBundle(res.Signed, id.KeyID())
+	if err != nil {
+		t.Fatalf("VerifyBundle: %v", err)
+	}
+	if !rep.OK() {
+		t.Fatalf("a sparse receipt carrying a release does not verify: %+v", rep)
+	}
+	claim := releaseClaimOf(t, res.Signed, release.Path)
+	if claim == nil {
+		t.Fatal("the sparse receipt leaves out the release, whose path names the workflow")
+	}
+	for _, member := range []string{"release_body", "release_nonce"} {
+		if _, ok := claim[member]; ok {
+			t.Errorf("a sparse receipt carries %q, which makes its own leaf recompute differently",
+				member)
+		}
+	}
+}
+
+// disclosedOutcomeText returns the outcome body a signed contiguous receipt discloses for a run.
+func disclosedOutcomeText(t *testing.T, signed []byte, runID string) string {
+	t.Helper()
+	var doc audit.Bundle
+	if err := json.Unmarshal(signed, &doc); err != nil {
+		t.Fatalf("parse the receipt: %v", err)
+	}
+	for _, c := range doc.Claims {
+		method, _ := c.Payload["method"].(string)
+		path, _ := c.Payload["path"].(string)
+		if method != audit.MethodRun || !strings.HasPrefix(path, "/runs/"+runID+"/outcome/") {
+			continue
+		}
+		text, ok := c.Payload["outcome_body"].(string)
+		if !ok {
+			t.Fatalf("the receipt's outcome claim discloses no outcome text: %v", c.Payload)
+		}
+		return text
+	}
+	t.Fatalf("the receipt has no outcome claim for %s", runID)
+	return ""
 }

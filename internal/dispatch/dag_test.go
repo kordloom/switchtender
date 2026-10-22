@@ -7,11 +7,16 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/event"
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -526,9 +531,9 @@ func TestStepOutputsDoesNotResurrectRun(t *testing.T) {
 		t.Fatalf("Save(done) error = %v", err)
 	}
 
-	outputs := d.stepOutputs(stale)
-	if outputs["version"] != "1.2.3" {
-		t.Fatalf("outputs = %v, want the published version", outputs)
+	outputs, reason := d.stepOutputs(stale)
+	if outputs["version"] != "1.2.3" || reason != "" {
+		t.Fatalf("outputs = %v refused for %q, want the published version", outputs, reason)
 	}
 
 	got, err := store.Get(ctx, "run_step")
@@ -541,5 +546,135 @@ func TestStepOutputsDoesNotResurrectRun(t *testing.T) {
 	}
 	if got.Outputs["version"] != "1.2.3" {
 		t.Errorf("stored outputs = %v, want recorded", got.Outputs)
+	}
+}
+
+// TestDenyPathNeedsARecordedVerdict pins that an approval step reading as denied or timed out takes
+// its deny path only on a verdict the chain records for it. A writer who flips a waiting step to
+// rejected or failed, points it at an entry that records something else, or removes its recorded
+// denial gets neither path: the workflow fails with the reason. A chain that cannot be read leaves
+// the step unverified, which fails the workflow without calling the step changed.
+//
+//nolint:funlen // Test function.
+func TestDenyPathNeedsARecordedVerdict(t *testing.T) {
+	t.Parallel()
+	// result is how the workflow ended and which paths ran.
+	type result struct {
+		// Status is the workflow's final status.
+		Status run.Status
+		// Deploy counts runs of the approve path.
+		Deploy int
+		// Notify counts runs of the deny path.
+		Notify int
+		// Prefix is the part of the workflow's error before its first colon.
+		Prefix string
+	}
+	tests := []struct {
+		// Name labels the case.
+		Name string
+		// Deny denies the step through DecideStep, which records the denial.
+		Deny bool
+		// Forge settles the step with this status as a writer would, recording nothing.
+		Forge run.Status
+		// Request makes the forged settle name the step's own request entry as its decision.
+		Request bool
+		// Hide removes every recorded denial from the chain as it is read back.
+		Hide bool
+		// Fail makes every read of the chain by id fail.
+		Fail bool
+		// WantResult is how the workflow ends.
+		WantResult result
+	}{{ // Test 0: A recorded denial runs the deny path.
+		Name: "recorded denial", Deny: true,
+		WantResult: result{Status: run.StatusSucceeded, Notify: 1},
+	}, { // Test 1: A step flipped to rejected with nothing recorded runs neither path.
+		Name: "flipped to rejected", Forge: run.StatusRejected,
+		WantResult: result{Status: run.StatusFailed, Prefix: "refused"},
+	}, { // Test 2: A step flipped to failed, a timeout nobody recorded, runs neither path.
+		Name: "flipped to failed", Forge: run.StatusFailed,
+		WantResult: result{Status: run.StatusFailed, Prefix: "refused"},
+	}, { // Test 3: A step settled rejected naming its request entry runs neither path.
+		Name: "request named as denial", Forge: run.StatusRejected, Request: true,
+		WantResult: result{Status: run.StatusFailed, Prefix: "refused"},
+	}, { // Test 4: A denial whose entry was removed from the chain runs neither path.
+		Name: "denial removed", Deny: true, Hide: true,
+		WantResult: result{Status: run.StatusFailed, Prefix: "refused"},
+	}, { // Test 5: A denial the chain cannot be read back for is unverified, and runs neither path.
+		Name: "chain unreadable", Deny: true, Fail: true,
+		WantResult: result{Status: run.StatusFailed, Prefix: "could not verify"},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			store := run.NewMemStore()
+			chain := &bndChain{Store: audit.NewMemStore()}
+			runner := &commandRecorder{}
+			first := New(store, runner, nil, WithNoJanitor(), WithAudits(chain))
+			parent, err := first.SubmitPipeline(ctx, "release", "", gatedWorkflow(0, true))
+			if err != nil {
+				t.Fatalf("SubmitPipeline() error = %v", err)
+			}
+			node := waitParked(t, store, parent.ID)
+			first.Close()
+
+			switch {
+			case test.Hide:
+				chain.set(func(e *audit.Entry) *audit.Entry {
+					if strings.HasSuffix(e.Path, "/decision/"+outcome.StepRejected) {
+						return nil
+					}
+					return e
+				}, 0)
+			case test.Fail:
+				chain.set(nil, -1)
+			}
+			d := New(store, runner, nil, WithNoJanitor(), WithAudits(chain))
+			defer d.Close()
+			switch {
+			case test.Deny:
+				if _, err := d.DecideStep(ctx, node.ID, StepDecision{Reason: "not today",
+					By: bndDecider()}); err != nil {
+					t.Fatalf("DecideStep() error = %v", err)
+				}
+			case test.Request:
+				id := ""
+				entries, err := chain.Chain(ctx)
+				if err != nil {
+					t.Fatalf("Chain() error = %v", err)
+				}
+				for _, e := range entries {
+					if e.Path == outcome.StepDecisionPath(parent.ID, node.ID, outcome.StepRequested) {
+						id = e.ID
+					}
+				}
+				claim := fmt.Sprintf(`{"id":%q,"verdict":"rejected","step":true,"status":"rejected"}`, id)
+				if ok, err := store.ClaimDecision(ctx, node.ID, id, claim); err != nil || !ok {
+					t.Fatalf("ClaimDecision() = (%v, %v), want (true, nil)", ok, err)
+				}
+				if ok, err := store.SettleDecision(ctx, node.ID, id, run.DecisionSettle{
+					Status: test.Forge, Error: "denied by an approver", EndedAt: time.Now(),
+				}); err != nil || !ok {
+					t.Fatalf("SettleDecision() = (%v, %v), want (true, nil)", ok, err)
+				}
+				d.sweepApprovalSteps()
+			default:
+				if ok, err := store.SettleHeld(ctx, node.ID, run.Finalization{Status: test.Forge,
+					EndedAt: time.Now(), Error: "denied by an approver"}); err != nil || !ok {
+					t.Fatalf("SettleHeld() = (%v, %v), want (true, nil)", ok, err)
+				}
+				d.sweepApprovalSteps()
+			}
+			got := waitTerminal(t, store, parent.ID)
+			prefix, _, _ := strings.Cut(got.Error, ":")
+			res := result{Status: got.Status, Deploy: runner.count("deploy"),
+				Notify: runner.count("notify"), Prefix: prefix}
+			if diff := cmp.Diff(test.WantResult, res); diff != "" {
+				t.Errorf("workflow mismatch (-want +got):\n%s\nerror: %s", diff, got.Error)
+			}
+			if strings.Contains(got.Error, "connection") {
+				t.Errorf("error = %q, want the store's own error kept out of it", got.Error)
+			}
+		})
 	}
 }

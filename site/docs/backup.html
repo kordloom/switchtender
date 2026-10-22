@@ -60,7 +60,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime">Managed Ansible runtime</a><a href="/docs/backup" class="active">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime">Managed Ansible runtime</a><a href="/docs/backup" class="active">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a><a href="/docs/witness">Hosted witness</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -101,18 +101,52 @@ sits in the state directory beside the database and is what makes a bundle attri
 every entry and a tree anchor's Merkle leaves are bound to the install id derived from that key. A
 deployment restored without it will not mint a replacement: once a chain names an install, the server and
 every command refuse to sign or bind as another one, because a new key would sign as a different install
-and no earlier entry would verify under it. The server still starts and records the chain, unbound, and a
-request for a signed bundle answers <code>409</code> naming the key it needs. Commands that record a change still
-record it, unbound, and say why. Copy the file with the same care as the encryption key, and keep it out
-of the same place if you keep the backup somewhere a reader could reach both. The remedy for a missing
-key is to restore it.</p>
+and no earlier entry would verify under it. The server refuses to start, keyed or unkeyed, since a server
+without the key over that chain would check no seal and pass no gate beside servers that hold it.
+Commands that record a change still record it, unbound, and say why, so a backup can still be taken. Copy
+the file with the same care as the encryption key, and keep it out of the same place if you keep the
+backup somewhere a reader could reach both. The remedy for a missing key is to restore it. With no copy
+anywhere, see <a href="#signing-key-lost">Signing key lost</a>.</p>
 <p>Against PostgreSQL there is no directory beside the database, so the key has to be supplied rather than
 found: set <code>SWITCHTENDER_AUDIT_KEY</code> to one seed on every process, or place the same <code>producer-key.json</code> in
 each host's identity directory. A shared database with no identity supplied will not mint a per-host key,
 because two replicas signing as two installs is a fleet whose own anchors disagree with it. The server
 still starts and still records the chain. It warns, and runs with the chain unattributed and unbound, so
 its entries commit to no install and its receipts can be lifted onto another one. Supply the key before
-the receipts matter to anybody.</p>
+the receipts matter to anybody. Once any process has signed the chain, a process without the seed refuses
+to start. The first keyed start binds the chain, so from then on no replica without the key runs beside
+the ones that hold it.</p>
+<h2 id="signing-key-lost">Signing key lost</h2>
+<p>A server that finds the chain bound to an install whose key it does not hold refuses to start. If a copy
+of <code>producer-key.json</code> or the seed exists anywhere, put it back: the server starts keyed over the same
+chain. A new key would sign as a different install, and no earlier entry would verify under it, so there
+is no command that hands the chain to another key.</p>
+<p>With no copy anywhere, the chain cannot be signed again, and the install starts again as a new one:</p>
+<ol>
+<li>Stop every server.</li>
+<li>Take a backup of the install with <code>switchtender backup</code>. Commands still record unbound, so this works
+without the key.</li>
+<li>Restore it into a new, empty database with <code>switchtender restore --db &lt;new database&gt;</code>.</li>
+<li>Start the server there with a new key. A SQLite install mints one beside the new file. A shared
+database takes a new <code>SWITCHTENDER_AUDIT_KEY</code> on every process.</li>
+<li>Publish the new fingerprint, enroll the new key with the witness, and have each person link their
+forge account again.</li>
+<li>Keep the old database read-only as an archive.</li>
+</ol>
+<p>The new chain opens with the restore and its provenance entry, which carries the instant the backup was
+taken and its counts, then the empty adoption record of the first keyed start. That boundary is written
+by the install that owns it.</p>
+<p>What it costs:</p>
+<ul>
+<li>Runs waiting or in flight never execute, since nothing can check their seals, so they are resubmitted
+on the new install.</li>
+<li>Run and estate history stay in the old database.</li>
+<li>Bundles, receipts, anchors and witness statements made before the loss verify against the old pinned
+key as they always did. Nothing exports the old chain again, so history on it that no bundle exported
+before the loss is not evidence anyone can sign.</li>
+<li>The witness keeps the old install's record at its last countersigned head, and the new install enrolls
+as a new record under its new key. Anyone pinning the old fingerprint sees the change.</li>
+</ul>
 <h2 id="how-it-is-secured">How it is secured</h2>
 <p>The whole backup is sealed with the deployment's encryption key using AES-256-GCM before it is
 written, so the file is both confidential and tamper-evident:</p>

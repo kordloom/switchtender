@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
 	named "github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
@@ -80,7 +81,8 @@ func approvalStepRun(parent *run.Run, step run.PipelineStep, idx int, at time.Ti
 // openApprovalStep records that the workflow reached an approval step and is waiting for a person:
 // the step's record, then the request on the audit chain, then the notification. The request is
 // appended fail-closed. A step whose request the chain does not hold is settled failed and returned
-// with the error, so the walk takes its deny path rather than waiting on a request with no record.
+// with the error, and the walk fails the workflow rather than wait on a request with no record or
+// run a deny path for a denial nobody made.
 func (d *Dispatcher) openApprovalStep(ctx context.Context, parent *run.Run, step run.PipelineStep,
 	idx int) (*run.Run, error) {
 	// The store's clock, because the timeout sweep ages the request with it.
@@ -89,6 +91,11 @@ func (d *Dispatcher) openApprovalStep(ctx context.Context, parent *run.Run, step
 		at = time.Now()
 	}
 	node := approvalStepRun(parent, step, idx, at)
+	if err := d.sealNew(node, func() (binding.Record, error) {
+		return binding.StepRecord(parent, node, nil)
+	}); err != nil {
+		return nil, fmt.Errorf("seal approval step: %w", err)
+	}
 	save := func() error { return d.store.Save(context.Background(), node) }
 	if err := withRetries(save); err != nil {
 		return nil, fmt.Errorf("save approval step: %w", err)
@@ -116,10 +123,23 @@ func (d *Dispatcher) openApprovalStep(ctx context.Context, parent *run.Run, step
 	return node, nil
 }
 
-// checkStepBinding reports whether an approved step still matches the state it was approved for.
-// The binding was stamped when the approval was recorded; a workflow whose finished steps or
-// published values changed since then is not the workflow the approver released.
+// checkStepBinding reports whether an approved step still matches the state it was approved for. A
+// workflow whose finished steps or published values changed since the approval is not the workflow
+// the approver released. On a dispatcher with a binding key the step is held to the seal minted when
+// it was approved, which names the workflow, the step's DECISION entry, and the state, so a row and
+// its stamp rewritten together are refused as well, and its reads are not ended by the walk's
+// cancellation, so a shutdown is never recorded as a step that could not be verified. Without a key
+// it is held to the binding stamped when the approval was recorded.
 func (d *Dispatcher) checkStepBinding(ctx context.Context, parent, node *run.Run) error {
+	if d.binder != nil {
+		read := context.WithoutCancel(ctx)
+		state, err := outcome.StepStateOf(read, d.store, parent, node)
+		if err != nil {
+			return fmt.Errorf("%w: approval step %q (run %s): rebuild the workflow state: %w",
+				binding.ErrUnverified, node.StepName, node.ID, err)
+		}
+		return d.binder.Gate(read, parent, node, state)
+	}
 	if node.ApprovedSpecBinding == "" {
 		// Stamped before the record is settled, so an approved step without one was not approved
 		// through DecideStep.
@@ -145,10 +165,11 @@ func (d *Dispatcher) checkStepBinding(ctx context.Context, parent, node *run.Run
 // DecideStep approves or denies a workflow approval step. It applies the rules a held run's
 // decision does: an agent never approves, the person who launched the workflow cannot approve it
 // when the rule in force requires a different approver, and the decision is committed to the chain
-// before it takes effect, binding the decider to the digest of the state they decided on. The
-// decision first claims the step in one compare-and-set, so of two deciders racing, or a decider
-// racing the timeout or a cancel, exactly one wins and only the winner is recorded. A workflow
-// parked at the step is then resumed by this process.
+// before it takes effect, binding the decider to the digest of the state they decided on. On a
+// dispatcher with a binding key the step and its workflow must still be as this process sealed
+// them. The decision first claims the step in one compare-and-set, so of two deciders racing, or a
+// decider racing the timeout or a cancel, exactly one wins and only the winner is recorded. A
+// workflow parked at the step is then resumed by this process.
 func (d *Dispatcher) DecideStep(ctx context.Context, id string, dec StepDecision) (*run.Run, error) {
 	node, err := d.store.Get(ctx, id)
 	if err != nil {
@@ -166,6 +187,12 @@ func (d *Dispatcher) DecideStep(ctx context.Context, id string, dec StepDecision
 	}
 	if parent.CancelRequested || parent.Status.Terminal() {
 		return nil, fmt.Errorf("%w: the workflow is %s", ErrNotPendingApproval, parent.Status)
+	}
+	// The workflow, then the step, are held to the seals this process made when it created them,
+	// before the separation-of-duties flag is read or anything is recorded, so a flag a writer
+	// cleared lets nobody release a step they launched under a seal made over the cleared flag.
+	if err := d.sealRefusal(ctx, parent, node); err != nil {
+		return nil, err
 	}
 	if dec.Approve {
 		// An agent's token cannot reach an approval at the door, and this holds the line again where
@@ -190,7 +217,7 @@ func (d *Dispatcher) DecideStep(ctx context.Context, id string, dec StepDecision
 	if dec.Shown != "" && dec.Shown != digest {
 		return nil, fmt.Errorf("%w: you were shown %s and it is now %s", ErrStateMoved, dec.Shown, digest)
 	}
-	binding, err := state.Binding()
+	stateBinding, err := state.Binding()
 	if err != nil {
 		return nil, fmt.Errorf("bind the approval step state: %w", err)
 	}
@@ -216,7 +243,7 @@ func (d *Dispatcher) DecideStep(ctx context.Context, id string, dec StepDecision
 	// The step is stamped with what it was decided on whichever way it went, so a resumed walk can
 	// hold an approval to the state it was given for.
 	c := &decisionClaim{ID: rec.ID, Verdict: verdict, Step: true, Status: status, Error: reason,
-		Digest: digest, Binding: binding}
+		Digest: digest, Binding: stateBinding}
 	if d.audits != nil {
 		entry, _, err := outcome.StepDecisionEntry(state, verdict, dec.By, d.now,
 			outcome.ExtrasOf(rec))
@@ -224,6 +251,17 @@ func (d *Dispatcher) DecideStep(ctx context.Context, id string, dec StepDecision
 			return nil, fmt.Errorf("record the approval step decision: %w", err)
 		}
 		c.Entry = claimEntryOf(entry)
+		// An approval is sealed over the state it was given for and the entry that records it, so
+		// a resumed walk holds the step to both. A denial releases only the deny path, which is
+		// held to the verdict the chain records instead.
+		if d.binder != nil && dec.Approve {
+			gate, err := binding.GateRecord(parent, binding.AsStamped(node, digest, stateBinding),
+				stateBinding, binding.PreparedRootOf(entry))
+			if err != nil {
+				return nil, fmt.Errorf("seal the approval step decision: %w", err)
+			}
+			c.Seal = d.binder.Key.Seal(gate)
+		}
 	}
 	if _, err := d.decide(ctx, node.ID, rec, c); err != nil {
 		return nil, decisionError("approval step decision", err)
@@ -247,6 +285,17 @@ func (d *Dispatcher) timeOutStep(ctx context.Context, node *run.Run) bool {
 	}
 	parent, err := d.store.Get(ctx, *node.ParentID)
 	if err != nil {
+		return false
+	}
+	// The step's row says when it times out, so a writer who backdated it, or gave it a timeout it
+	// was never built with, would have the deny path run on terms nobody set. The workflow and the
+	// step are held to their seals first, as a person's decision is. A step that fails is not timed
+	// out: neither of its paths runs, and the workflow fails with the reason. A check that could not
+	// read what it depends on decides nothing, and the next sweep asks again.
+	if err := d.sealRefusal(ctx, parent, node); err != nil {
+		if errors.Is(err, binding.ErrDrift) {
+			d.refuseWaiting(ctx, parent, RefusalText(err))
+		}
 		return false
 	}
 	c := &decisionClaim{ID: audit.NewID(), Verdict: outcome.StepTimedOut, Step: true,
@@ -276,6 +325,33 @@ func (d *Dispatcher) timeOutStep(ctx context.Context, node *run.Run) bool {
 	}
 	d.resumeParked(d.ctx, parent.ID)
 	return true
+}
+
+// refuseWaiting fails a workflow parked at an approval step whose row, or the workflow's, failed its
+// seal when the sweep came to time the step out. The step is not decided, so neither of its paths
+// runs, the way a walk refuses a step. The workflow is taken under this process's lease first, so of
+// every replica's sweep exactly one ends it, and its waiting steps are withdrawn before it ends.
+func (d *Dispatcher) refuseWaiting(ctx context.Context, parent *run.Run, reason string) {
+	if d.coordinating(parent.ID) {
+		return
+	}
+	ok, err := d.store.TransitionStatusAndClaim(ctx, parent.ID, run.StatusPendingApproval,
+		run.StatusRunning, d.owner, time.Time{})
+	if err != nil || !ok {
+		return
+	}
+	cur, err := d.storeGetWithRetries(ctx, parent.ID)
+	if err != nil {
+		// The lease is ours and nothing walks the workflow, so the lease sweep settles it once the
+		// lease ages out.
+		d.log.Error("dispatch: read a refused workflow: "+err.Error(), zap.String("run_id", parent.ID))
+		return
+	}
+	d.log.Error("dispatch: an approval step was not timed out: "+reason,
+		zap.String("run_id", parent.ID))
+	d.withdrawSteps(parent.ID)
+	d.finalize(cur, run.StatusFailed, nil, reason)
+	d.publisher.CloseRun(parent.ID)
 }
 
 // resumeParked continues a workflow parked at an approval step, on this process. The parent moves
@@ -510,20 +586,26 @@ func (d *Dispatcher) park(parent *run.Run) bool {
 		}
 		d.log.Error("dispatch: park a workflow: "+err.Error(), zap.String("run_id", parent.ID))
 	}
-	pending, perr := run.PendingApprovalSteps(context.Background(), d.store, parent.ID)
-	if perr != nil {
-		d.log.Error("dispatch: list waiting approval steps: "+perr.Error(),
-			zap.String("run_id", parent.ID))
+	d.withdrawSteps(parent.ID)
+	return false
+}
+
+// withdrawSteps takes every waiting approval step of a workflow that is ending out of the approval
+// queue, so none is left to be approved for a workflow that is gone. A step a decision claimed is
+// not withdrawn: it is finished, so its decision is on the chain before the caller records how the
+// workflow ended.
+func (d *Dispatcher) withdrawSteps(parentID string) {
+	pending, err := run.PendingApprovalSteps(context.Background(), d.store, parentID)
+	if err != nil {
+		d.log.Error("dispatch: list waiting approval steps: "+err.Error(),
+			zap.String("run_id", parentID))
 	}
 	for _, node := range pending {
 		if _, cerr := d.store.CancelPending(context.Background(), node.ID); cerr != nil {
 			d.log.Error("dispatch: withdraw approval step: "+cerr.Error(), zap.String("run_id", node.ID))
 		}
 	}
-	// A step a decision claimed is not withdrawn: it is finished, so its decision is on the chain
-	// before the caller records how the workflow ended.
-	d.finishClaimedSteps(context.Background(), parent.ID)
-	return false
+	d.finishClaimedSteps(context.Background(), parentID)
 }
 
 // handedOff reports whether the store no longer has this process holding the workflow at an

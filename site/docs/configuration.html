@@ -60,7 +60,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration" class="active">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime">Managed Ansible runtime</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration" class="active">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime">Managed Ansible runtime</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a><a href="/docs/witness">Hosted witness</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -147,17 +147,17 @@ believes it has a control it does not have.</p>
 </tr>
 <tr>
 <td><code>SWITCHTENDER_DB</code></td>
-<td>serve, worker</td>
+<td>serve, worker, adopt</td>
 <td>The database when <code>--db</code> is not given: a SQLite file path or a <code>postgres://</code> DSN. A DSN carries its password, and on the command line it shows in the process list and, on Kubernetes, in the pod spec, so a shared deployment names it here instead.</td>
 </tr>
 <tr>
 <td><code>SWITCHTENDER_AUDIT_KEY</code></td>
-<td>serve</td>
-<td>Hex-encoded ed25519 seed for the install's signing identity, which signs the LoomSeal bundles it emits and binds every audit entry to this install. Unset beside a local database, the install mints and stores its own key there. Unset against a shared database it mints nothing, since every process must sign as the same install, and the chain is recorded unattributed and unbound until a seed is supplied to all of them. A malformed value stops startup.</td>
+<td>serve, adopt</td>
+<td>Hex-encoded ed25519 seed for the install's signing identity, which signs the LoomSeal bundles it emits and binds every audit entry to this install. Unset beside a local database, the install mints and stores its own key there. Unset against a shared database it mints nothing, since every process must sign as the same install, and the chain is recorded unattributed and unbound until a seed is supplied to all of them. Once any process has signed the chain, a process without the seed refuses to start. A malformed value stops startup.</td>
 </tr>
 <tr>
 <td><code>SWITCHTENDER_IDENTITY_DIR</code></td>
-<td>serve, audit, receipt</td>
+<td>serve, adopt, audit, receipt</td>
 <td>Directory holding the install's producer signing identity. A SQLite install keeps it beside the database and needs no setting. A postgres install has no filesystem home, so it uses a per-user configuration directory; when the account has no home, as in a container, there is nowhere durable to put a key and startup refuses rather than choosing a path a restart would empty. Point this at a durable path the server owns.</td>
 </tr>
 <tr>
@@ -264,6 +264,11 @@ believes it has a control it does not have.</p>
 <td><code>SWITCHTENDER_WITNESS_TOKEN</code></td>
 <td>witness serve</td>
 <td>Bearer token the witness API requires, read when <code>--api-token</code> is unset.</td>
+</tr>
+<tr>
+<td><code>SWITCHTENDER_WITNESS_NOTIFY_SLACK</code></td>
+<td>witness serve</td>
+<td>Slack incoming webhook URL that receives every finding as a message, read when <code>--notify-slack</code> is not given. The URL is its own credential, and a flag shows in the process list.</td>
 </tr>
 <tr>
 <td><code>SWITCHTENDER_MCP_TOKEN</code></td>
@@ -897,10 +902,34 @@ that variable is unset.</p>
 <td>none</td>
 <td>RFC 3161 timestamp authority the chain anchors against. Empty anchors nothing.</td>
 </tr>
+<tr>
+<td><code>--witness-enrollment</code></td>
+<td>none</td>
+<td>Enrollment file to push each span beat to its witness under. Empty reads <code>witness-enrollment.json</code> beside the license file, and an install with neither pushes nothing. An enrolled install refuses to start without <code>--span-cadence</code> or without a producer identity, since it would run unwitnessed while its enrollment says otherwise. At start it holds the audit chain to the head the witness countersigned, and refuses to start on a chain that does not reach it or on a statement the enrollment does not accept. A witness that does not answer with its signed statement is a warning, and the server starts. A witness outage never blocks the timestamp anchor, and the reverse.</td>
+</tr>
 </tbody>
 </table>
 <p>Retention windows accept a whole number of days with a <code>d</code> suffix, such as <code>30d</code>, or Go duration
 syntax such as <code>720h</code>.</p>
+<h3 id="approval-binding-needs-the-producer-identity">Approval binding needs the producer identity</h3>
+<p>A server that loads the install's producer identity derives an approval binding key from it, held in
+memory and never written anywhere. It seals every run it creates or releases under that key and
+checks the seal before the run executes, so a run whose spec, approval fields, decision, or who
+decided was changed in the database after it was approved is refused rather than run. Every server
+of one install must load the same identity, from the identity directory or from
+<code>SWITCHTENDER_AUDIT_KEY</code>, since a run sealed under one key is refused under another. A relay control
+node checks each run before it hands it to a relay worker. A worker that shares the database holds
+no key, so the runs it claims are held only to the digests stored on them.</p>
+<p>A server with no identity on a chain no install has signed holds no key. It still compares the
+digests stored on each run, and its startup warning says that approval binding is row-checked only,
+which a change written into the database together with matching digests passes. A server that finds
+the chain bound to an install whose key it does not hold refuses to start, as the
+<a href="/docs/backup#signing-key-lost">backup page</a> explains.</p>
+<p>A server that loads an identity refuses to start while work an earlier release left carries no seal
+and the audit chain holds no adoption record, and it names the runs. Run <a href="#adopt">adopt</a> once to
+seal that work, then start the server. A server that loads an identity and finds nothing to adopt
+records the adoption itself at its first start, trusting no row. A start that finds sealed work and
+no adoption record is refused, since the record was removed.</p>
 <h3 id="ai-providers">AI providers</h3>
 <p>The advisory AI features run against one provider, chosen with <code>--ai-provider</code>: <code>ollama</code> for a local
 model, or <code>anthropic</code> and <code>openai</code> for a cloud model with <code>SWITCHTENDER_AI_KEY</code>. The provider is off
@@ -1287,6 +1316,13 @@ of band. Without it the receipt is checked against the key it names, which prove
 but not who signed it, and the verdict says so: <code>INTACT, BUT UNIDENTIFIED</code> rather than <code>VERIFIED</code>.
 A <code>--pubkey</code> given an empty value, which is what a failed key fetch leaves behind, is refused rather
 than treated as no pin.</p>
+<p>An install enrolled with a witness carries the witness's countersignatures in its bundles and
+receipts. Pass <code>--witness-pubkey</code> with the key the witness publishes, in either the sha256 key id or
+the raw hex form, so only that witness's countersignatures are counted, and <code>--witness</code> with the
+statement fetched from the witness at <code>GET /v1/installs/&lt;key id&gt;/attestation</code>, where <code>&lt;key id&gt;</code> is
+the producer key id, so the file is held to the newest head the witness countersigned. A file that
+ends before that head, or a statement that holds nothing yet, is reported as not checkable and never
+reads <code>VERIFIED</code>. An empty <code>--witness-pubkey</code> is refused.</p>
 <h2 id="witness">witness</h2>
 <p>Watches a server's span beat feed from outside it. A chain proves what it holds was not altered, but
 not that nothing was removed from the end, because the process running the chain also decides what
@@ -1341,9 +1377,13 @@ beats off, the witness reports <code>empty_feed</code>, and a <code>--once</code
 <li><code>witness serve</code> watches many servers from one process and answers auditors with countersigned
 attestations.</li>
 <li><code>witness verify-attestation</code> verifies an attestation offline against a pinned witness key.</li>
+<li><code>witness rotate-key</code> retires the witness signing key and makes a new one current.</li>
+<li><code>witness enroll</code> enrolls this install with a push witness that countersigns its chain.</li>
 </ul>
 <h2 id="witness-serve">witness serve</h2>
-<p>Runs the witness. Its flags are checked against that subcommand rather than <code>witness</code> itself.</p>
+<p>Runs the witness. Its flags are checked against that subcommand rather than <code>witness</code> itself. With
+<code>--accept-enrollments</code> it is also a push witness, the one <a href="/docs/witness">the hosted witness page</a>
+describes, and <code>--enrollment-policy open</code> runs it for installs on your own network.</p>
 <table>
 <thead>
 <tr>
@@ -1387,6 +1427,98 @@ attestations.</li>
 <td><code>--webhook</code></td>
 <td>none</td>
 <td>URL that receives every finding as a JSON POST.</td>
+</tr>
+<tr>
+<td><code>--accept-enrollments</code></td>
+<td>off</td>
+<td>Accept enrollments from installs that push their own chain heads. <code>--watch</code> is then optional.</td>
+</tr>
+<tr>
+<td><code>--enrollment-policy</code></td>
+<td><code>licensed</code></td>
+<td>Who may enroll: <code>licensed</code> (a license that includes the hosted witness) or <code>open</code> (any signed enrollment).</td>
+</tr>
+<tr>
+<td><code>--max-installs-per-license</code></td>
+<td><code>10</code></td>
+<td>How many installs one license may enroll.</td>
+</tr>
+</tbody>
+</table>
+<p><code>--notify-slack</code> takes a Slack incoming webhook URL, is repeatable, and is unset by default. The
+witness posts every finding there as a message that names its kind, its class (refusal or note), the
+producer key id of the install it is about or the watched server, and its detail. When the flag is
+not given, the URL in <code>SWITCHTENDER_WITNESS_NOTIFY_SLACK</code> is used, which keeps the URL out of the
+process list. Messages are sent in order from a queue of their own, so an install's push is never
+answered late because Slack is slow. A post that fails is tried once more after two seconds, and a
+second failure is logged with the URL masked. The findings record stays the durable copy either way.</p>
+<h2 id="witness-rotate-key">witness rotate-key</h2>
+<p>Retires the witness signing key and makes a new one current. Stop the witness first and start it
+again after, since a running witness keeps signing with the key it loaded.</p>
+<pre><code>switchtender witness rotate-key --key-dir /var/lib/switchtender-witness-key \
+  --state-dir /var/lib/switchtender-witness
+</code></pre>
+<p>The witness publishes every key it has signed with at <code>/.well-known/loomseal.json</code> and in every
+enrollment answer, each with its <code>valid_from</code> and, once retired, its <code>retired</code> time. After a rotation
+the list is signed by the new key and endorsed by every retired key the key directory still holds,
+so an enrolled install that holds an earlier key accepts the new list on that key's word. An
+attestation a key made before it retired verifies against the list for as long as anyone keeps it.
+The witness keeps reading its own memory signed by a retired key, for memory written before that key
+retired, and signs it with the new key at the next push it adopts. A retried push gets the bytes it
+was first answered with while the witness still holds the key that answered it.</p>
+<p><code>--key-dir</code> is required and names the directory holding the key, the same one <code>witness serve</code> runs
+with. <code>--state-dir</code> names the witness state directory and defaults to <code>switchtender-witness</code>. The
+key directory must not be the state directory, lie inside it, or hold it, because the state
+directory is copied off the host. The retired key stays in the key directory, readable only by the
+account that runs the witness. Back up the whole key directory after a rotation, since its key
+history is part of what the witness publishes. Deleting a retired key's file stops that key
+endorsing anything again, which is the step after a compromise, and an install that held only that
+key then pins the new key by hand. The command prints the retired key and the new current key as
+JSON.</p>
+<h2 id="witness-enroll">witness enroll</h2>
+<p>Enrolls this install with a push witness. The server then sends every span beat to the witness with
+the tree root at that beat and a consistency proof from the root the witness last signed, and stores
+the countersignatures the witness answers with. It needs a license that includes the hosted witness:
+Enterprise, or Team with the add-on. Without one the command refuses and sends nothing.</p>
+<pre><code>switchtender witness enroll --db /var/lib/switchtender/switchtender.db \
+  --witness https://witness.switchtender.com
+</code></pre>
+<p>The command prints the witness key id. Compare it with the id the witness publishes at
+<code>/.well-known/loomseal.json</code> and with the one <a href="/docs/witness#the-witness-key">the hosted witness page</a>
+carries before trusting what it countersigns, or pass <code>--witness-key</code> to refuse any other. The
+enrollment is written to <code>witness-enrollment.json</code> beside the license file, so a
+backup and a restore carry both or neither. It holds no secret. An install whose key was changed
+under its install id through <code>SWITCHTENDER_AUDIT_KEY</code> is refused, since the witness binds an install
+id to the key it was born to. A new install started after its signing key was lost enrolls as a new
+record under its new key, beside the old install's record, which keeps its last countersigned head.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--db</code></td>
+<td><code>switchtender.db</code></td>
+<td>Database of the install to enroll. The license, key, and enrollment are found from it.</td>
+</tr>
+<tr>
+<td><code>--witness</code></td>
+<td>none</td>
+<td>Base URL of the witness. Required unless <code>--refresh-keys</code> is given. It must be https, or plain http to a loopback address (127.0.0.0/8, <code>::1</code>, or <code>localhost</code>).</td>
+</tr>
+<tr>
+<td><code>--witness-key</code></td>
+<td>none</td>
+<td>Witness key id, <code>sha256:...</code>, the witness must sign with. Anything else writes nothing.</td>
+</tr>
+<tr>
+<td><code>--refresh-keys</code></td>
+<td>off</td>
+<td>Fetch the enrolled witness's key list after it rotates, kept only when a held key signed it.</td>
 </tr>
 </tbody>
 </table>
@@ -1590,6 +1722,86 @@ backup was written with, and it never deletes objects absent from the file.</p>
 </tr>
 </tbody>
 </table>
+<h2 id="adopt">adopt</h2>
+<p>Seals, once per install, the work a release with no approval binding key left behind, so a server of
+this release accepts it. Run it after every server and worker of the earlier release has stopped and
+before this release's <code>serve</code> first starts. <a href="/docs/upgrading">Upgrading</a> gives the order.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--db</code></td>
+<td><code>switchtender.db</code></td>
+<td>SQLite file path, or a <code>postgres://</code> DSN, of the install to adopt.</td>
+</tr>
+<tr>
+<td><code>--dry-run</code></td>
+<td><code>false</code></td>
+<td>Print the rows adoption would seal and write nothing.</td>
+</tr>
+<tr>
+<td><code>--yes</code></td>
+<td><code>false</code></td>
+<td>Seal without asking, for a script. The rows are still printed.</td>
+</tr>
+<tr>
+<td><code>--fail-unsealed</code></td>
+<td><code>false</code></td>
+<td>Record the adoption trusting no row, and fail every unfinished run that carries no seal.</td>
+</tr>
+<tr>
+<td><code>--witness-enrollment</code></td>
+<td>none</td>
+<td>Enrollment file of the witness whose countersigned head the audit chain is held to. Empty reads <code>witness-enrollment.json</code> beside the license file, and an install with neither is held to no witness. A named file that is missing or out of form is an error, as for <code>serve</code>. An enrolled adoption pushes a span beat after its record and exits non-zero when that push fails, with the adoption kept.</td>
+</tr>
+</tbody>
+</table>
+<p>Adoption reads every run that has not finished, the finished steps a waiting workflow reads forward,
+and the decisions left in flight, and gives each the seal its kind is held to, from the row as it
+reads and the decision entries it names. A row it cannot seal, such as one whose decision entry is
+not on the chain, is listed with the reason and left unsealed, and a server refuses that row when it
+reaches it. Before the rows, adopt prints the chain's entry count, its newest anchor (type,
+sequence, and reference) or that it has none, and the install the chain is bound to or that this
+adoption binds it. Then it prints every row it seals, with the run id, the kind of seal, who asked
+for the run, who decided it, the decision entry, its spec digest, and its release entry, and a count
+of decision claims whose decisions are not on the chain yet. Compare the anchor with its external
+target, which is the git ref, the published head, or the witness, before answering. Adopt asks
+before it writes. <code>--yes</code> skips the question. Without it, adopt refuses to run where standard input
+is not a terminal.</p>
+<p><code>--yes</code> is for one run by hand. Never put adopt in an entrypoint, a chart hook, an init container,
+or a recurring job. A second adopt on the same install is refused and exits non-zero, which a script
+should expect.</p>
+<p>It refuses, and writes nothing, in each of these cases. Each shows that keyed operation already
+began, so adopting again would seal whatever was written since as though the earlier release had
+left it.</p>
+<ul>
+<li>The audit chain does not verify from its first entry to its last, or no longer reaches an anchor
+recorded over it.</li>
+<li>Any run carries a seal, finished runs included.</li>
+<li>The chain holds a <code>RELEASE</code> entry or an adoption record.</li>
+</ul>
+<p>An install refused for one of the last two reasons that has no copy to restore runs adopt with
+<code>--fail-unsealed</code>. It records the adoption with nothing adopted, so no row is trusted, and fails
+every unfinished run that carries no seal with the reason <code>not adopted</code>. A run that carries a seal
+is left for the server to check when it reaches it, and one it did not make is refused. A run
+still held under a lease, or with a decision or a cancel in flight, is listed and left as it is.
+It still refuses a chain that does not verify and an install whose adoption is already recorded.</p>
+<p>Adopt appends one record to the audit chain, at <code>/runs/adopted</code> under an id the install's key fixes,
+before it writes any seal. A second adopt on the same install is refused and says when and by whom
+the first one ran. The rows it seals are the rows it showed, as they read when it showed them. A row
+changed while the list was on screen carries a seal over what was shown, which a server refuses, and
+a row created meanwhile is not sealed.</p>
+<p>Adopt needs the install's producer identity, the same one <code>serve</code> loads, from the identity directory
+or <code>SWITCHTENDER_AUDIT_KEY</code>. An install with no identity has no key and nothing to adopt, and adopt
+says so. Adopt binds an unbound chain to the key it runs with and names where that key came from, so
+against a PostgreSQL DSN run it with the seed the servers will sign with in
+<code>SWITCHTENDER_AUDIT_KEY</code>. A server whose key names another install refuses to start.</p>
 <h2 id="version">version</h2>
 <p>Prints the SwitchTender version.</p>
 <p><code>--verify</code> fetches this version's published binary hashes and verifies the running executable.</p>

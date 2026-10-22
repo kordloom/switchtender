@@ -442,6 +442,20 @@ type Run struct {
 	// grind candidates against this value. It reaches a relay worker on a header instead, the same
 	// way the claim capability does.
 	ApprovedSpecBinding string `json:"-"`
+	// SpecSeal is the process's keyed seal over this row's spec binding, its governance fields, its
+	// parent's binding, and the chain entries it derives from. The executor recomputes it before it
+	// acts on the row and refuses on any difference, so a writer who can edit the database but does
+	// not hold the key cannot mint one for a row it changed. Empty on a row written before sealing
+	// or by a process without the key.
+	//
+	// It is never serialized, for the reason ApprovedSpecBinding is not: it is checked only inside
+	// the process that minted it.
+	SpecSeal string `json:"-"`
+	// ResultSeal is the process's keyed seal over how a finished row ended, its status and the
+	// digest of its outputs, written by the terminal write. A resumed workflow feeds forward only a
+	// result whose seal verifies. Empty on a row that has not finished or was finished without the
+	// key. It is never serialized, for the same reason as SpecSeal.
+	ResultSeal string `json:"-"`
 	// Intent is the plain-language request an AI turned into this proposed run. A run carrying it
 	// was proposed from a description and is born held for approval, so an approver can judge the
 	// generated run against what was asked before anything executes.

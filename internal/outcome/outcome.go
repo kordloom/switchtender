@@ -141,7 +141,6 @@ type Record struct {
 	Oversize *Oversize `json:"oversize,omitempty"`
 }
 
-// RecordHost is one host's result in a run, the counts an auditor reads.
 // RecordChild is one shard or pipeline step rolled into its coordinator's outcome.
 type RecordChild struct {
 	// RunID is the child's run id.
@@ -158,8 +157,20 @@ type RecordChild struct {
 	ExitCode *int `json:"exit_code"`
 	// LogSHA256 digests the child's captured output, so its stored log can be held against this.
 	LogSHA256 string `json:"log_sha256,omitempty"`
+	// SpecDigest is the child's spec digest, the value the RELEASE entry that released a step names,
+	// so a reader holds the step that ran to the step a decision released. It is present only when
+	// the child's row carries a spec seal, so a coordinator finished before seals existed rebuilds to
+	// the bytes the chain committed for it.
+	SpecDigest string `json:"spec_digest,omitempty"`
+	// OutputsDigest is the digest of the values the child published for the steps after it, taken
+	// over their redacted canonical form the way a spec digest is, so a value that looks like a
+	// secret is never the input to a digest anybody is shown. It is present only when the child's
+	// row carries a result seal, which only a process holding the binding key writes, so a
+	// coordinator finished before seals existed rebuilds to the bytes the chain committed for it.
+	OutputsDigest string `json:"outputs_digest,omitempty"`
 }
 
+// RecordHost is one host's result in a run, the counts an auditor reads.
 type RecordHost struct {
 	// Host is the target host.
 	Host string `json:"host"`
@@ -308,6 +319,24 @@ func logDigest(ctx context.Context, store run.Store, runID string) (string, erro
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// varsDigest returns the disclosed digest of a set of vars, a run's outputs or a step's inputs: the
+// unkeyed digest of their redacted canonical form, the way a spec digest is taken. Nil and empty
+// digest the same, since a store round trip does not keep that difference.
+func varsDigest(vars map[string]any) (string, error) {
+	if vars == nil {
+		vars = map[string]any{}
+	}
+	raw, err := json.Marshal(vars)
+	if err != nil {
+		return "", err
+	}
+	body, err := audit.CanonicalRedacted(raw)
+	if err != nil {
+		return "", err
+	}
+	return audit.UnkeyedDigestOfReduced(body), nil
+}
+
 // Parse decodes a disclosed outcome body, the JSON Body produces, so a verifier can read what a run
 // did after confirming the body matches the digest the chain committed.
 //
@@ -396,9 +425,21 @@ func childRecords(ctx context.Context, store run.Store, r *run.Run) ([]RecordChi
 		if index == nil {
 			index = c.ShardIndex
 		}
+		var specDigest, outputsDigest string
+		if c.SpecSeal != "" {
+			if specDigest, err = SpecDigest(c); err != nil {
+				return nil, err
+			}
+		}
+		if c.ResultSeal != "" {
+			if outputsDigest, err = varsDigest(c.Outputs); err != nil {
+				return nil, err
+			}
+		}
 		out = append(out, RecordChild{
 			RunID: c.ID, Name: c.StepName, Index: index, Attempt: c.Attempt,
 			Status: string(c.Status), ExitCode: c.ExitCode, LogSHA256: logSHA,
+			SpecDigest: specDigest, OutputsDigest: outputsDigest,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {

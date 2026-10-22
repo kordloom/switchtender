@@ -3,13 +3,18 @@ package dispatch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -24,8 +29,18 @@ import (
 // A swap that changes nothing means the parent is no longer where it was left: canceled, already
 // coordinated, or swept. Either way this coordinator does not own it and settles its children
 // instead of starting them.
+//
+// A split or workflow parent never reaches the executor, so it is held to its seal here, before the
+// fence, the way execute holds a run: a parent rewritten after its decision fails with the reason
+// and its children are settled rather than started.
 func (d *Dispatcher) parentMayStart(parent *run.Run, childIDs []string) bool {
 	ctx := context.Background()
+	if reason := d.bindingRefusal(ctx, parent); reason != "" {
+		d.cancelChildren(childIDs)
+		d.finalize(parent, run.StatusFailed, nil, reason)
+		d.publisher.CloseRun(parent.ID)
+		return false
+	}
 	// Retried like every other store write in this file. It is the one write that decides whether a
 	// whole fan-out lives, and under SQLite a single writer with a busy timeout means contention is
 	// expected rather than exceptional, so one busy moment must not hard-fail a healthy split.
@@ -421,6 +436,17 @@ func (d *Dispatcher) coordinatePipeline(parent *run.Run, resumed bool) bool {
 		}
 		d.startParentRow(parent)
 	}
+	// A resumed workflow was claimed by the resume rather than started through the fence, so it is
+	// held to its seal here, before anything is restored from its step records. A refused workflow
+	// takes its waiting steps out of the approval queue and fails with the reason.
+	if resumed {
+		if reason := d.bindingRefusal(pipeCtx, parent); reason != "" {
+			d.withdrawSteps(parent.ID)
+			d.finalize(parent, run.StatusFailed, nil, reason)
+			d.publisher.CloseRun(parent.ID)
+			return false
+		}
+	}
 
 	watchCtx, stopWatch := context.WithCancel(pipeCtx)
 	defer stopWatch()
@@ -512,9 +538,16 @@ type stepsResult struct {
 
 // runStepsLinear executes the steps one after another, stopping at a failure unless the failing
 // step continues on failure. It returns whether any step failed and whether execution was
-// canceled.
+// canceled. A sequence holds no approval step, so every step is released by the workflow's own
+// decision alone, read once here.
 func (d *Dispatcher) runStepsLinear(ctx context.Context, parent *run.Run, steps []run.PipelineStep) stepsResult {
 	var res stepsResult
+	roots, err := d.workflowRoots(ctx, parent)
+	if err != nil {
+		d.log.Error("dispatch: "+err.Error(), zap.String("run_id", parent.ID))
+		res.failed, res.reason = true, RefusalText(err)
+		return res
+	}
 	vars := baseStepVars(parent)
 	for i, step := range steps {
 		if ctx.Err() != nil {
@@ -522,7 +555,13 @@ func (d *Dispatcher) runStepsLinear(ctx context.Context, parent *run.Run, steps 
 			return res
 		}
 
-		status, outputs := d.runStepAttempts(ctx, parent, step, i, cloneVars(vars))
+		status, outputs, reason := d.runStepAttempts(ctx, parent, step, i, cloneVars(vars), roots)
+		if reason != "" {
+			// A step whose release was refused never ran, so continuing past it is not a choice the
+			// author's continue on failure made.
+			res.failed, res.reason = true, reason
+			return res
+		}
 		// A step whose executor died is an interrupt, and one the coordinator stopped is a cancel.
 		// The two look alike here and are not: only the interrupt is the state a rerun resumes
 		// from, so the parent has to be told which happened rather than folding both into stopped.
@@ -684,49 +723,284 @@ func stepRun(parent *run.Run, step run.PipelineStep, idx, attempt int, vars map[
 // is spent. Every attempt is its own child run with an attempt number, so each try keeps a full
 // matrix, events, and history. The step receives vars as its extra vars, and on success the
 // values it published with set_stats come back for its dependents.
+//
+// roots are the chain entries that released the step, in the order the walk names them, empty for
+// a step nothing decided on. An attempt with roots is released on the chain before its record is
+// stored. The reason is empty unless an attempt was refused, before anything of it was stored or
+// once it succeeded because its stored result no longer held to its seal, and then it says why, for
+// the workflow to fail with.
 func (d *Dispatcher) runStepAttempts(ctx context.Context, parent *run.Run, step run.PipelineStep,
-	idx int, vars map[string]any) (run.Status, map[string]any) {
+	idx int, vars map[string]any, roots []binding.Root) (run.Status, map[string]any, string) {
 	status := run.StatusFailed
 	for attempt := 0; attempt <= step.Retries; attempt++ {
 		if ctx.Err() != nil {
-			return run.StatusCanceled, nil
+			return run.StatusCanceled, nil, ""
 		}
-		child := stepRun(parent, step, idx, attempt, vars)
-		child.CreatedAt = d.now()
-		if err := d.store.Save(context.Background(), child); err != nil {
-			d.log.Error("dispatch: save pipeline step: "+err.Error(), zap.String("run_id", parent.ID))
-			return run.StatusFailed, nil
+		child, ended, reason := d.startAttempt(ctx, parent, step, idx, attempt, vars, roots)
+		if child == nil {
+			return ended, nil, reason
 		}
 		d.wake()
 		status = d.waitChildren(ctx, []string{child.ID})[0]
 		if status == run.StatusSucceeded {
-			return status, d.stepOutputs(child)
+			outputs, reason := d.stepOutputs(child)
+			return status, outputs, reason
 		}
 		if status == run.StatusCanceled {
-			return status, nil
+			return status, nil, ""
 		}
 	}
-	return status, nil
+	return status, nil, ""
 }
 
-// stepOutputs returns what a finished step published with set_stats, read from the step's own run
-// record. It is best effort; a read failure just means no outputs flow downstream.
+// startAttempt stores one attempt of a workflow step for a claim loop to execute and returns its
+// record. A second launcher of an attempt already released returns the record the first one stored.
+// When nothing was stored for the attempt it returns no record, the status the attempt ends as, and
+// for an attempt refused before anything of it was stored, the reason.
+func (d *Dispatcher) startAttempt(ctx context.Context, parent *run.Run, step run.PipelineStep, idx,
+	attempt int, vars map[string]any, roots []binding.Root) (*run.Run, run.Status, string) {
+	child := stepRun(parent, step, idx, attempt, vars)
+	child.CreatedAt = d.now()
+	child, adopted, reason := d.releaseAttempt(ctx, parent, child, roots)
+	switch {
+	case reason != "":
+		return nil, run.StatusFailed, reason
+	case child == nil:
+		return nil, run.StatusCanceled, ""
+	case adopted:
+		return child, "", ""
+	}
+	if err := d.store.Save(context.Background(), child); err != nil {
+		d.log.Error("dispatch: save pipeline step: "+err.Error(), zap.String("run_id", parent.ID))
+		return nil, run.StatusFailed, ""
+	}
+	return child, "", ""
+}
+
+// adoptPolls bounds how many times a launcher that lost the release of an attempt reads the
+// workflow's steps for the record the winner released, one poll interval apart. The winner appends
+// before it saves, so the record can lag the entry; a winner that died between the two never saves
+// it, and the attempt then fails rather than waiting forever.
+const adoptPolls = 10
+
+// releaseAttempt readies one attempt of a workflow step to be stored on a dispatcher with a binding
+// key: the record is cleaned the way a store's save cleans it and sealed to its workflow and to the
+// entries that released it. An attempt with roots is first released on the chain under the id
+// audit.ReleaseID fixes, with each root named by the content digest its entry committed, so its
+// seal can name that entry, and a second launcher of the same attempt gets the record the first one
+// released, with adopted set, to wait on rather than store. A reason means the attempt must not run
+// and nothing of it was stored. A nil record with no reason means the walk stopped while waiting on
+// another launcher's record.
+func (d *Dispatcher) releaseAttempt(ctx context.Context, parent, child *run.Run,
+	roots []binding.Root) (*run.Run, bool, string) {
+	if d.binder == nil {
+		return child, false, ""
+	}
+	child.Sanitize()
+	released := releaseRootsOf(roots)
+	seal := slices.Clone(roots)
+	var entry *audit.Entry
+	var err error
+	if len(roots) > 0 {
+		by := outcome.Decider{Name: requestDecider, Type: "system", OnBehalfOf: parent.Actor}
+		entry, err = outcome.ReleaseEntry(child, released, by, d.now)
+		if entry != nil {
+			seal = append(seal, binding.PreparedRootOf(entry))
+		}
+	}
+	if err == nil {
+		err = d.sealNew(child, func() (binding.Record, error) {
+			return binding.StepRecord(parent, child, seal)
+		})
+	}
+	if err != nil {
+		d.log.Error("dispatch: seal pipeline step: "+err.Error(), zap.String("run_id", parent.ID))
+		return nil, false, fmt.Sprintf("step %q was not started: its record could not be sealed",
+			child.StepName)
+	}
+	if entry == nil {
+		return child, false, ""
+	}
+	return d.release(ctx, parent, child, released, entry)
+}
+
+// release appends the RELEASE entry for an attempt and returns the record the attempt executes as.
+// An append the chain refuses as a duplicate is read back: an entry that commits to child is an
+// earlier try of this append whose answer was lost, and child stands. Any other entry is another
+// launcher's release of the same attempt, and its record is adopted. The append and the reads are
+// not ended by the walk's cancellation, so a shutdown landing between them never strands an attempt
+// released and unrecorded.
+func (d *Dispatcher) release(ctx context.Context, parent, child *run.Run,
+	roots []outcome.ReleaseRoot, entry *audit.Entry) (*run.Run, bool, string) {
+	unrecorded := fmt.Sprintf("step %q was not started: its release could not be recorded on the "+
+		"chain", child.StepName)
+	rec := context.WithoutCancel(ctx)
+	dup := false
+	err := withRetries(func() error {
+		aerr := d.audits.Append(rec, entry)
+		if errors.Is(aerr, audit.ErrDuplicateID) {
+			dup = true
+			return nil
+		}
+		return aerr
+	})
+	if err != nil {
+		d.log.Error("dispatch: release pipeline step: "+err.Error(), zap.String("run_id", parent.ID))
+		return nil, false, unrecorded
+	}
+	if !dup {
+		return child, false, ""
+	}
+	var held *audit.Entry
+	err = withRetries(func() error {
+		var rerr error
+		held, rerr = d.chainEntry(rec, entry.ID)
+		return rerr
+	})
+	if err != nil || held == nil {
+		d.log.Error("dispatch: read the release of a pipeline step", zap.String("run_id", parent.ID),
+			zap.String("entry_id", entry.ID), zap.Error(err))
+		return nil, false, unrecorded
+	}
+	if releases(held, child, roots) {
+		return child, false, ""
+	}
+	return d.adoptRelease(ctx, parent, child, roots, held)
+}
+
+// adoptRelease finds the record another launcher released for child's attempt: the step of the
+// workflow at the same index and attempt whose release body reproduces the entry's digest. It is a
+// record found from a chain entry by the key the entry fixes, never by trusting a row's word. The
+// record can lag the entry, so the steps are read again, adoptPolls times at most.
+func (d *Dispatcher) adoptRelease(ctx context.Context, parent, child *run.Run,
+	roots []outcome.ReleaseRoot, held *audit.Entry) (*run.Run, bool, string) {
+	read := context.WithoutCancel(ctx)
+	for range adoptPolls {
+		steps, err := d.store.Steps(read, parent.ID)
+		if err != nil {
+			d.log.Warn("dispatch: read steps to adopt a release: "+err.Error(),
+				zap.String("run_id", parent.ID))
+		}
+		for _, s := range steps {
+			if s.StepIndex != nil && *s.StepIndex == *child.StepIndex && s.Attempt == child.Attempt &&
+				s.Kind != run.KindApproval && releases(held, s, roots) {
+				return s, true, ""
+			}
+		}
+		select {
+		case <-time.After(childPollInterval):
+		case <-ctx.Done():
+			return nil, false, ""
+		}
+	}
+	return nil, false, fmt.Sprintf("step %q was not started: attempt %d was released by another "+
+		"coordinator, and the record it released never appeared", child.StepName, child.Attempt)
+}
+
+// releases reports whether e is the RELEASE entry of step s under the decisions roots names: a
+// RELEASE at s's path whose committed body is the one s rebuilds to.
+func releases(e *audit.Entry, s *run.Run, roots []outcome.ReleaseRoot) bool {
+	if e.Method != audit.MethodRelease || s.ParentID == nil ||
+		e.Path != audit.ReleasePath(*s.ParentID, s.ID) {
+		return false
+	}
+	body, err := outcome.ReleaseBody(s, roots)
+	return err == nil && audit.VerifyContentDigest(e.ContentDigest, e.Nonce, body)
+}
+
+// workflowRoots returns the root naming the decision that won a workflow, read from the chain by
+// the id the workflow records, or none for a workflow nobody decided on or a dispatcher with no
+// binding key. The entry must record an approval of this workflow. The read is not ended by the
+// walk's cancellation, so a shutdown is never recorded as a decision that could not be read.
+func (d *Dispatcher) workflowRoots(ctx context.Context, parent *run.Run) ([]binding.Root, error) {
+	if d.binder == nil || parent.DecisionID == "" {
+		return nil, nil
+	}
+	subject := "workflow run " + parent.ID
+	read := context.WithoutCancel(ctx)
+	var e *audit.Entry
+	err := withRetries(func() error {
+		var rerr error
+		e, rerr = d.chainEntry(read, parent.DecisionID)
+		return rerr
+	})
+	switch {
+	case err != nil:
+		return nil, fmt.Errorf("%w: %s: read chain entry %s: %w", binding.ErrUnverified, subject,
+			parent.DecisionID, err)
+	case e == nil:
+		return nil, fmt.Errorf("%w: %s: chain entry %s it names is not on the chain", binding.ErrDrift,
+			subject, parent.DecisionID)
+	case e.Method != audit.MethodDecision ||
+		e.Path != "/runs/"+parent.ID+"/decision/"+outcome.StepApproved:
+		return nil, fmt.Errorf("%w: %s: chain entry %s is not the decision it names", binding.ErrDrift,
+			subject, parent.DecisionID)
+	}
+	return []binding.Root{binding.RootOf(e)}, nil
+}
+
+// StepReleaseRoots returns the rule naming the chain entries a workflow step derives from, in the
+// order its seal names them, reading the workflow's steps from runs: the decisions
+// outcome.ReleaseRoots reads from the stored rows, then the RELEASE entry their launch appended
+// under the id audit.ReleaseID fixes. A step nothing decided on derives from nothing. Every
+// verifier that checks a step sets its StepRoots from this rule, so each one rebuilds the ids the
+// seal named.
+func StepReleaseRoots(runs run.Store) binding.RootsFunc {
+	return func(ctx context.Context, parent, child *run.Run) ([]string, error) {
+		if child.StepIndex == nil {
+			return nil, nil
+		}
+		steps, err := runs.Steps(ctx, parent.ID)
+		if err != nil {
+			return nil, err
+		}
+		ids := outcome.ReleaseRoots(parent, child, steps)
+		if len(ids) == 0 {
+			return nil, nil
+		}
+		return append(ids, audit.ReleaseID(ids, parent.ID, *child.StepIndex, child.Attempt)), nil
+	}
+}
+
+// stepOutputs returns what a step that finished succeeded published with set_stats, read from the
+// step's own run record, and why the walk must not take the step's result, empty when it may.
 //
 // The values are folded and recorded by whichever process executed the step, before the step went
 // terminal, so the coordinator reads the answer rather than recomputing it from events. Recomputing
 // it here re-read the step's events through the coordinator's store, and a step executed across the
 // relay leaves its events on the control node while the executor's store cannot read them back at
 // all, so every relay-executed step silently published nothing to its dependents.
-func (d *Dispatcher) stepOutputs(child *run.Run) map[string]any {
+//
+// On a dispatcher with a binding key the record is held to the result seal written with its terminal
+// status before anything of it is returned: a step whose stored status or outputs a writer changed
+// after it finished is refused, and so is one whose record cannot be read, since its success is then
+// unverified. Without a key the read is best effort, and a failed read means no outputs flow
+// downstream.
+func (d *Dispatcher) stepOutputs(child *run.Run) (map[string]any, string) {
 	fresh, err := d.storeGetWithRetries(context.Background(), child.ID)
 	if err != nil {
 		d.log.Error("dispatch: read run for outputs: "+err.Error(), zap.String("run_id", child.ID))
-		return nil
+		if d.binder == nil {
+			return nil, ""
+		}
+		return nil, RefusalText(fmt.Errorf("%w: run %s: read its record: %w", binding.ErrUnverified,
+			child.ID, err))
+	}
+	if d.binder != nil && fresh.Status != run.StatusSucceeded {
+		// The walk saw this step succeed, and a terminal record is never moved by this process, so a
+		// record that now reads otherwise was changed by whoever wrote it.
+		err := fmt.Errorf("%w: run %s: its status changed after it finished, from %s to %s",
+			binding.ErrDrift, fresh.ID, run.StatusSucceeded, fresh.Status)
+		d.log.Error("dispatch: "+err.Error(), zap.String("run_id", fresh.ID))
+		return nil, err.Error()
+	}
+	if reason := d.resultRefusal(context.Background(), fresh); reason != "" {
+		return nil, reason
 	}
 	if len(fresh.Outputs) == 0 {
-		return nil
+		return nil, ""
 	}
-	return fresh.Outputs
+	return fresh.Outputs, ""
 }
 
 // DefaultMaxShards caps how many groups a split fans out into when an operator sets no override, so
@@ -796,4 +1070,14 @@ func hostWeights(hosts []string, costs map[string]float64) map[string]float64 {
 		out[host] = fallback
 	}
 	return out
+}
+
+// releaseRootsOf names each decision root the way a release body does, by entry id and the content
+// digest that entry committed.
+func releaseRootsOf(roots []binding.Root) []outcome.ReleaseRoot {
+	released := make([]outcome.ReleaseRoot, len(roots))
+	for i, root := range roots {
+		released[i] = outcome.ReleaseRoot{ID: root.EntryID, ContentDigest: root.ContentDigest}
+	}
+	return released
 }

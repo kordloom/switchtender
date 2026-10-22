@@ -25,7 +25,9 @@ var errNoDatabase = errors.New("no database")
 var errContainerBuild = errors.New("this binary was built into the container image")
 
 // errLostIdentity is returned when the audit chain is bound to an install whose signing key is not
-// where this process looks for it, so creating one would silently start a second install.
+// where this process looks for it, or when it has nowhere to look, so creating one would silently
+// start a second install. serve refuses to start on it, since running unkeyed over a signed chain
+// would check no seal and pass no gate.
 var errLostIdentity = errors.New("this install's signing key is missing")
 
 // errForeignIdentity is returned when the signing key found names a different install than the one

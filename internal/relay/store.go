@@ -186,8 +186,14 @@ func (c *Client) TransitionStatus(context.Context, string, run.Status, run.Statu
 
 // StampApprovedSpec is a control-node write and is not served to workers: decisions are made where
 // the approver is, never on the far side of the relay.
-func (c *Client) StampApprovedSpec(context.Context, string, string, string) error {
+func (c *Client) StampApprovedSpec(context.Context, string, string, string, string) error {
 	return ErrUnsupported
+}
+
+// SealAdopted is a control-node write and is not served to workers: an install is adopted where its
+// binding key is held, and a worker holds none and never adopts.
+func (c *Client) SealAdopted(context.Context, string, run.Adoption) (bool, error) {
+	return false, ErrUnsupported
 }
 
 // WipeSealed is a control-node write and is not served to workers. A worker never holds the sealed

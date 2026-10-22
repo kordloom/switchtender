@@ -17,6 +17,7 @@ import (
 	"github.com/kordloom/switchtender/internal/attention"
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/dispatch"
@@ -113,6 +114,15 @@ func WithSecretOpener(o relay.SecretOpener) Option {
 // reason.
 func WithPlanSealer(p relay.PlanSealer) Option {
 	return func(srv *Server) { srv.planSealer = p }
+}
+
+// WithBinder makes the relay hold every run it leases to a worker to the seal this install made
+// over it, and seal the results workers report and the applies it proposes, under key. The check
+// is built with dispatch.NewBindingVerifier over the relay's own store and the audit chain, so the
+// control node holds a row exactly as its dispatcher does. Nil, or a server with no audit chain,
+// checks and seals nothing.
+func WithBinder(key *binding.Key) Option {
+	return func(srv *Server) { srv.bindingKey = key }
 }
 
 // WithRetrier enables the failed shard retry endpoint backed by r.
@@ -397,6 +407,9 @@ type Server struct {
 	// planSealer seals the plan file a relay worker's plan saved onto the apply proposed from it, nil
 	// when this control node accepts none.
 	planSealer relay.PlanSealer
+	// bindingKey is the key the relay holds every run it leases to a worker to, and seals worker
+	// results under, nil when this process holds no producer identity to derive one from.
+	bindingKey *binding.Key
 	// retrier backs the failed shard retry endpoint when configured.
 	retrier Retrier
 	// approver backs the run approval endpoints when configured.
@@ -438,6 +451,9 @@ type Server struct {
 	producer *audit.Identity
 	// producerProblem is why producer is nil, empty when there is nothing to explain.
 	producerProblem string
+	// witness reports the standing of the push witness the install is enrolled with, nil when it
+	// is not enrolled.
+	witness WitnessStatuser
 	// runFiles is where this server stages run files, for the doctor, nil when it was not told.
 	runFiles *runFilesState
 	// productVersion stamps the trust document.
@@ -700,8 +716,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/audit/verify", walks.hold(auditVerifyHandler(s.audits, producer, s.log)))
 	mux.Handle("GET /v1/audit/bundle", walks.hold(auditBundleHandler(s.audits, s.producer,
 		s.producerProblem, s.productVersion, s.log)))
-	mux.Handle("GET /v1/audit/register",
-		walks.hold(auditRegisterHandler(s.store, s.audits, producer, s.log)))
+	mux.Handle("GET /v1/audit/register", walks.hold(auditRegisterHandler(s.store, s.audits, producer,
+		dispatch.NewBindingVerifier(s.store, s.audits, s.bindingKey), s.log)))
+	mux.Handle("GET /v1/audit/witness", witnessHandler(s.witness, s.log))
 	// Served unauthenticated: the beat feed exists so an outside watcher can see the chain is
 	// alive and whole, and that watcher has no account here.
 	mux.Handle("GET "+beatfeed.APIPath, auditBeatsHandler(s.audits, s.log))
@@ -742,9 +759,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/runs/{id}/notifications",
 		runNotificationsHandler(s.store, s.notifications, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/evidence",
-		walks.hold(runEvidenceHandler(s.store, s.audits, producer, s.decisions, authz, s.log)))
-	mux.Handle("GET /v1/runs/{id}/receipt", walks.hold(runReceiptHandler(s.store, s.audits,
-		s.producer, s.productVersion, s.decisions, authz, s.log)))
+		walks.hold(runEvidenceHandler(s.store, s.audits, producer, s.decisions,
+			dispatch.NewBindingVerifier(s.store, s.audits, s.bindingKey), authz, s.log)))
+	mux.Handle("GET /v1/runs/{id}/receipt",
+		walks.hold(runReceiptHandler(s.store, s.audits, s.producer, s.productVersion, s.decisions,
+			dispatch.NewBindingVerifier(s.store, s.audits, s.bindingKey), authz, s.log)))
 	mux.Handle("POST /v1/runs/{id}/explain", explainRunHandler(s.store, s.ai, authz, s.log))
 	mux.Handle("POST /v1/ai/draft", draftStepHandler(s.ai, s.log))
 	mux.Handle("POST /v1/ai/ask", askFleetHandler(s.store, s.ai, authz, s.log))
@@ -946,6 +965,9 @@ func (s *Server) Handler() http.Handler {
 		}
 		if s.planSealer != nil {
 			opts = append(opts, relay.WithPlanSealer(s.planSealer))
+		}
+		if v := dispatch.NewBindingVerifier(s.relayStore, s.audits, s.bindingKey); v != nil {
+			opts = append(opts, relay.WithBinder(v))
 		}
 		if s.attention != nil && s.attention.Presence != nil {
 			opts = append(opts, relay.WithPresence(s.attention.Presence))

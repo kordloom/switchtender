@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,9 +15,52 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/outcome"
+	"github.com/kordloom/switchtender/internal/receipt"
 	"github.com/kordloom/switchtender/internal/run"
 )
+
+// sealDecided settles the held run runID in the install at db with the DECISION entry decisionID,
+// as a keyed approval settles it, and seals it to that entry under the key the install's producer
+// identity derives, the key the receipt command holds the approver to. It returns the run as
+// stored.
+func sealDecided(t *testing.T, store storeBundle, db, runID, decisionID string) *run.Run {
+	t.Helper()
+	ctx := context.Background()
+	id, err := installIdentity(db)
+	if err != nil {
+		t.Fatalf("installIdentity() error = %v", err)
+	}
+	key, err := bindingKeyOf(&id)
+	if err != nil {
+		t.Fatalf("bindingKeyOf() error = %v", err)
+	}
+	if ok, err := store.Runs().ClaimDecision(ctx, runID, decisionID, "claim"); err != nil || !ok {
+		t.Fatalf("ClaimDecision() = %v, %v", ok, err)
+	}
+	settle := run.DecisionSettle{Status: run.StatusRunning, Owner: "test"}
+	if ok, err := store.Runs().SettleDecision(ctx, runID, decisionID, settle); err != nil || !ok {
+		t.Fatalf("SettleDecision() = %v, %v", ok, err)
+	}
+	r, err := store.Runs().Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	entry, err := store.Audits().Entry(ctx, decisionID)
+	if err != nil {
+		t.Fatalf("Entry() error = %v", err)
+	}
+	rec, err := binding.RunRecord(r, binding.RootOf(entry))
+	if err != nil {
+		t.Fatalf("RunRecord() error = %v", err)
+	}
+	r.SpecSeal = key.Seal(rec)
+	if err := store.Runs().Save(ctx, r); err != nil {
+		t.Fatalf("Save(sealed) error = %v", err)
+	}
+	return r
+}
 
 // TestReceiptProduceAndVerifyOffline is the end-to-end proof of the receipt wedge: a finished run is
 // turned into a signed receipt, and that receipt verifies with no database and no network. Then the
@@ -47,7 +91,7 @@ func TestReceiptProduceAndVerifyOffline(t *testing.T) {
 	// Mirror the real flow: evidence is written while the run is running, then it is finalized, then
 	// its outcome is committed. Log append is fenced to a non-terminal run, so the order matters.
 	r := &run.Run{
-		ID: "run_demo", Playbook: "site.yml", Inventory: "prod", Status: run.StatusRunning,
+		ID: "run_demo", Playbook: "site.yml", Inventory: "prod", Status: run.StatusPendingApproval,
 		Actor: "alice", ActorType: "agent", AuditReceipt: audit.Receipt(creation), CreatedAt: at,
 		ExtraVars: map[string]any{"service": "api"},
 	}
@@ -56,10 +100,13 @@ func TestReceiptProduceAndVerifyOffline(t *testing.T) {
 	}
 	// The approval decision lands on the chain between creation and outcome, binding the approver
 	// to the spec digest, exactly as the dispatcher commits it.
-	if _, err := outcome.CommitDecision(ctx, store.Audits(), r, "approved",
-		outcome.Decider{Name: "approver-pat", Type: "session"}, time.Now); err != nil {
+	decisionID := audit.NewID()
+	if _, err := outcome.CommitDecisionWith(ctx, store.Audits(), r, "approved",
+		outcome.Decider{Name: "approver-pat", Type: "session"}, time.Now,
+		outcome.DecisionExtras{ID: decisionID}); err != nil {
 		t.Fatalf("CommitDecision(, time.Now) error = %v", err)
 	}
+	r = sealDecided(t, store, db, r.ID, decisionID)
 	if err := store.Runs().AppendLog(ctx, "run_demo", []byte("PLAY RECAP\nweb01 : ok=5 changed=1\n")); err != nil {
 		t.Fatalf("AppendLog() error = %v", err)
 	}
@@ -127,9 +174,9 @@ func TestReceiptProduceAndVerifyOffline(t *testing.T) {
 	}
 	t.Logf("switchtender verify run.receipt:\n%s", buf.String())
 
-	// A spec edited after the decision produces a receipt whose rebuilt decision body no longer
-	// matches the digest the chain committed, and verify refuses it. This is the exact tamper the
-	// binding exists to surface.
+	// A spec edited after the decision moves the seal the approved run carries, which covers the
+	// spec beside the approver its decision names, so the command refuses to write a receipt naming
+	// that approver at all. This is the exact tamper the binding exists to surface.
 	tampered, err := openBundle(db)
 	if err != nil {
 		t.Fatalf("openBundle(tamper) error = %v", err)
@@ -142,11 +189,13 @@ func TestReceiptProduceAndVerifyOffline(t *testing.T) {
 	_ = tampered.Close()
 	tamperedOut := filepath.Join(dir, "tampered.receipt")
 	receiptRunDB, receiptRunOut = db, tamperedOut
-	if err := runReceipt(testCommand(), []string{"run_demo"}); err != nil {
-		t.Fatalf("runReceipt(tampered) error = %v", err)
+	err = runReceipt(testCommand(), []string{"run_demo"})
+	if !errors.Is(err, receipt.ErrUnattested) || !errors.Is(err, binding.ErrDrift) {
+		t.Fatalf("runReceipt(tampered) error = %v, want the approver refused as no longer "+
+			"matching the run's seal", err)
 	}
-	if err := runVerify(testCommand(), []string{tamperedOut}); err == nil {
-		t.Error("runVerify() accepted a receipt whose spec changed after the decision")
+	if _, serr := os.Stat(tamperedOut); !errors.Is(serr, os.ErrNotExist) {
+		t.Errorf("a receipt was written for a run whose spec changed after the decision: %v", serr)
 	}
 
 	// A doctored receipt must fail.

@@ -3,7 +3,7 @@ const PAGE_NAV = {
 	overview: "overview", runs: "runs", detail: "runs", fleet: "fleet", host: "fleet",
 	tasks: "tasks", workers: "workers", drift: "drift", estate: "estate", changes: "changes", projects: "projects", inventories: "inventories",
 	sources: "sources", jobtemplates: "templates", schedules: "schedules", workflows: "workflows",
-	migrate: "migrate", credentials: "credentials", users: "users", audit: "audit",
+	migrate: "migrate", credentials: "credentials", users: "users", audit: "audit", register: "audit",
 	policies: "policies", doctor: "doctor", docs: "docs", notifications: "notifications",
 	links: "links",
 };
@@ -98,7 +98,7 @@ function mountTopbar() {
 // comment that contradicts itself is worse than no comment: a reader cannot tell which half is the
 // rule and which is the leftover.
 const EXPORT_PAGES = ["runs", "fleet", "drift", "estate", "changes", "tasks", "compare", "workers", "schedules", "jobtemplates",
-	"users", "audit", "host", "projects", "inventories", "sources", "policies", "doctor",
+	"users", "audit", "register", "host", "projects", "inventories", "sources", "policies", "doctor",
 	"credentials"];
 
 // tableRowsData reads the rendered table into headers and rows, skipping the actions column and
@@ -394,6 +394,7 @@ const FACET_COLUMNS = {
 	inventories: ["Format"],
 	policies: ["Tool", "Holding"],
 	audit: ["Method"],
+	register: ["Outcome", "Risk"],
 	doctor: ["Severity"],
 	host: ["Outcome"],
 	tasks: ["Trend"],

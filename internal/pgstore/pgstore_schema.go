@@ -64,6 +64,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	actor_type    TEXT NOT NULL DEFAULT '',
 	approved_spec_digest TEXT NOT NULL DEFAULT '',
 	approved_spec_binding TEXT NOT NULL DEFAULT '',
+	spec_seal     TEXT NOT NULL DEFAULT '',
+	result_seal   TEXT NOT NULL DEFAULT '',
 	rerun_of      TEXT NOT NULL DEFAULT '',
 	labels        TEXT NOT NULL DEFAULT '',
 	warning       TEXT NOT NULL DEFAULT '',
@@ -156,6 +158,8 @@ ALTER TABLE runs ADD COLUMN IF NOT EXISTS actor TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS actor_type TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS approved_spec_digest TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS approved_spec_binding TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS spec_seal TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS result_seal TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS rerun_of TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS labels TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS warning TEXT NOT NULL DEFAULT '';
@@ -690,6 +694,25 @@ ALTER TABLE audit_anchors ADD COLUMN IF NOT EXISTS shape TEXT NOT NULL DEFAULT '
 -- what every replica minting its own key produces, is diagnosed rather than called a rewrite.
 ALTER TABLE audit_anchors ADD COLUMN IF NOT EXISTS install_id TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_audit_anchor_seq ON audit_anchors(seq);
+-- A witness attestation is one countersignature a hosted witness returned for a pushed beat. The
+-- store holds one per seq, kind, and witness key, and the first written wins. Every column but the
+-- id carries a default so the table stays healable column by column.
+CREATE TABLE IF NOT EXISTS audit_attestations (
+	id         TEXT PRIMARY KEY,
+	seq        BIGINT NOT NULL DEFAULT 0,
+	kind       TEXT NOT NULL DEFAULT '',
+	key_id     TEXT NOT NULL DEFAULT '',
+	link       TEXT NOT NULL DEFAULT '',
+	size       BIGINT NOT NULL DEFAULT 0,
+	root       TEXT NOT NULL DEFAULT '',
+	public_key TEXT NOT NULL DEFAULT '',
+	role       TEXT NOT NULL DEFAULT '',
+	at         TEXT NOT NULL DEFAULT '',
+	sig        TEXT NOT NULL DEFAULT '',
+	witness    TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_attestation_coord
+	ON audit_attestations(seq, kind, key_id);
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_entries(at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_seq ON audit_entries(seq);
 -- Span beats are a narrow slice of the chain selected by actor and method and ordered by seq.

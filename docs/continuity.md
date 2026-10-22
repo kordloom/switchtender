@@ -46,9 +46,14 @@ agent in between.
 
 ## What degrades on vendor death
 
-Honesty requires the other column. Vendor-operated services stop: hosted witness
-countersignatures, scheduled delivery of paid evidence packs, and support. Each has a
-self-service equivalent in the free binary for two of the three (run your own witness, and
-lean on the community), while the scheduled evidence packs have only their raw material free: the
-per-run dossiers, receipts, and signed bundles the free binary always emits (the change register
-that assembles them on a cadence is itself Team), but the operated versions are what a subscription buys, and they end with the vendor.
+Honesty requires the other column. Vendor-operated services stop: hosted witness countersignatures,
+scheduled delivery of paid evidence packs, and support. The countersignatures the hosted witness
+already issued keep verifying against its published key, carried in every export that holds them,
+but nothing new is countersigned. Two of the three have a self-service equivalent in the free binary
+(run your own witness, and lean on the community). Watching a server's beat feed with
+`switchtender witness serve` needs no license, and an install licensed for the hosted witness can
+enroll with a push witness it runs itself, as
+[the hosted witness page](witness.md#run-your-own-push-witness) describes. Meanwhile the scheduled
+evidence packs have only their raw material free: the per-run dossiers, receipts, and signed bundles
+the free binary always emits (the change register that assembles them on a cadence is itself Team),
+but the operated versions are what a subscription buys, and they end with the vendor.

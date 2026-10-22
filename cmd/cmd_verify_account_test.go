@@ -43,7 +43,7 @@ func receiptForDecisionUnder(t *testing.T, actor, actorType, onBehalfOf string, 
 		t.Fatalf("Append(creation) error = %v", err)
 	}
 	r := &run.Run{
-		ID: "run_decided", Playbook: "site.yml", Inventory: "prod", Status: run.StatusRunning,
+		ID: "run_decided", Playbook: "site.yml", Inventory: "prod", Status: run.StatusPendingApproval,
 		Actor: "casey", AuditReceipt: audit.Receipt(creation), CreatedAt: at,
 	}
 	if err := store.Runs().Save(ctx, r); err != nil {
@@ -60,13 +60,15 @@ func receiptForDecisionUnder(t *testing.T, actor, actorType, onBehalfOf string, 
 	if unkeyed {
 		digest, nonce = audit.UnkeyedDigestOf(body), ""
 	}
+	decisionID := audit.NewID()
 	if err := store.Audits().Append(ctx, &audit.Entry{
-		ID: audit.NewID(), At: at.Add(time.Minute), Actor: actor, ActorType: actorType,
+		ID: decisionID, At: at.Add(time.Minute), Actor: actor, ActorType: actorType,
 		OnBehalfOf: onBehalfOf, Method: audit.MethodDecision, Path: "/runs/run_decided/decision/approved",
 		ContentDigest: digest, Nonce: nonce,
 	}); err != nil {
 		t.Fatalf("Append(decision) error = %v", err)
 	}
+	r = sealDecided(t, store, db, r.ID, decisionID)
 	r.Status = run.StatusSucceeded
 	if err := store.Runs().Save(ctx, r); err != nil {
 		t.Fatalf("Save(succeeded) error = %v", err)

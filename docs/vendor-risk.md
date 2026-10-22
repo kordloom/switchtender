@@ -21,7 +21,7 @@ when you configure them, and each is optional:
 | Connection | When | Where |
 | --- | --- | --- |
 | Timestamp anchoring | You run `switchtender audit anchor` | The RFC 3161 timestamp authority you name; the default is freetsa.org |
-| Witness countersignatures | You point the install at a witness | The hosted witness, or one you run yourself; the witness command ships in this binary |
+| Witness countersignatures | You enroll the install with `switchtender witness enroll` | The [hosted witness](witness.md) at witness.switchtender.com, or a push witness you run yourself with this binary. It receives the producer public key, the install id, and the license file at enrollment, then each span beat's number, time, position, entry hash, tree root, and consistency proof. No run content, host names, credentials, or personal data |
 | Advisory AI | You configure a provider | Your provider, including local Ollama; read-only, executes nothing |
 | Project sync | You add a git project | Your repository host |
 | Notifications and webhooks | You configure them | Your endpoints |
@@ -87,5 +87,9 @@ without this vendor.
 ## Subprocessors
 
 None in the self-hosted product. If you use the hosted witness, KordLoom operates that single
-service; the anchor default, freetsa.org, is a third party you can replace with any RFC 3161
-authority, including your own.
+service on two sub-processors. DigitalOcean hosts the machine it runs on. Cloudflare carries every
+connection to it through a Cloudflare Tunnel, terminates TLS, and holds the snapshots of its state,
+so Cloudflare's edge logs hold the address your server connects from for Cloudflare's retention
+period. The witness itself writes no address and stores no URL, organization, or run content. The
+anchor default, freetsa.org, is a third party you can replace with any RFC 3161 authority,
+including your own.

@@ -42,11 +42,12 @@ sits in the state directory beside the database and is what makes a bundle attri
 every entry and a tree anchor's Merkle leaves are bound to the install id derived from that key. A
 deployment restored without it will not mint a replacement: once a chain names an install, the server and
 every command refuse to sign or bind as another one, because a new key would sign as a different install
-and no earlier entry would verify under it. The server still starts and records the chain, unbound, and a
-request for a signed bundle answers `409` naming the key it needs. Commands that record a change still
-record it, unbound, and say why. Copy the file with the same care as the encryption key, and keep it out
-of the same place if you keep the backup somewhere a reader could reach both. The remedy for a missing
-key is to restore it.
+and no earlier entry would verify under it. The server refuses to start, keyed or unkeyed, since a server
+without the key over that chain would check no seal and pass no gate beside servers that hold it.
+Commands that record a change still record it, unbound, and say why, so a backup can still be taken. Copy
+the file with the same care as the encryption key, and keep it out of the same place if you keep the
+backup somewhere a reader could reach both. The remedy for a missing key is to restore it. With no copy
+anywhere, see [Signing key lost](#signing-key-lost).
 
 Against PostgreSQL there is no directory beside the database, so the key has to be supplied rather than
 found: set `SWITCHTENDER_AUDIT_KEY` to one seed on every process, or place the same `producer-key.json` in
@@ -54,7 +55,43 @@ each host's identity directory. A shared database with no identity supplied will
 because two replicas signing as two installs is a fleet whose own anchors disagree with it. The server
 still starts and still records the chain. It warns, and runs with the chain unattributed and unbound, so
 its entries commit to no install and its receipts can be lifted onto another one. Supply the key before
-the receipts matter to anybody.
+the receipts matter to anybody. Once any process has signed the chain, a process without the seed refuses
+to start. The first keyed start binds the chain, so from then on no replica without the key runs beside
+the ones that hold it.
+
+## Signing key lost
+
+A server that finds the chain bound to an install whose key it does not hold refuses to start. If a copy
+of `producer-key.json` or the seed exists anywhere, put it back: the server starts keyed over the same
+chain. A new key would sign as a different install, and no earlier entry would verify under it, so there
+is no command that hands the chain to another key.
+
+With no copy anywhere, the chain cannot be signed again, and the install starts again as a new one:
+
+1. Stop every server.
+2. Take a backup of the install with `switchtender backup`. Commands still record unbound, so this works
+   without the key.
+3. Restore it into a new, empty database with `switchtender restore --db <new database>`.
+4. Start the server there with a new key. A SQLite install mints one beside the new file. A shared
+   database takes a new `SWITCHTENDER_AUDIT_KEY` on every process.
+5. Publish the new fingerprint, enroll the new key with the witness, and have each person link their
+   forge account again.
+6. Keep the old database read-only as an archive.
+
+The new chain opens with the restore and its provenance entry, which carries the instant the backup was
+taken and its counts, then the empty adoption record of the first keyed start. That boundary is written
+by the install that owns it.
+
+What it costs:
+
+- Runs waiting or in flight never execute, since nothing can check their seals, so they are resubmitted
+  on the new install.
+- Run and estate history stay in the old database.
+- Bundles, receipts, anchors and witness statements made before the loss verify against the old pinned
+  key as they always did. Nothing exports the old chain again, so history on it that no bundle exported
+  before the loss is not evidence anyone can sign.
+- The witness keeps the old install's record at its last countersigned head, and the new install enrolls
+  as a new record under its new key. Anyone pinning the old fingerprint sees the change.
 
 ## How it is secured
 

@@ -1,0 +1,13 @@
+# Runs switchtender-witness-snapshot.service every hour. Persistent catches up on a run missed while
+# the droplet was off, and the delay keeps the upload away from the top of the hour.
+
+[Unit]
+Description=Hourly snapshot of the SwitchTender hosted witness state to R2
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -299,6 +299,10 @@ async function loadAudit() {
 	}
 }
 
+// PRICING_URL is the price list a licensing refusal names. Its presence in a 403 is what tells a
+// licensing refusal apart from a role refusal, which must never be shown as an offer.
+const PRICING_URL = "https://switchtender.com/pricing";
+
 // renderLicensedFeature reports a paid feature as an offer rather than as a breakage, with the
 // pricing link as a link.
 //
@@ -311,7 +315,7 @@ function renderLicensedFeature(message) {
 	if (!el) return;
 	el.className = "muted";
 	el.textContent = "";
-	const url = "https://switchtender.com/pricing";
+	const url = PRICING_URL;
 	const text = String(message || "").replace(url, "").trim();
 	el.appendChild(document.createTextNode(text.endsWith(".") ? text + " " : text + ". "));
 	const link = document.createElement("a");
@@ -421,7 +425,7 @@ function renderBundleRefusal(badge, r) {
 // link here was greeted by a red "Verify failed: forbidden" badge, which reads as a broken chain, and
 // a bundle button that failed the same way.
 function renderAuditForAdminsOnly() {
-	for (const id of ["audit-badge", "audit-verify", "audit-bundle", "audit-register"]) {
+	for (const id of ["audit-badge", "audit-verify", "audit-bundle", "audit-register", "audit-register-view"]) {
 		const el = document.getElementById(id);
 		if (el) el.hidden = true;
 	}
@@ -429,9 +433,33 @@ function renderAuditForAdminsOnly() {
 		"and signed receipt on its page.");
 }
 
-// wireAudit hooks the audit page's three buttons. Verify recomputes the chain and shows a badge,
-// the evidence pack renders the period's change register, and bundle downloads a signed LoomSeal
-// bundle anyone can verify offline with an open verifier.
+// REGISTER_TIER_TIP explains why the change register carries a Team mark wherever it is offered.
+const REGISTER_TIER_TIP = "The last 90 days as a change register, the evidence a compliance " +
+	"review samples from. Per-run proofs, anchoring and verification stay free; this packaging is Team.";
+
+// downloadEvidencePack fetches the period's change register document and hands it to the browser as
+// a file. The Audit page's Evidence pack button and the register page's Download document button
+// both call it, so the file saved from either page is the same document.
+async function downloadEvidencePack(button) {
+	button.disabled = true;
+	try {
+		const text = await (await fetchAuthed("/audit/register")).text();
+		downloadBlob("switchtender-change-register.html", "text/html", text);
+	} catch (err) {
+		if (err.status === 403) {
+			renderLicensedFeature(err.message);
+		} else {
+			setStatus("Could not build the evidence pack: " + err.message);
+		}
+	} finally {
+		button.disabled = false;
+	}
+}
+
+// wireAudit hooks the audit page's three buttons and marks its register link. Verify recomputes the
+// chain and shows a badge, the evidence pack renders the period's change register, the link opens
+// that register as a page, and bundle downloads a signed LoomSeal bundle anyone can verify offline
+// with an open verifier.
 function wireAudit() {
 	const badge = document.getElementById("audit-badge");
 	const runVerify = async () => {
@@ -457,24 +485,13 @@ function wireAudit() {
 	}
 	const reg = document.getElementById("audit-register");
 	if (reg) {
-		markTier(reg, "Team", "The last 90 days as a change register, the evidence a compliance " +
-			"review samples from. Per-run proofs, anchoring and verification stay free; this " +
-			"packaging is Team.");
-		reg.addEventListener("click", async () => {
-			reg.disabled = true;
-			try {
-				const text = await (await fetchAuthed("/audit/register")).text();
-				downloadBlob("switchtender-change-register.html", "text/html", text);
-			} catch (err) {
-				if (err.status === 403) {
-					renderLicensedFeature(err.message);
-				} else {
-					setStatus("Could not build the evidence pack: " + err.message);
-				}
-			} finally {
-				reg.disabled = false;
-			}
-		});
+		markTier(reg, "Team", REGISTER_TIER_TIP);
+		reg.addEventListener("click", () => downloadEvidencePack(reg));
+	}
+	// The same register, read on screen rather than saved, beside the button that downloads it.
+	const view = document.getElementById("audit-register-view");
+	if (view) {
+		markTier(view, "Team", REGISTER_TIER_TIP);
 	}
 	const bundle = document.getElementById("audit-bundle");
 	if (bundle) {

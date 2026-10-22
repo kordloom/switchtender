@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/scrub"
@@ -45,6 +47,15 @@ type Decision struct {
 	At time.Time
 	// Seq is the chain entry recording it.
 	Seq int64
+	// EntryID is the id of the chain entry recording it.
+	EntryID string
+	// StepID is the workflow approval step the decision was made on, empty for a whole run.
+	StepID string
+	// Seal is what holding the row the approval released to its seal found, one of the Seal
+	// states, set by AttachRegisterSeals and empty when nothing checked it.
+	Seal string
+	// SealText says what the check found when the seal did not hold.
+	SealText string
 }
 
 // RegisterInput is everything the change register renders, gathered by CollectRegister.
@@ -165,8 +176,12 @@ func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store,
 			// The decision the run, or its approval step, stores as its winner is the one
 			// credited. A run decided before winners were stored credits the newest decision,
 			// as the chain tells it, in order.
-			in.Decisions[id] = Decision{Verdict: verdict, Actor: e.Actor, OnBehalfOf: onBehalfOf(e),
-				At: e.At, Seq: e.Seq}
+			d := Decision{Verdict: verdict, Actor: e.Actor, OnBehalfOf: onBehalfOf(e),
+				At: e.At, Seq: e.Seq, EntryID: e.ID}
+			if _, stepID, _, isStep := outcome.ParseStepDecisionPath(e.Path); isStep {
+				d.StepID = stepID
+			}
+			in.Decisions[id] = d
 		}
 		return nil
 	})
@@ -195,6 +210,65 @@ func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store,
 		in.Pruned = len(pruned)
 	}
 	return in, nil
+}
+
+// AttachRegisterSeals holds the row each credited approval in the register released, the run or
+// its approval step, to the seal the process made over it, which covers who the approval's entry
+// says decided, and records what each check found on the decision. A rejection seals nothing and is
+// left unchecked. A nil verifier, an install with no binding key, marks every approval unchecked,
+// and so does a run the store no longer holds, which retention pruned: neither is a drift.
+func AttachRegisterSeals(ctx context.Context, in *RegisterInput, v *binding.Verifier,
+	runs run.Store) {
+	if in == nil {
+		return
+	}
+	listed := make(map[string]*run.Run, len(in.Runs))
+	for _, r := range in.Runs {
+		listed[r.ID] = r
+	}
+	for id, d := range in.Decisions {
+		if d.Verdict != "Approved" {
+			continue
+		}
+		d.Seal, d.SealText = registerSeal(ctx, v, runs, listed[id], id, d)
+		in.Decisions[id] = d
+	}
+}
+
+// registerSeal checks the row the approval d on run id released and returns the Seal state and,
+// when it did not hold, what the check found. r is the run as listed, nil to read it from runs.
+func registerSeal(ctx context.Context, v *binding.Verifier, runs run.Store, r *run.Run, id string,
+	d Decision) (string, string) {
+	if v == nil {
+		return SealUnchecked, noKeyText
+	}
+	if r == nil {
+		got, err := runs.Get(ctx, id)
+		switch {
+		case errors.Is(err, run.ErrNotFound):
+			return SealUnchecked, "the run is no longer in the store, which retention prunes"
+		case err != nil:
+			return SealUnchecked, "the run could not be read: " + err.Error()
+		}
+		r = got
+	}
+	var err error
+	switch {
+	case d.StepID != "":
+		var node *run.Run
+		if node, err = runs.Get(ctx, d.StepID); err != nil {
+			return SealUnchecked, "the approval step could not be read: " + err.Error()
+		}
+		err = gateCheck(ctx, v, runs, r.ID, node)
+	case r.DecisionID == "":
+		if err = v.Sealed(ctx, r); err == nil {
+			err = fmt.Errorf("run %s: %w", r.ID, errNamesNoDecision)
+		}
+	default:
+		err = v.Sealed(ctx, r)
+	}
+	c := sealCheckOf(r.ID, "", d.EntryID, err)
+	return c.Status, c.Text
 }
 
 // trimAt returns rows, which are oldest first, without the tail created at or after at.
@@ -271,76 +345,95 @@ func decisionOf(e *audit.Entry) (id, verdict string) {
 	return "", ""
 }
 
-// registerRow is one change as rendered.
-type registerRow struct {
-	// When is the run creation time, formatted.
-	When string
+// RegisterRow is one change in the register: one row of the document's table and one element of
+// the JSON form's rows, built once by BuildRegister for both.
+type RegisterRow struct {
+	// When is the run creation time in UTC, formatted as YYYY-MM-DD HH:MM.
+	When string `json:"when"`
 	// Run is the run id.
-	Run string
-	// Change describes what the run did.
-	Change string
-	// Actor is who asked for it.
-	Actor string
+	Run string `json:"run"`
+	// Change describes what the run did, with any secret its script assigned redacted.
+	Change string `json:"change"`
+	// Actor is who asked for it, empty when the run records nobody.
+	Actor string `json:"actor"`
 	// Source is where it came from.
-	Source string
+	Source string `json:"source"`
 	// Risk is the graded blast radius.
-	Risk string
+	Risk string `json:"risk"`
 	// Held names the approval rule that stopped this change, as it was named at the hold. Empty
 	// when nothing held it.
-	Held string
-	// Decision is the chain-recorded approval or rejection, or a dash when none was required.
-	Decision string
+	Held string `json:"held"`
+	// Decision is the chain-recorded approval or rejection, empty when none was required.
+	Decision string `json:"decision"`
 	// DecisionSeq is the chain entry recording the decision, zero when none.
-	DecisionSeq int64
+	DecisionSeq int64 `json:"decision_seq"`
 	// Outcome is the run's terminal or current status.
-	Outcome string
+	Outcome string `json:"outcome"`
 	// DryRun is true for a run submitted in its tool's no-change mode.
-	DryRun bool
+	DryRun bool `json:"dry_run"`
 	// NotChangeFree is true for a dry run the gate did not find change free: its playbook forces
 	// work to run for real, or its configuration runs a program while it plans, or the scan could
 	// not read all of it. That is not the no-change run the dry-run mark alone would claim.
-	NotChangeFree bool
+	NotChangeFree bool `json:"not_change_free"`
 }
 
-// registerView is the data rendered into the register.
-type registerView struct {
+// Register is the change register as data: what the HTML document renders and what the JSON form
+// of the register endpoint returns. Both are built by BuildRegister from one RegisterInput, so the
+// page a reader opens and the document they download cannot disagree.
+type Register struct {
 	// Status is the machine verdict class: verified, unanchored, or broken.
-	Status string
+	Status string `json:"status"`
 	// StatusText is the banner sentence.
-	StatusText string
-	// From and To are the period bounds, formatted.
-	From, To string
+	StatusText string `json:"status_text"`
+	// From is the first day of the period, inclusive, formatted as a date.
+	From string `json:"from"`
+	// To is the day the period ends, exclusive, formatted as a date.
+	To string `json:"to"`
 	// Rows are the changes, oldest first.
-	Rows []registerRow
-	// Total, Approved, Rejected, Held tally the rows.
-	Total, Approved, Rejected int
+	Rows []RegisterRow `json:"rows"`
+	// Total counts the rows.
+	Total int `json:"total"`
+	// Approved counts the rows whose decision is an approval.
+	Approved int `json:"approved"`
+	// Rejected counts the rows whose decision is a rejection.
+	Rejected int `json:"rejected"`
 	// Truncated reports that the period held more changes than the document carries.
-	Truncated bool
+	Truncated bool `json:"truncated"`
+	// TruncatedText is the notice a truncated register carries, naming the cap, how many changes it
+	// holds, and the instant it stops covering. Empty unless Truncated.
+	TruncatedText string `json:"truncated_text"`
 	// Limit is the cap the store query carried, named in the truncation notice.
-	Limit int
+	Limit int `json:"limit"`
 	// CoveredTo is the instant the document stops covering, formatted, empty unless Truncated.
-	CoveredTo string
+	CoveredTo string `json:"covered_to"`
 	// Failed tallies rows whose outcome is a failure.
-	Failed int
+	Failed int `json:"failed"`
+	// Drifted tallies approvals whose row's seal no longer matches the entry naming the approver.
+	Drifted int `json:"drifted"`
 	// Pruned counts changes the chain records in this period that the run store no longer holds,
 	// so the document says it is incomplete rather than reading as an account of a quiet period.
-	Pruned int
+	Pruned int `json:"pruned"`
+	// PrunedText is the notice an incomplete register carries, naming how many changes retention
+	// removed. Empty when Pruned is zero.
+	PrunedText string `json:"pruned_text"`
 	// ChainCount is the whole chain's entry count.
-	ChainCount int
+	ChainCount int `json:"chain_count"`
 	// Receipt is the chain head's seq:link at collection.
-	Receipt string
+	Receipt string `json:"receipt"`
 	// AnchorProblems describes each anchor the chain no longer satisfies.
-	AnchorProblems []string
+	AnchorProblems []string `json:"anchor_problems"`
 	// GeneratedAt is when the register was made, formatted.
-	GeneratedAt string
+	GeneratedAt string `json:"generated_at"`
 }
 
-// RenderRegister writes the change register as a self-contained HTML document.
-func RenderRegister(in *RegisterInput) ([]byte, error) {
+// BuildRegister turns a collected register into the rows, tallies, verdict, and notices the
+// document renders. It is the only place rows are made, so the HTML document and the JSON form of
+// the register endpoint carry the same changes in the same words.
+func BuildRegister(in *RegisterInput) (*Register, error) {
 	if in == nil {
-		return nil, fmt.Errorf("render register: no input")
+		return nil, fmt.Errorf("build register: no input")
 	}
-	v := registerView{
+	v := &Register{
 		From: in.From.UTC().Format("2006-01-02"), To: in.To.UTC().Format("2006-01-02"),
 		ChainCount:  in.ChainCount,
 		GeneratedAt: in.GeneratedAt.UTC().Format(time.RFC3339),
@@ -348,19 +441,31 @@ func RenderRegister(in *RegisterInput) ([]byte, error) {
 		Truncated:   in.Truncated,
 		Pruned:      in.Pruned,
 		Limit:       in.Limit,
+		Rows:        make([]RegisterRow, 0, len(in.Runs)),
 	}
 	// A truncated register that does not say so is the worst artifact this package can produce: it
 	// reads as the whole period, so an auditor sampling it believes they saw everything. The notice
 	// is rendered from the same fields the bound was applied with.
 	if in.Truncated {
 		v.CoveredTo = in.CoveredTo.UTC().Format(time.RFC3339)
+		v.TruncatedText = fmt.Sprintf("This register is truncated and is not the whole period. A "+
+			"register carries at most %d changes; this one carries the earliest %d and stops at %s. "+
+			"Changes created after %s are not in this document. The register that starts at %s "+
+			"carries the rest of the period.", v.Limit, v.Total, v.CoveredTo, v.CoveredTo,
+			v.CoveredTo)
+	}
+	if in.Pruned > 0 {
+		v.PrunedText = fmt.Sprintf("This register is incomplete. The chain records %d further %s in "+
+			"this period whose runs this install no longer holds, because retention removed them. "+
+			"Their entries remain in the chain and still verify; what they did is no longer readable "+
+			"here.", in.Pruned, util.Plural(in.Pruned, "change", "changes"))
 	}
 	if in.Head != nil {
 		v.Receipt = fmt.Sprintf("%d:%s", in.Head.Seq, in.Head.Hash)
 	}
 	for _, r := range in.Runs {
 		risk := run.AssessRisk(r)
-		row := registerRow{
+		row := RegisterRow{
 			When:          r.CreatedAt.UTC().Format("2006-01-02 15:04"),
 			Run:           r.ID,
 			Change:        changeOf(r),
@@ -384,6 +489,17 @@ func RenderRegister(in *RegisterInput) ([]byte, error) {
 			// account it acted for follows it.
 			if d.OnBehalfOf != "" {
 				row.Decision += " on behalf of " + d.OnBehalfOf
+			}
+			// The name is the approval entry's, which a writer can rewrite; the seal over the row
+			// it released is what says whether it still stands.
+			switch d.Seal {
+			case SealDrifted:
+				row.Decision += ", seal drifted"
+				v.Drifted++
+			case SealUnsealed:
+				row.Decision += ", unsealed"
+			case SealUnchecked:
+				row.Decision += ", seal unchecked"
 			}
 			row.DecisionSeq = d.Seq
 			switch d.Verdict {
@@ -421,6 +537,24 @@ func RenderRegister(in *RegisterInput) ([]byte, error) {
 		v.Status = "verified"
 		v.StatusText = fmt.Sprintf("The chain verifies and carries %d %s fixing it outside this "+
 			"install.", in.Anchored, util.Plural(in.Anchored, "anchor", "anchors"))
+	}
+	if v.Drifted > 0 {
+		v.StatusText += fmt.Sprintf(" %d %s no longer %s the seal on the row %s released, so the "+
+			"%s on %s not trusted.", v.Drifted, util.Plural(v.Drifted, "approval", "approvals"),
+			util.Plural(v.Drifted, "matches", "match"), util.Plural(v.Drifted, "it", "they"),
+			util.Plural(v.Drifted, "name", "names"), util.Plural(v.Drifted, "it is", "them are"))
+	}
+	return v, nil
+}
+
+// RenderRegister writes the change register as a self-contained HTML document.
+func RenderRegister(in *RegisterInput) ([]byte, error) {
+	if in == nil {
+		return nil, fmt.Errorf("render register: no input")
+	}
+	v, err := BuildRegister(in)
+	if err != nil {
+		return nil, fmt.Errorf("render register: %w", err)
 	}
 	var buf bytes.Buffer
 	if err := registerTemplate.Execute(&buf, v); err != nil {

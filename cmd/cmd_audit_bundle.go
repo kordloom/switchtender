@@ -160,6 +160,9 @@ func runAuditBundle(cmd *cobra.Command, _ []string) error {
 		// head is what the producer key could still rewrite whichever slice is handed over.
 		warnAnchorLag(walk.Highest, recorded)
 	}
+	if _, err := doc.AttachStoredAttestations(cmd.Context(), store.Audits()); err != nil {
+		return err
+	}
 	signed, err := audit.SignBundleDoc(doc, id.Private())
 	if err != nil {
 		return err

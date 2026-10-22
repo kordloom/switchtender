@@ -73,6 +73,10 @@ func TestUIRoutes(t *testing.T) {
 			Name: "run notifications", Path: "/ui/runs/run_1", WantStatus: http.StatusOK,
 			WantContains: `id="run-notifications"`,
 		},
+		{ // Test 10: The change register page renders as its own page, not as the audit page.
+			Name: "register", Path: "/ui/audit/register", WantStatus: http.StatusOK,
+			WantContains: `data-page="register"`,
+		},
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -154,7 +158,8 @@ func TestAppJSAssembledFromParts(t *testing.T) {
 	}
 	// Spot functions from the first, a middle, and the last source part must all be present,
 	// which fails if any part is dropped from the assembly.
-	for _, marker := range []string{"function syncBrandLogos", "const auditCollections", "function buildModel"} {
+	for _, marker := range []string{"function syncBrandLogos", "const auditCollections", "function buildModel",
+		"function loadRegister"} {
 		if !strings.Contains(body, marker) {
 			t.Errorf("assembled app.js is missing %q, so a source part was dropped", marker)
 		}

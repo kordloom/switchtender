@@ -57,7 +57,7 @@ func TestAReceiptNamingTheRegoBundleThatDecidedVerifiesInLoomSeal(t *testing.T) 
 	ended := time.Now()
 	exit := 0
 	r := &run.Run{
-		ID: "run_rego", Status: run.StatusSucceeded, CreatedAt: started, StartedAt: &started,
+		ID: "run_rego", Status: run.StatusPendingApproval, CreatedAt: started, StartedAt: &started,
 		EndedAt: &ended, Tool: run.ToolTerraform, Command: "infra/prod", Actor: "operator",
 		ActorType: "session", ExitCode: &exit,
 		AuditReceipt: fmt.Sprintf("%d:%s", creation.Seq, creation.Hash),
@@ -72,10 +72,8 @@ func TestAReceiptNamingTheRegoBundleThatDecidedVerifiesInLoomSeal(t *testing.T) 
 	if err := runs.Save(ctx, r); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	if _, err := outcome.CommitDecision(ctx, audits, r, "approved",
-		outcome.Decider{Name: "approver", Type: "session"}, time.Now); err != nil {
-		t.Fatalf("CommitDecision() error = %v", err)
-	}
+	r = approveSealed(t, runs, audits, id, r.ID, outcome.Decider{Name: "approver", Type: "session"},
+		run.DecisionSettle{Status: run.StatusSucceeded, EndedAt: ended})
 	if err := runs.AppendLog(ctx, r.ID, []byte("Apply complete!\n")); err != nil {
 		t.Fatalf("AppendLog() error = %v", err)
 	}
@@ -83,7 +81,8 @@ func TestAReceiptNamingTheRegoBundleThatDecidedVerifiesInLoomSeal(t *testing.T) 
 		t.Fatalf("Commit() error = %v", err)
 	}
 
-	res, err := receipt.Build(ctx, runs, audits, id, "v-test", r.ID, receipt.Options{})
+	res, err := receipt.Build(ctx, runs, audits, id, "v-test", r.ID,
+		keyedReceipt(t, runs, audits, id, receipt.Options{}))
 	if err != nil {
 		t.Fatalf("receipt.Build() error = %v", err)
 	}

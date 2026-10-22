@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -56,7 +57,13 @@ const (
 	FeaturePostgresInit Feature = "postgres-init"
 	// FeatureReconcile is the one-click drift reconcile proposal. Drift detection stays Community.
 	FeatureReconcile Feature = "reconcile"
+	// FeatureHostedWitness is enrolling the install with the KordLoom-operated witness. Enterprise
+	// includes it, and Team buys it as an add-on.
+	FeatureHostedWitness Feature = "hosted-witness"
 )
+
+// AddonHostedWitness is the add-on entry that grants FeatureHostedWitness to a Team license.
+const AddonHostedWitness = "hosted-witness"
 
 // Claims is the signed body of a license.
 type Claims struct {
@@ -77,6 +84,10 @@ type Claims struct {
 	Expires string `json:"expires"`
 	// Kid names the compiled-in key that signed this license.
 	Kid string `json:"kid"`
+	// Addons lists what was bought on top of the tier, such as AddonHostedWitness. The signature
+	// covers it only when it is non-empty, so a license without add-ons is signed over the same
+	// bytes it always was.
+	Addons []string `json:"addons,omitempty"`
 }
 
 // File is a license as it sits on disk: the claims and a signature over their canonical form.
@@ -132,14 +143,24 @@ func normalizeTier(tier string) string {
 // featureTier is the lowest tier that includes each feature. A feature absent from this map
 // requires Team, so forgetting to place a new feature fails toward the paid side, never the free.
 var featureTier = map[Feature]string{
-	FeatureSSO:          TierPro,
-	FeaturePolicyFull:   TierTeam,
-	FeaturePolicyRules:  TierPro,
-	FeatureRegister:     TierTeam,
-	FeatureWorkers:      TierTeam,
-	FeaturePostgresInit: TierTeam,
-	FeatureReconcile:    TierTeam,
+	FeatureSSO:           TierPro,
+	FeaturePolicyFull:    TierTeam,
+	FeaturePolicyRules:   TierPro,
+	FeatureRegister:      TierTeam,
+	FeatureWorkers:       TierTeam,
+	FeaturePostgresInit:  TierTeam,
+	FeatureReconcile:     TierTeam,
+	FeatureHostedWitness: TierEnterprise,
 }
+
+// featureAddon names the add-on that grants a feature below the tier that includes it. Only a tier
+// of addonTier or above can carry one.
+var featureAddon = map[Feature]string{
+	FeatureHostedWitness: AddonHostedWitness,
+}
+
+// addonTier is the lowest tier an add-on is sold on.
+const addonTier = TierTeam
 
 // minTierFor returns the lowest tier that includes a feature.
 func minTierFor(f Feature) string {
@@ -162,9 +183,30 @@ func tierLabel(tier string) string {
 	return tier
 }
 
-// covers reports whether the license's tier includes a feature.
-func (l *License) covers(f Feature) bool {
-	return tierRank(normalizeTier(l.Claims.Tier)) >= tierRank(minTierFor(f))
+// Covers reports whether the license includes a feature, by its tier or, from addonTier up, by an
+// add-on it lists. It looks at the claims alone and not at the term, so a lapsed license still
+// covers what it covered while live, which is the question Allow settles before it asks the clock.
+func (l *License) Covers(f Feature) bool {
+	rank := tierRank(normalizeTier(l.Claims.Tier))
+	if rank >= tierRank(minTierFor(f)) {
+		return true
+	}
+	addon, ok := featureAddon[f]
+	return ok && rank >= tierRank(addonTier) && slices.Contains(l.Claims.Addons, addon)
+}
+
+// needFor names what a feature requires as gate errors print it, article included: "a Team
+// license", or for a feature sold as an add-on, "an Enterprise license or the Team add-on".
+func needFor(f Feature) string {
+	tier := minTierFor(f)
+	need := "a " + tierLabel(tier) + " license"
+	if tier == TierEnterprise {
+		need = "an " + tierLabel(tier) + " license"
+	}
+	if _, ok := featureAddon[f]; ok {
+		need += " or the " + tierLabel(addonTier) + " add-on"
+	}
+	return need
 }
 
 // Verify checks a license file's signature against the compiled-in keys and returns the license.
@@ -207,6 +249,13 @@ func claimsObject(c Claims) map[string]any {
 	}
 	if c.Hosts != "" {
 		m["hosts"] = c.Hosts
+	}
+	if len(c.Addons) > 0 {
+		addons := make([]any, len(c.Addons))
+		for i, a := range c.Addons {
+			addons[i] = a
+		}
+		m["addons"] = addons
 	}
 	return m
 }
@@ -262,9 +311,9 @@ func allowAt(l *License, f Feature, now time.Time) error {
 	if name == "" {
 		name = string(f)
 	}
-	need := tierLabel(minTierFor(f))
+	need := needFor(f)
 	if l == nil {
-		return fmt.Errorf("%s requires a %s license; this install runs Community. "+
+		return fmt.Errorf("%s requires %s; this install runs Community. "+
 			"https://switchtender.com/pricing", name, need)
 	}
 	// Coverage is settled before the clock, and the order is the whole meaning of ErrLapsed.
@@ -275,13 +324,13 @@ func allowAt(l *License, f Feature, now time.Time) error {
 	// never included, so an expired Pro license was read as having lapsed out of the Team-only
 	// policy engine and was handed it. An expired license would then buy strictly more than the
 	// same license bought while it was live.
-	if !l.covers(f) {
-		return fmt.Errorf("%s requires a %s license; this install's %s license does not "+
+	if !l.Covers(f) {
+		return fmt.Errorf("%s requires %s; this install's %s license does not "+
 			"include it. https://switchtender.com/pricing",
 			name, need, tierLabel(normalizeTier(l.Claims.Tier)))
 	}
 	if l.Expired(now) {
-		return fmt.Errorf("%w: %s requires a %s license and this install's license for %s "+
+		return fmt.Errorf("%w: %s requires %s and this install's license for %s "+
 			"lapsed on %s; everything Community keeps working. https://switchtender.com/pricing",
 			ErrLapsed, name, need, l.Claims.Org, l.Claims.Expires)
 	}
@@ -340,13 +389,14 @@ func allowPoliciesAt(l *License, total int, now time.Time) error {
 
 // featureNames are the human names gates print.
 var featureNames = map[Feature]string{
-	FeatureSSO:          "Directory sign-in (OIDC, SAML, LDAP, JWT)",
-	FeaturePolicyFull:   "The full policy engine",
-	FeaturePolicyRules:  "Deny rules and risk and reversibility floors",
-	FeatureRegister:     "The period change register",
-	FeatureWorkers:      "Running distributed workers",
-	FeaturePostgresInit: "Initializing a new PostgreSQL database",
-	FeatureReconcile:    "One-click drift reconcile",
+	FeatureSSO:           "Directory sign-in (OIDC, SAML, LDAP, JWT)",
+	FeaturePolicyFull:    "The full policy engine",
+	FeaturePolicyRules:   "Deny rules and risk and reversibility floors",
+	FeatureRegister:      "The period change register",
+	FeatureWorkers:       "Running distributed workers",
+	FeaturePostgresInit:  "Initializing a new PostgreSQL database",
+	FeatureReconcile:     "One-click drift reconcile",
+	FeatureHostedWitness: "The hosted witness",
 }
 
 // PathFor returns where an install's license lives. SWITCHTENDER_LICENSE overrides everything.

@@ -44,10 +44,20 @@ type Observed struct {
 	Head string `json:"head"`
 }
 
-// Checkpoint is the witness's signed memory of a server's beat stream.
+// Checkpoint is the witness's signed memory of a server's beat stream, or of an enrolled install's
+// pushed beats and tree.
 type Checkpoint struct {
-	// Server is the watched server's base URL.
+	// Server is the watched server's base URL, or the install id for an enrolled install.
 	Server string `json:"server"`
+	// InstallID names the enrolled install this memory belongs to. It is empty for a pulled
+	// server, and omitted then, so a checkpoint signed before the field existed verifies unchanged.
+	InstallID string `json:"install_id,omitempty"`
+	// Size is the number of chain entries the held tree root covers, zero before the first push and
+	// for a pulled server.
+	Size int64 `json:"size,omitempty"`
+	// Root is the hex Merkle tree root at Size, the tree the next push's consistency proof must
+	// extend. It is empty before the first push and for a pulled server.
+	Root string `json:"root,omitempty"`
 	// LastBeat is the highest beat number observed.
 	LastBeat int64 `json:"last_beat"`
 	// LastSeq is the chain position of that beat.
@@ -88,6 +98,10 @@ type Finding struct {
 	// so a reporter can tell "the same truncation, observed again" from a new event. Empty means
 	// Detail itself is stable and identifies the event.
 	Key string `json:"-"`
+	// Class carries the recorded class, ClassRefusal or ClassNote, to notifiers for a finding about
+	// an enrolled install, and is empty for a watched server. It is never serialized, so the findings
+	// record, the statement and every API answer keep their bytes.
+	Class string `json:"-"`
 }
 
 // maxBeatJump bounds how far past the last witnessed beat a served beat may claim to be, and it
@@ -516,10 +530,11 @@ func Verify(c *Checkpoint) (publicKey string, err error) {
 	return c.PublicKey, nil
 }
 
-// Load reads and verifies a checkpoint file, pinning its signer to expectKey when one is given. A
-// missing file returns nil with no error, the first watch. A present file that fails verification
-// or was signed by another key is an error, never silently accepted.
-func Load(path, expectKey string) (*Checkpoint, error) {
+// Load reads and verifies a checkpoint file, pinning its signer to one of expectKeys when any is
+// given, which is how a witness that rotated its key still reads the memory an earlier key signed.
+// An empty key pins nothing. A missing file returns nil with no error, the first watch. A present
+// file that fails verification or was signed by any other key is an error, never silently accepted.
+func Load(path string, expectKeys ...string) (*Checkpoint, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -538,10 +553,19 @@ func Load(path, expectKey string) (*Checkpoint, error) {
 	// The signature alone proves only that the file is self-consistent, which a forger who
 	// generates their own key satisfies trivially. Pinning the signer to this witness's own key is
 	// what makes a replaced state file detectable.
-	if expectKey != "" && signer != expectKey {
+	var pinned []string
+	for _, k := range expectKeys {
+		if k == signer {
+			return &c, nil
+		}
+		if k != "" {
+			pinned = append(pinned, keyName(k))
+		}
+	}
+	if len(pinned) > 0 {
 		return nil, fmt.Errorf("checkpoint was signed by key %s, not by this witness's key %s: "+
 			"the state file was replaced, or this witness is not running with the key that wrote "+
-			"it", keyName(signer), keyName(expectKey))
+			"it", keyName(signer), strings.Join(pinned, " or "))
 	}
 	return &c, nil
 }

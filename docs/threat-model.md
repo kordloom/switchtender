@@ -67,8 +67,12 @@ its actor, and the run itself records which rule held it.
 Editing an entry breaks its content digest. Replacing an entry breaks the hash link of everything
 after it. Truncating the chain moves the head backward, which is exactly what a witness on another
 machine is watching for: it keeps a signed checkpoint of the head it saw and raises a finding when
-history shrinks or a heartbeat goes missing. A bundle already exported is out of reach entirely; it
-is signed, self-contained, and in somebody else's hands.
+history shrinks or a heartbeat goes missing. An install enrolled with a push witness sends it every
+beat with a consistency proof, and the witness countersigns only a tree that extends the one it
+holds. A chain rewritten at or before any position it countersigned is never countersigned again,
+and no export from that chain reads `VERIFIED` when `switchtender verify --witness` holds it to the
+witness's signed statement. A bundle already exported is out of reach entirely. It is signed,
+self-contained, and in somebody else's hands.
 
 ### An administrator of the controller
 
@@ -81,13 +85,138 @@ and a witness dates that boundary. The chain proves the record was not altered a
 has never claimed to prove the writer was honest at the time of writing, and this page will not
 claim it either.
 
+### Whoever can write the database
+
+This principal can write every table, the audit chain's tables included, and can recompute every
+hash the chain carries, since the chain's links are plain SHA-256 over public fields. It does not
+control the server process and does not hold the install's producer identity seed. A principal that
+also controls the process or holds the seed is the administrator of the section above, and nothing
+here changes that boundary.
+
+What holds depends on the server loading the producer identity, which the precondition below
+states. The server derives an approval binding key from the producer identity with HKDF-SHA256 and
+holds it only in memory. The database never holds it. Every run the server creates or releases
+carries a seal, an HMAC under that key over the run's spec binding, its governance fields, its
+parent's binding, and the audit chain entries it derives from, each named by id and content digest
+and by the actor, actor type, delegated account, and method of the entry, so who decided is under
+the seal. The governance fields are who asked, whether an agent or a person asked, who it acted for, the
+queue, the labels, the reversibility grade, the timeout, and the creation time, among others. A
+writer can read every row and still cannot mint a seal for a row it edited.
+
+Before a run executes, the executor recomputes the seal from the row and from the chain entries it
+fetches by id, and refuses the run on any difference. This covers held runs, approval nodes, shards
+of a split run, workflow steps, and steps released by an approval. Approving or rejecting a run, or
+deciding an approval step, also checks the seal first, so a rewritten row is refused before
+anyone's decision attaches to it. Once an install's adoption is recorded, a keyed executor checks
+every row, so a row whose seal a writer removed is refused as carrying none. A claim on a decision
+in flight carries its own seal, so a decision claim the process did not write is never recorded as
+a decision. Because the governance fields are sealed, a writer cannot mark a run as already
+approved to skip a rule that makes it plan first, and cannot turn an agent's run into a person's to
+skip the approval agent runs need.
+
+Who decided is held the same way. A writer who renames the approver on a DECISION entry and
+re-links the chain leaves a chain that verifies, but the executor reads the entry by id and checks
+no link, and the seal it recomputes covers the name, so the run is refused before it runs. A receipt
+is built only by the process that holds the key, and it is refused rather than signed when the run,
+or an approval step whose approval it carries, no longer matches its seal, or when the install holds
+no key. The dossier and the change register name each approver from the chain entry, hold the row
+the approval released to its seal, and flag a name whose seal drifted as not trusted, and the
+dossier then reads not verified.
+
+An approval step's timeout and the time it started waiting are sealed. A forged timeout, whether
+backdated or added, is refused: the workflow fails with the reason and neither the approved nor the
+denied path runs. A step whose approval request could not be recorded fails the workflow instead of
+running the deny path. The deny path runs only after a recorded verdict. A finished step's status
+and outputs carry a result seal minted when the process writes them, so a workflow resumed later
+feeds forward only what the process wrote.
+
+Each attempt appends a START entry under an id fixed by the run and the attempt, after the executor
+takes the run and before any tool runs. A finished run that a writer resets to pending is refused
+and runs nothing, and an honest retry gets a new attempt and runs. If the START entry cannot be
+recorded, the run does not run. A relay control node does the same for the runs it hands to relay
+workers, and checks each run's seal before it hands it out. Launching a step that an approval
+released appends one RELEASE entry under a fixed id, naming the decision entries that released it
+by content digest. A receipt holds the released step's spec to the decision that released it, and
+this product's verifier and every LoomSeal verifier from 1.10.0 on fail a receipt whose release or
+decision was edited. A receipt that withholds its outcome reports its releases as verified but not
+compared. When the check cannot be made, because a chain entry cannot be read, the run fails closed
+and its error says the check could not be made. It never says the run was refused or changed.
+
+All of this holds only on a server that loads the install's producer identity, and every server of
+one install must load the same one. A server with no identity holds no key. It compares the digests
+stored on each run and warns at startup that approval binding is row-checked only, which a writer
+who also writes matching digests passes. A worker that shares the database directly holds no key,
+so the runs it claims are held only to the digests stored on them. A server whose key names another
+install refuses to start.
+
+Work a release without the key left behind carries no seal. `switchtender adopt` seals it once per
+install, run by a person. It verifies the chain from its first entry, refuses if any row already
+carries a seal or the chain holds an entry only a keyed install writes, shows every row it would
+seal, with who asked and who decided, and asks before it writes. It records the adoption on the
+chain under an id the key fixes. A keyed server that starts with nothing to adopt records the
+adoption itself, trusting no row, so adopt cannot later be run over that install. A keyed start
+that finds sealed work and no adoption record is refused as a removed record.
+
+Several things do not hold. The chain's links use public hashes. A writer can delete the adoption
+record, re-link every later entry, and delete the anchors the database holds, and then adopt runs a
+second time and seals whatever the writer left. Only an anchor or a witness checked outside the
+database bounds that. An install enrolled with a witness is bounded: adopt fetches the witness's
+signed head and refuses a chain that does not reach it, and refuses to adopt while the witness
+cannot answer. A witness that holds nothing for an install says so in a signed statement, so an
+unsigned answer saying the same is refused, and adopt and `witness enroll` refuse a plain-http
+witness that is not on a loopback address. After it writes, adopt appends a span beat and pushes it,
+so the witness's head covers the adoption record before adopt returns, and a keyed server on an
+enrolled install refuses to start on a chain that does not reach the witness's head. One window
+remains. From the moment adopt's push fails, or from a start that found entries the witness has not
+seen while the witness could not be reached, until the next push lands, those newest entries are
+outside the witness's memory, and a writer who removes the record and re-links the chain inside that
+window is not refused by the witness. Adopt exits non-zero when its push fails, and the server logs
+a warning when it starts without the check. Adopt prints the chain's length, its newest anchor and
+the install it is bound to before it asks, and a request to adopt an install that was adopted or
+served before is itself evidence that its chain was rewritten. The same re-link reopens a finished
+run: a writer who deletes its START entry and re-links the chain makes the attempt look unstarted.
+It also reaches receipts. The server signs the chain it reads, so a re-linked edit or a cut tail on
+a chain that no anchor or witness covers verifies. Anchors and the witness detect each of these, as
+for adoption. A workflow that ended interrupted or canceled before its walk finished can be resumed
+by a writer who resets its status, and it then launches the steps that never ran. No step runs
+twice, but nobody asked for the resume. Adopt's check that no row carries a seal is a tripwire for
+an honest restore of the wrong backup, not a defense: one statement clears every seal. A rule's
+policy is read from the database when a run nobody approved executes, so a writer who edits a policy
+changes which unapproved applies are made to plan first.
+
+Who decided has limits of its own. Outside the process nothing changes. The decider on the chain is
+bound by the public link, so an exported chain that was re-linked carries the rewritten name and
+verifies until an anchor or a witness beat covering that entry is compared, and inside the
+unwitnessed tail nothing bounds it. A receipt issued before the rewrite is unaffected and is not
+checked again later. An install with no producer identity holds no key, so the decider is
+rewritable there like every other field, and the dossier and the register say unchecked and never
+verified for it. The decision record kept beside the chain, with its actor, its account, and its
+reason text, is covered by no seal and no link. The dossier names the decider from the sealed entry
+and shows a record that disagrees beside it, without resolving the disagreement. When a decision was
+made is not sealed. The entry's time is bound by the link only, because a seal is made before its
+entry is appended and the append truncates the time, so sealing it needs an encoding fixed on the
+stored form. Adopt seals the decider as the chain shows it at adoption, so a rewrite made before
+adopt is sealed as true, which the witness fence bounds as it does every other adopted field. A
+rejection, a denied approval step, and the policy refusal `system:policy` records release nothing,
+so no row's seal covers who made them, and they are display evidence only.
+
+Two more limits apply. Adopting an unbound chain from a machine whose identity differs from the
+servers' binds the chain to that machine's key, and the servers then refuse to start. That is an
+operator's error caught at the first keyed start, not a path for the writer. And a writer can always
+stop work by damaging rows. Every refusal fails closed, which the availability limit below already
+states.
+
 ### Whoever holds the signing key
 
 The key signs bundles, so its holder can sign a forged one. Three things bound the damage. The key
 is published at a well-known path and can be pinned out of band, so a verifier is not taking the
-server's word for which key is real. The hosted witness countersigns what it observed, so a forged
-bundle also needs the witness to have seen a history that was never served. And every entry is
-bound to its install identity, so a bundle signed by one install cannot be replayed as another's.
+server's word for which key is real. The hosted witness countersigns each beat an enrolled install
+pushes, under its own key, which the producer key's holder does not hold: it is a 0600 file on the
+witness host, and KordLoom keeps its encrypted backups off that host. A forged history therefore
+also needs the witness to have countersigned it, and held to the witness's statement with `verify
+--witness`, an export whose links differ from what the witness countersigned fails. And every entry
+is bound to its install identity, so a bundle signed by one install cannot be replayed as
+another's.
 
 The operator who runs the install holds that key, so the operator is this adversary too, and the
 cheapest forgery open to them is not a new history but an edited receipt: change what a receipt
@@ -110,6 +239,19 @@ one. Anchors fix when history existed, so a rewrite made after an anchor shows. 
 countersigns heads as they are served fixes them in a record the operator does not control. Neither
 makes an entry true, and before the first anchor the operator's key is the only thing the record
 rests on.
+
+The push witness has limits of its own, and [the hosted witness page](witness.md#limits) lists
+them. It bounds history only from the first root it countersigned for an install, and it sees
+nothing between two beats. Before it holds a countersigned head for an install it bounds nothing:
+adopt's check against the witness's head binds only once there is one, and adopt's refusal when the
+install's store holds countersignatures the witness no longer remembers is a tripwire held in the
+database, which a writer who rewrites the chain can empty too. Root on the witness host, or a holder
+of a backup of its key, can sign false countersignatures. `switchtender verify` counts only the
+countersignatures on entries and refuses head attestations by name, and a sparse receipt is not
+checkable under `--witness`. A rotated identity cannot enroll until a succession link ships. An
+outage queues pushes in memory for one day of beats, drops the oldest past that with a counter
+rising, and resumes from the size the witness last acknowledged, and neither the queue nor the
+status's newest countersigned beat survives a restart.
 
 ### An AI agent holding a token
 
@@ -185,6 +327,10 @@ loudly, and it is the right trade for a system whose product is the record.
 - **Chain append fails.** The mutation is refused with 503. Nothing executes off the record.
 - **Policy store unreadable.** Submission refused. A gate that cannot be evaluated has not passed.
 - **Spec changed after approval.** The run fails at claim time, naming the digest mismatch.
+- **A run changed in the database after approval.** On a server with the producer identity it is
+  refused before it runs, naming what does not match.
+- **The chain cannot be read while a run is checked.** The run fails closed, and its error says the
+  check could not be made rather than that the run was changed.
 - **Project fetch fails at the gate.** The grade reads the commit the last sync left and says which
   commit that was. The execution that follows syncs the same remote and fails on the same fault.
 - **Database restored from an older backup.** The head moves backward. A witness raises a finding,
@@ -193,9 +339,26 @@ loudly, and it is the right trade for a system whose product is the record.
   When it comes back it checks the feed against its signed checkpoint, so a beat it had already
   witnessed that has since vanished or changed is still a finding. History written and removed
   entirely while it was away is outside what it saw. Anchors bound that loss independently of any
-  witness. `witness serve` reports a server it cannot reach rather than going quiet.
-- **Signing key lost.** Old bundles still verify against the pinned key. New exports need a new
-  key, and the change of key is itself visible to anyone pinning the old fingerprint.
+  witness. `witness serve` reports a server it cannot reach rather than going quiet. An enrolled
+  install keeps beating and anchoring, queues its pushes for up to one day of beats, and proves
+  each from the size the witness last acknowledged when it answers again. Past a day the oldest is
+  dropped and counted, and the witness notes the gap as `missing_beat`. An export made during the
+  outage carries countersignatures through the last acknowledged beat and none after.
+- **Witness restored from a snapshot.** Its memory rewinds to the snapshot. It records one
+  `memory_restored` note per enrolled install naming the size it now holds, each install proves
+  again from that size, and the notes never fail a verify. Countersignatures issued after the
+  snapshot still verify by their signatures, but the witness no longer holds those entries, so a
+  rewrite of them made before the install's first push after the restore is not refused. That
+  interval is the window a relying party weighs, and the note names where it starts.
+- **Signing key lost.** A server that finds the chain bound to an install whose key it does not
+  hold refuses to start, keyed or unkeyed, so no replica runs beside keyed ones checking no seal.
+  Bundles, receipts, anchors and witness statements made before the loss verify against the
+  pinned key as they always did. Runs waiting or in flight carry seals only that key can check,
+  so they never execute. The remedy is to restore the key. With no copy anywhere, the install
+  starts again as a new one: a backup restored into a new database, with a new key, a new
+  install id, a new fingerprint to pin and a new witness enrollment. Anyone pinning the old
+  fingerprint sees the change. History on the old chain that no bundle exported before the loss
+  is not evidence anyone can sign.
 
 If a claim on the homepage is not defended on this page, report it as a bug: either the page is
 missing an argument or the homepage is overclaiming, and both deserve a fix.

@@ -2,10 +2,7 @@ package dispatch
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 
 	"go.uber.org/zap"
 
@@ -180,31 +177,23 @@ func launcherType(r, root *run.Run) string {
 	}
 }
 
-// approverOf reads who approved r from the decision entry the audit chain recorded for it. The scan
-// starts at the entry that recorded r's request, since a decision always follows the request it
-// decides, and stops at the first approval for r. It answers empty when the install keeps no trail
-// or the run carries no receipt to start from, rather than reading the whole chain on every launch.
+// approverOf reads who approved r from the DECISION entry r names by id. It runs after the executor
+// held r to its seal, which covers that entry's actor, so the name it reads is the name sealed. A
+// scan by path would take the first approval at r's path, which can be a decision that lost its
+// claim and never released r. It answers empty when the install keeps no trail, r names no
+// decision, or the entry is not the approval of r.
 func (d *Dispatcher) approverOf(ctx context.Context, r *run.Run) (string, string) {
-	if d.audits == nil || r.AuditReceipt == "" {
+	if d.audits == nil || r.DecisionID == "" {
 		return "", ""
 	}
-	seqText, _, _ := strings.Cut(r.AuditReceipt, ":")
-	seq, err := strconv.ParseInt(seqText, 10, 64)
-	if err != nil || seq < 1 {
-		return "", ""
-	}
-	path := "/runs/" + r.ID + "/decision/approved"
-	var name, kind string
-	err = d.audits.ChainScan(ctx, seq-1, func(e *audit.Entry) error {
-		if e.Method == audit.MethodDecision && e.Path == path {
-			name, kind = e.Actor, e.ActorType
-			return errDecisionFound
-		}
-		return nil
-	})
-	if err != nil && !errors.Is(err, errDecisionFound) {
+	e, err := chainEntryOf(d.audits)(ctx, r.DecisionID)
+	switch {
+	case err != nil:
 		d.log.Warn("dispatch: read approval for run identity: "+err.Error(), zap.String("run_id", r.ID))
 		return "", ""
+	case e == nil || e.Method != audit.MethodDecision ||
+		e.Path != "/runs/"+r.ID+"/decision/"+outcome.StepApproved:
+		return "", ""
 	}
-	return name, kind
+	return e.Actor, e.ActorType
 }

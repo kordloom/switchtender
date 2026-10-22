@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/util"
 	"github.com/kordloom/switchtender/witness"
 )
@@ -195,14 +197,25 @@ func postWitnessFinding(ctx context.Context, client *http.Client, webhook, serve
 	if webhook == "" {
 		return nil
 	}
-	payload, err := json.Marshal(map[string]string{
+	body := map[string]string{
 		"server": server, "kind": f.Kind, "detail": f.Detail,
 		"at": time.Now().UTC().Format(time.RFC3339),
-	})
+	}
+	if f.Class != "" {
+		body["class"] = f.Class
+	}
+	payload, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhook, bytes.NewReader(payload))
+	return postWitnessBody(ctx, client, webhook, payload)
+}
+
+// postWitnessBody posts one JSON body to a channel. A transport failure or a non-2xx answer is
+// returned, because a delivery the channel refused is a delivery that did not happen, whatever the
+// transport says. The generic webhook and Slack both post through it.
+func postWitnessBody(ctx context.Context, client *http.Client, target string, payload []byte) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
@@ -216,6 +229,98 @@ func postWitnessFinding(ctx context.Context, client *http.Client, webhook, serve
 		return fmt.Errorf("the webhook answered %s", res.Status)
 	}
 	return nil
+}
+
+// The witness posts findings to Slack from one goroutine of its own. The service hands a finding to
+// its notifier before it answers the push that raised it, so a post made there would hold the
+// install's answer for as long as Slack took, a retry included.
+const (
+	// witnessSlackRetryWait is how long a Slack post that failed waits before its one retry.
+	witnessSlackRetryWait = 2 * time.Second
+	// witnessSlackQueue bounds the messages waiting for Slack. Past it a message is dropped with a
+	// log line, since the findings record is the durable copy and a push never waits on Slack.
+	witnessSlackQueue = 256
+)
+
+// witnessSlackText renders one finding as the Slack message the witness posts. A finding about an
+// enrolled install names its class and the producer key id the witness keeps the install's record
+// under. A finding about a watched server has no class and names the server.
+func witnessSlackText(subject string, f witness.Finding) string {
+	if f.Class == "" {
+		return fmt.Sprintf("SwitchTender witness: %s on watched server %s\n> %s", f.Kind, subject,
+			f.Detail)
+	}
+	return fmt.Sprintf("SwitchTender witness %s: %s for producer key %s\n> %s", f.Class, f.Kind,
+		subject, f.Detail)
+}
+
+// postWitnessSlack posts one message to a Slack incoming webhook, and once more after wait when the
+// first attempt fails, so a passing fault at Slack does not cost the alert. It returns the last
+// attempt's error with the webhook URL masked out of it, because the URL is the credential.
+func postWitnessSlack(ctx context.Context, client *http.Client, webhook, text string, wait time.Duration) error {
+	payload, err := dispatch.SlackBody(text)
+	if err != nil {
+		return err
+	}
+	if err = postWitnessBody(ctx, client, webhook, payload); err == nil {
+		return nil
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+		return util.MaskURLError(err, webhook)
+	}
+	return util.MaskURLError(postWitnessBody(ctx, client, webhook, payload), webhook)
+}
+
+// witnessSlack delivers findings to Slack incoming webhooks in the order they were raised, from the
+// goroutine that runs it.
+type witnessSlack struct {
+	// urls are the incoming webhook URLs every finding is posted to.
+	urls []string
+	// client posts the messages.
+	client *http.Client
+	// wait is how long a failed post waits before its one retry.
+	wait time.Duration
+	// log receives every delivery that failed twice and every dropped message, with no URL unmasked.
+	log *zap.Logger
+	// queue holds the messages waiting for delivery, oldest first.
+	queue chan string
+}
+
+// newWitnessSlack returns a Slack notifier for urls. Nothing is posted until run is started.
+func newWitnessSlack(urls []string, client *http.Client, wait time.Duration, log *zap.Logger) *witnessSlack {
+	return &witnessSlack{urls: urls, client: client, wait: wait, log: log,
+		queue: make(chan string, witnessSlackQueue)}
+}
+
+// notify queues one finding for Slack and returns at once.
+func (n *witnessSlack) notify(subject string, f witness.Finding) {
+	select {
+	case n.queue <- witnessSlackText(subject, f):
+	default:
+		n.log.Warn("witness: slack queue full, dropping a finding",
+			zap.String("subject", subject), zap.String("finding", f.Kind))
+	}
+}
+
+// run posts queued messages to every webhook until ctx ends.
+func (n *witnessSlack) run(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case text := <-n.queue:
+			for _, webhook := range n.urls {
+				if err := postWitnessSlack(ctx, n.client, webhook, text, n.wait); err != nil {
+					n.log.Warn("witness: slack delivery failed",
+						zap.String("url", util.MaskURL(webhook)), zap.Error(err))
+				}
+			}
+		}
+	}
 }
 
 // witnessSummary is the line a clean --once check ends with: what this witness now holds. Without

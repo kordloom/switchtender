@@ -60,7 +60,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api" class="active">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime">Managed Ansible runtime</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api" class="active">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime">Managed Ansible runtime</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a><a href="/docs/witness">Hosted witness</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -95,7 +95,7 @@ with a message naming the feature rather than failing in some subtler way:</p>
 <tr>
 <td><code>GET /v1/audit/register</code></td>
 <td>Team</td>
-<td>The period change register, covering the last 90 days unless <code>from</code> and <code>to</code> name another period, each a date or an RFC 3339 timestamp. Per-run dossiers, receipts, bundles, and <code>GET /v1/audit/verify</code> are free.</td>
+<td>The period change register, covering the last 90 days unless <code>from</code> and <code>to</code> name another period, each a date or an RFC 3339 timestamp, and the same rows as JSON with <code>format=json</code>. Per-run dossiers, receipts, bundles, and <code>GET /v1/audit/verify</code> are free.</td>
 </tr>
 <tr>
 <td><code>POST /v1/drift/reconcile</code></td>
@@ -863,7 +863,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/audit/register</code></td>
-<td>The change register as a self-contained HTML document, admin only.</td>
+<td>The change register as a self-contained HTML document, admin only. <code>format=json</code> returns the same rows as data, which the web interface's register page reads.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -879,6 +879,11 @@ either licensed or absent.</li>
 <td>GET</td>
 <td><code>/v1/audit/bundle</code></td>
 <td>The audit chain as a signed LoomSeal bundle, verifiable offline or on the /verify page.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/audit/witness</code></td>
+<td>The install's standing with its push witness, admin only: the witness and its key id, the last countersigned beat, seq, and time, the queue, the last error, and the last refusal with its findings. 404 when the install is not enrolled.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -999,7 +1004,9 @@ verified first, and the slice's first entry carries the link to the one before i
 verifier sees that the slice belongs to the chain.</p>
 <p>The chain gauges walk again at most every 15 seconds, or every ten times the last walk's duration
 when that is longer, so a long chain never keeps a read connection busy more than a tenth of the
-time. That interval is also how long an entry rewritten in place can go unreported. A scrape that
+time. The stretched interval is capped at 10 minutes, so one walk that stalls cannot hold the next
+one off longer than that. That interval is also how long an entry rewritten in place can go
+unreported. A scrape that
 arrives while another walk runs serves the last reading with <code>switchtender_audit_health_stale</code> at
 <code>1</code> instead of waiting, and the next scrape walks.</p>
 <h2 id="opening-a-live-stream">Opening a live stream</h2>

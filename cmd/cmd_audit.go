@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/dossier"
 	"github.com/kordloom/switchtender/internal/license"
 )
@@ -113,6 +114,14 @@ func runChangeRegister(cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("collect change register: %w", err)
 	}
+	// The key the install seals rows under derives from the identity that signs, so each approval
+	// is held to the seal over the row it released.
+	key, err := bindingKeyOf(&id)
+	if err != nil {
+		return err
+	}
+	dossier.AttachRegisterSeals(cmd.Context(), in,
+		dispatch.NewBindingVerifier(store.Runs(), store.Audits(), key), store.Runs())
 	doc, err := dossier.RenderRegister(in)
 	if err != nil {
 		return err

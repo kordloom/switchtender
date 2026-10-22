@@ -64,7 +64,8 @@ var commands = sync.OnceValue(func() commandTree {
 func TestTheCommandSurfaceIsWhatItSaysItIs(t *testing.T) {
 	t.Parallel()
 	want := []string{
-		"ansible", "assess", "audit", "backup", "demo", "desktop", "examples", "import", "init",
+		"adopt", "ansible", "assess", "audit", "backup", "demo", "desktop", "examples", "import",
+		"init",
 		"license", "mcp",
 		"receipt", "restore", "serve", "token", "user", "verify", "version", "witness", "worker",
 	}
@@ -103,7 +104,8 @@ func TestSubcommandGroupsKeepTheirMembers(t *testing.T) {
 		Name: "import", Parent: importCmd,
 		WantNames: []string{"awx", "chef", "cron", "jenkins", "puppet", "rundeck", "semaphore"},
 	}, { // Test 6: The witness tools.
-		Name: "witness", Parent: witnessCmd, WantNames: []string{"serve", "verify-attestation"},
+		Name: "witness", Parent: witnessCmd,
+		WantNames: []string{"enroll", "rotate-key", "serve", "verify-attestation"},
 	}, { // Test 7: The worker's one group, its delivery keys.
 		Name: "worker", Parent: workerCmd, WantNames: []string{"key"},
 	}, { // Test 8: The delivery key tools a relay worker pool registers and rotates with.
@@ -285,13 +287,14 @@ func TestNoFlagDefaultCarriesASecret(t *testing.T) {
 func TestEveryStoreCommandTakesTheSameDatabaseFlag(t *testing.T) {
 	t.Parallel()
 	paths := []string{
-		"switchtender ansible", "switchtender audit anchor", "switchtender audit bundle",
+		"switchtender adopt", "switchtender ansible", "switchtender audit anchor",
+		"switchtender audit bundle",
 		"switchtender audit receipt", "switchtender audit report", "switchtender audit run", "switchtender backup",
 		"switchtender examples", "switchtender import awx", "switchtender import cron",
 		"switchtender import jenkins", "switchtender import rundeck", "switchtender import semaphore",
 		"switchtender init", "switchtender license install", "switchtender license status",
 		"switchtender receipt", "switchtender restore", "switchtender serve", "switchtender token",
-		"switchtender user", "switchtender worker",
+		"switchtender user", "switchtender witness enroll", "switchtender worker",
 	}
 	byPath := commands().ByPath
 	for testNum, path := range paths {

@@ -479,7 +479,7 @@ func TestAuditRegisterRefusesABadPeriod(t *testing.T) {
 				audits = audit.NewMemStore()
 			}
 			rec := httptest.NewRecorder()
-			auditRegisterHandler(run.NewMemStore(), audits, audit.Identity{InstallID: "install_1"}, zap.NewNop()).
+			auditRegisterHandler(run.NewMemStore(), audits, audit.Identity{InstallID: "install_1"}, nil, zap.NewNop()).
 				ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
 					"/v1/audit/register"+test.Query, nil))
 			if rec.Code != test.WantStatus {
@@ -499,7 +499,7 @@ func TestAuditRegisterHandlerPanicsWithoutAStore(t *testing.T) {
 			t.Error("auditRegisterHandler accepted a nil run store")
 		}
 	}()
-	auditRegisterHandler(nil, audit.NewMemStore(), audit.Identity{InstallID: "install_1"}, zap.NewNop())
+	auditRegisterHandler(nil, audit.NewMemStore(), audit.Identity{InstallID: "install_1"}, nil, zap.NewNop())
 }
 
 // TestParseRegisterTime pins both accepted spellings of a period bound and the refusal of anything
@@ -578,6 +578,9 @@ func (u *unreadableAudits) Chain(context.Context) ([]*audit.Entry, error) { retu
 func (u *unreadableAudits) ChainScan(context.Context, int64, func(*audit.Entry) error) error {
 	return u.err
 }
+
+// Entry reports the read failure.
+func (u *unreadableAudits) Entry(context.Context, string) (*audit.Entry, error) { return nil, u.err }
 
 // TestChainHealthReportsStaleRatherThanBroken pins the distinction an alarm depends on. A chain that
 // cannot be read is not a chain that has been tampered with, and reporting one as the other pages

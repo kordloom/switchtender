@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -82,6 +83,31 @@ type BundleReport struct {
 	SpecConsistent bool
 	// SpecBody is the disclosed redacted spec JSON, meaningful when SpecConsistent.
 	SpecBody []byte
+	// ReleaseEntries counts the step releases the document carries, disclosed or not. A receipt
+	// cannot disclose a release whose step record is gone, and the chain still holds its entry, so
+	// a count beside ReleasesPresent says how many the document could not show.
+	ReleaseEntries int
+	// ReleasesPresent counts the step releases the document disclosed.
+	ReleasesPresent int
+	// ReleasesOK reports every disclosed release matches the digest its chain entry committed and
+	// discloses no reason, since a release commits none. True when none are disclosed.
+	ReleasesOK bool
+	// ReleasesConsistent reports every verified release names, by content digest, a verified
+	// decision of its own run that approved, rejected, or timed out, and, when ReleasesCompared,
+	// that the verified outcome's child for the released step names the same index, attempt, and
+	// spec digest. True when there was nothing to compare. False means the step the receipt says a
+	// decision released is not the step it says ran, or no decision the receipt shows released it.
+	ReleasesConsistent bool
+	// ReleasesCompared reports the verified releases were held to a verified outcome's children.
+	// False when the document discloses no outcome, or one that does not match its digest, which
+	// leaves each release verified against its own entry and held to no outcome.
+	ReleasesCompared bool
+	// Releases are the digest-verified releases: which step of which workflow was released, at which
+	// attempt, with which spec, and the decisions it names.
+	Releases []DisclosedRelease
+	// ReleaseProblems names, as "claim N ...", each disclosed release that failed and why, so a
+	// refusal says which release it is about.
+	ReleaseProblems []string
 	// TimeProblems names each place a claim's recorded time does not advance past the claim before
 	// it. A written link commits to the time it holds and cannot be repaired, so this is reported
 	// rather than treated as a broken chain, and a reader decides what a clock that went backward
@@ -121,8 +147,72 @@ type BundleReport struct {
 	// DisclosedUnchecked is how many disclosed records are unchecked, a member and the one it travels
 	// with counted once. A document with any never verifies as plain VERIFIED.
 	DisclosedUnchecked int
+	// WitnessAttested counts the claims a witness countersigned, each pair of witness key and claim
+	// once, among the attestations of role witness that verify over the link of the claim they ride
+	// on.
+	WitnessAttested int
+	// WitnessKeyIDs are the key ids of the witnesses whose attestations verify, in sorted order.
+	WitnessKeyIDs []string
+	// WitnessNewestSeq is the highest seq a verified witness attestation covers, zero when none does.
+	WitnessNewestSeq int64
+	// WitnessProblems names, by the seq of the entry it rides on, each witness attestation that does
+	// not verify. The claim it names was altered or the attestation was forged, so any entry fails
+	// the document.
+	WitnessProblems []string
+	// witnessBy holds, per witness key id, what that key's verified attestations cover.
+	witnessBy map[string]*witnessTally
 	// memberStates holds what each check established about the members it covered.
 	memberStates map[int]map[string]memberSettled
+	// decisionClaims holds, by claim index, what the release check reads about each decision whose
+	// body matched its digest.
+	decisionClaims map[int]verifiedDecision
+}
+
+// verifiedDecision is what the release check reads about one decision claim whose body matched the
+// digest its entry committed.
+type verifiedDecision struct {
+	// runID is the run the decision body names.
+	runID string
+	// verdict is the verdict the claim's path commits, empty for a path that names none.
+	verdict string
+	// actor is who decided, as the chain committed it.
+	actor string
+}
+
+// DisclosedRelease is one digest-verified step release read back from a receipt: the record a
+// RELEASE entry commits, naming the step a decision released and the decisions it derives from.
+type DisclosedRelease struct {
+	// Claim is the claim's index in the document.
+	Claim int
+	// RunID is the workflow run the release body names.
+	RunID string
+	// StepRunID is the step record released.
+	StepRunID string
+	// Step is the step's name in the graph.
+	Step string
+	// Index is the step's position in the graph.
+	Index int
+	// Attempt is which try of the step was released.
+	Attempt int
+	// SpecDigest is the step's spec digest, the value the workflow's outcome names for the step.
+	SpecDigest string
+	// InputsDigest is the digest of the vars the step was handed.
+	InputsDigest string
+	// Roots are the decisions the release names, in the order its body lists them.
+	Roots []DisclosedReleaseRoot
+}
+
+// DisclosedReleaseRoot is one decision a disclosed release names, and what the receipt shows of it.
+type DisclosedReleaseRoot struct {
+	// ID is the decision entry's id, as the release body names it.
+	ID string
+	// ContentDigest is the content digest the release body names the decision by.
+	ContentDigest string
+	// Verdict is the verdict the matched decision claim's path commits, empty when the digest names
+	// no verified decision.
+	Verdict string
+	// Actor is who made the matched decision, as the chain committed it.
+	Actor string
 }
 
 // Reason states, for a decision or a correction whose body commits a reason.
@@ -178,14 +268,17 @@ type DisclosedDecision struct {
 }
 
 // OK reports whether every check passed, the single question a verify command answers yes or no. A
-// disclosed outcome or decision that does not match its commitment fails the whole receipt: it is a
-// claim the chain does not back. A spec inconsistency fails it too, because then the approval and
-// the execution the receipt ties together are not about the same change.
+// disclosed outcome, decision, or release that does not match its commitment fails the whole
+// receipt: it is a claim the chain does not back. A spec inconsistency fails it too, because then
+// the approval and the execution the receipt ties together are not about the same change, and so
+// does a release the outcome or the decisions do not bear out. So does a witness attestation that
+// does not verify over the claim it rides on.
 func (r *BundleReport) OK() bool {
 	return r.SignatureOK && r.ChainOK && r.AnchorsOK &&
 		(!r.OutcomePresent || r.OutcomeDigestOK) && r.DecisionsOK && r.SpecConsistent &&
 		r.ApprovalPrecedesRun && !r.CorrectionsFailed && !r.SpansUnbound &&
-		len(r.CaseVariants) == 0 && len(r.LegacyAfterKeyed) == 0
+		len(r.CaseVariants) == 0 && len(r.LegacyAfterKeyed) == 0 &&
+		r.ReleasesOK && r.ReleasesConsistent && len(r.WitnessProblems) == 0
 }
 
 // VerifyBundle checks a signed bundle with no store and no network: it confirms the producer's
@@ -300,16 +393,20 @@ func verifyBundle(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleRe
 	// "receipt --sparse", which prints "Verify it with: switchtender verify".
 	// Surfaces this product does not verify are refused by name, never silently skipped: a
 	// disclosure or attestation the mirror ignored would ride inside a green verdict unchecked,
-	// which is the exact rider problem the strip list exists to prevent. SwitchTender's own
-	// receipts carry neither, so nothing this product emits is affected.
+	// which is the exact rider problem the strip list exists to prevent. The one attestation this
+	// product verifies is a witness's countersignature of a claim, which verifyWitnessAttestations
+	// checks below. A head attestation and an attestation of any other role are refused.
 	if len(b.Attestations) > 0 {
 		return rep, fmt.Errorf("%w: bundle carries attestations: this product does not verify"+
 			" them; use the open loomseal verifier", ErrVerify)
 	}
 	for i := range b.Claims {
-		if len(b.Claims[i].Disclosures) > 0 || len(b.Claims[i].Attestations) > 0 {
-			return rep, fmt.Errorf("%w: claim %d carries disclosures or attestations: this"+
-				" product does not verify them; use the open loomseal verifier", ErrVerify, i)
+		if len(b.Claims[i].Disclosures) > 0 {
+			return rep, fmt.Errorf("%w: claim %d carries disclosures: this product does not"+
+				" verify them; use the open loomseal verifier", ErrVerify, i)
+		}
+		if err := refuseForeignAttestations(i, b.Claims[i].Attestations); err != nil {
+			return rep, err
 		}
 		// A payload with a redactable-field digest set follows LoomSwatch rules this product
 		// does not implement; passing it unexamined would grade a construction nobody checked.
@@ -373,8 +470,11 @@ func verifyBundle(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleRe
 	verifyDecisionDisclosures(b.Claims, rep)
 	verifyCorrectionDisclosures(b.Claims, rep)
 	verifySpecConsistency(b.Claims, rep)
+	verifyReleaseDisclosures(b.Claims, rep)
+	verifyReleaseConsistency(b.Claims, rep)
 	verifySpanBinding(b.Claims, rep)
 	verifyTimeOrder(b.Claims, claimAt, rep)
+	verifyWitnessAttestations(b.Claims, rep)
 	classifyDisclosed(&b, rep)
 	return rep, nil
 }
@@ -530,7 +630,315 @@ func verifyDecisionDisclosures(claims []BundleClaim, rep *BundleReport) {
 		}
 		d.ReasonState, d.Reason, d.RedactedCategory = state, text, category
 		rep.Decisions = append(rep.Decisions, d)
+		runID, _ := bodyMap["run_id"].(string)
+		path, _ := c.Payload["path"].(string)
+		rep.noteDecision(i, verifiedDecision{runID: runID, verdict: decisionVerdict(path),
+			actor: actor})
 	}
+}
+
+// noteDecision records what the release check reads about the decision at claim, whose body
+// matched the digest its entry committed.
+func (r *BundleReport) noteDecision(claim int, d verifiedDecision) {
+	if r.decisionClaims == nil {
+		r.decisionClaims = map[int]verifiedDecision{}
+	}
+	r.decisionClaims[claim] = d
+}
+
+// decisionVerdict returns the verdict a decision claim's path commits: the last segment of a run's
+// decision path or of an approval step's, the two paths a verdict is recorded at. Any other path,
+// a refusal's among them, names no verdict a release can derive from, and yields empty.
+func decisionVerdict(path string) string {
+	if !pathMatches("/runs/{run}/decision/{verdict}", path) &&
+		!pathMatches("/runs/{run}/steps/{step}/decision/{verdict}", path) {
+		return ""
+	}
+	return path[strings.LastIndexByte(path, '/')+1:]
+}
+
+// releasesStep reports whether a decision with verdict can release a workflow step: an approval
+// releases the steps behind it, and a rejection or the timeout a clock made releases the steps that
+// handle a denial. A request decides nothing, so a release naming one was released by no decision.
+func releasesStep(verdict string) bool {
+	switch verdict {
+	case "approved", "rejected", "timed_out":
+		return true
+	}
+	return false
+}
+
+// verifyReleaseDisclosures checks every disclosed step release against the digest its chain entry
+// committed, the way a decision is checked, and collects the verified ones so a reader learns which
+// step a decision released and with what spec. A release commits no reason, so one disclosing a
+// reason beside its body, or whose body carries a reason commitment, fails: the text is nothing the
+// chain fixed. A release entry carried without its body, which a receipt leaves when the step's
+// record is gone, is counted and fails nothing, since the chain is intact and the count says what
+// the receipt could not show. A document with no releases leaves ReleasesOK and ReleasesConsistent
+// true and is judged exactly as one from before releases existed.
+func verifyReleaseDisclosures(claims []BundleClaim, rep *BundleReport) {
+	rep.ReleasesOK, rep.ReleasesConsistent = true, true
+	keyedAt := firstKeyed(claims)
+	for i, c := range claims {
+		if recordKindOf(c.Payload) != recordRelease {
+			continue
+		}
+		rep.ReleaseEntries++
+		if !recordFormHolds(i, c.Payload, recordRelease, "release_body", keyedAt, rep) {
+			continue
+		}
+		bodyVal, hasBody := c.Payload["release_body"]
+		digest, _ := c.Payload["content_digest"].(string)
+		if !hasBody || digest == "" {
+			continue
+		}
+		rep.ReleasesPresent++
+		nonce, _ := c.Payload["release_nonce"].(string)
+		if !disclosedRecordVerifies(digest, nonce, bodyVal) {
+			rep.failRelease(i, "release_body does not match the content digest its entry committed")
+			continue
+		}
+		// The digest commits the whole body; its fields are read from the exact canonical members,
+		// not a case-insensitive struct decode, for the reason the decision check states.
+		bodyMap, ok := bodyVal.(map[string]any)
+		if !ok {
+			rep.failRelease(i, "release_body is not an object")
+			continue
+		}
+		rep.settleRecord(i, digest, "release_body", "release_nonce")
+		if why := releaseReason(c.Payload, bodyMap); why != "" {
+			rep.failRelease(i, why)
+		}
+		rel, why := readRelease(i, bodyMap)
+		if why != "" {
+			rep.inconsistentRelease(i, why)
+		}
+		path, _ := c.Payload["path"].(string)
+		if why := releasePathProblem(path, &rel); why != "" {
+			rep.inconsistentRelease(i, why)
+		}
+		rep.Releases = append(rep.Releases, rel)
+	}
+}
+
+// releaseReason says why a release claim discloses a reason, or returns empty when it discloses
+// none. A release commits no reason, so a reason member beside its body, or a reason commitment
+// inside it, is text the chain never fixed, and a reader must not be shown it as the release's.
+func releaseReason(payload, body map[string]any) string {
+	if _, ok := body["reason_commitment"]; ok {
+		return "release_body carries a reason_commitment, and a release commits no reason"
+	}
+	for _, m := range []string{"reason_text", "reason_random", "reason_redacted"} {
+		if _, ok := payload[m]; ok {
+			return "discloses " + m + " beside its release_body, and a release commits no reason"
+		}
+	}
+	return ""
+}
+
+// readRelease reads a verified release body from its exact members, and says what it lacks when it
+// does not name what a release record names: a run, a step record, a whole index and attempt, and
+// its decisions as objects of an id and a content digest. Without those it cannot be held to the
+// outcome or to the decisions, which fails it rather than passing it unexamined.
+func readRelease(claim int, body map[string]any) (DisclosedRelease, string) {
+	rel := DisclosedRelease{Claim: claim}
+	rel.RunID, _ = body["run_id"].(string)
+	rel.StepRunID, _ = body["step_run_id"].(string)
+	rel.Step, _ = body["step"].(string)
+	rel.SpecDigest, _ = body["spec_digest"].(string)
+	rel.InputsDigest, _ = body["inputs_digest"].(string)
+	index, indexOK := intMember(body, "index")
+	attempt, attemptOK := intMember(body, "attempt")
+	rel.Index, rel.Attempt = index, attempt
+	roots, rootsOK := body["roots"].([]any)
+	for _, raw := range roots {
+		obj, isObject := raw.(map[string]any)
+		id, idOK := obj["id"].(string)
+		digest, digestOK := obj["content_digest"].(string)
+		rootsOK = rootsOK && isObject && idOK && digestOK
+		rel.Roots = append(rel.Roots, DisclosedReleaseRoot{ID: id, ContentDigest: digest})
+	}
+	switch {
+	case rel.RunID == "" || rel.StepRunID == "":
+		return rel, "release_body names no run or no step record"
+	case !indexOK || !attemptOK:
+		return rel, "release_body names no whole index or attempt"
+	case !rootsOK:
+		return rel, "release_body does not name its decisions as a release record does"
+	case len(rel.Roots) == 0:
+		return rel, "release_body names no decision, and a release no decision made is not " +
+			"a release"
+	}
+	return rel, ""
+}
+
+// releasePathProblem says why a release body does not name the workflow and step record the path
+// its link commits names, or returns empty when it names both. The link fixes the path and the
+// digest fixes the body, so a body naming another run or step than its own entry is a release of
+// something the chain did not record releasing.
+func releasePathProblem(path string, rel *DisclosedRelease) string {
+	runID, stepRunID, ok := ParseReleasePath(path)
+	switch {
+	case !ok:
+		return "sits on a path that is not a release path"
+	case rel.RunID != runID:
+		return fmt.Sprintf("release_body names run %s, and its entry's path names run %s",
+			rel.RunID, runID)
+	case rel.StepRunID != stepRunID:
+		return fmt.Sprintf("release_body names step record %s, and its entry's path names %s",
+			rel.StepRunID, stepRunID)
+	}
+	return ""
+}
+
+// intMember reads a member of a decoded JSON object as a whole number, reporting false for a
+// member that is absent, not a number, or not whole.
+func intMember(obj map[string]any, name string) (int, bool) {
+	f, ok := obj[name].(float64)
+	if !ok || f != math.Trunc(f) || math.Abs(f) > 1<<53 {
+		return 0, false
+	}
+	return int(f), true
+}
+
+// failRelease records a disclosed release the chain does not back.
+func (r *BundleReport) failRelease(claim int, why string) {
+	r.ReleasesOK = false
+	r.ReleaseProblems = append(r.ReleaseProblems, fmt.Sprintf("claim %d %s", claim, why))
+}
+
+// inconsistentRelease records a verified release the rest of the document does not bear out.
+func (r *BundleReport) inconsistentRelease(claim int, why string) {
+	r.ReleasesConsistent = false
+	r.ReleaseProblems = append(r.ReleaseProblems, fmt.Sprintf("claim %d %s", claim, why))
+}
+
+// verifyReleaseConsistency holds each verified release to the rest of the document. Its spec digest
+// must be the one the verified outcome names for the step record it released, at the same index
+// and attempt, so the step a decision released is the step that ran. Each decision it names must be
+// found by the content digest its entry committed, on exactly one claim, and be a verified decision
+// of the release's own run that approved, rejected, or timed out. A document that discloses no
+// verified outcome naming its steps holds its releases to none, which ReleasesCompared reports,
+// and fails nothing for it, the way a spec with nothing to compare fails nothing. Whether a
+// decision's verdict fits the edge the step was reached over needs the graph, which only the spec
+// carries, so each verdict is reported and not judged.
+func verifyReleaseConsistency(claims []BundleClaim, rep *BundleReport) {
+	if len(rep.Releases) == 0 {
+		return
+	}
+	children, compared := outcomeChildren(rep)
+	rep.ReleasesCompared = compared
+	byDigest := map[string][]int{}
+	for i, c := range claims {
+		if digest, _ := c.Payload["content_digest"].(string); digest != "" {
+			byDigest[digest] = append(byDigest[digest], i)
+		}
+	}
+	for n := range rep.Releases {
+		rel := &rep.Releases[n]
+		if compared {
+			if why := childProblem(children[rel.StepRunID], rel); why != "" {
+				rep.inconsistentRelease(rel.Claim, why)
+			}
+		}
+		for k := range rel.Roots {
+			if why := rep.rootProblem(byDigest, &rel.Roots[k], rel.RunID); why != "" {
+				rep.inconsistentRelease(rel.Claim, why)
+			}
+		}
+	}
+}
+
+// outcomeChildren reads the children the verified outcome names, by run id, from the exact bytes
+// the digest committed and by their exact member names, never a case-insensitive struct decode. It
+// reports false when there is nothing to hold a release to: no outcome, one that does not match
+// its digest, or the summary an outcome too large to disclose whole is committed as, which keeps
+// the run, its status, and its spec and names no children.
+func outcomeChildren(rep *BundleReport) (map[string][]map[string]any, bool) {
+	if !rep.OutcomePresent || !rep.OutcomeDigestOK {
+		return nil, false
+	}
+	var m map[string]any
+	if json.Unmarshal(rep.OutcomeBody, &m) != nil {
+		return nil, true
+	}
+	if _, summarized := m["oversize"]; summarized {
+		return nil, false
+	}
+	list, _ := m["children"].([]any)
+	out := make(map[string][]map[string]any, len(list))
+	for _, raw := range list {
+		child, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		id, _ := child["run_id"].(string)
+		out[id] = append(out[id], child)
+	}
+	return out, true
+}
+
+// childProblem says why the outcome's children do not bear out rel, or returns empty when exactly
+// one child is the step record rel released and names its index, its attempt, and its spec digest.
+// A child's attempt is left out when it is zero, so an absent one reads as zero.
+func childProblem(kids []map[string]any, rel *DisclosedRelease) string {
+	switch len(kids) {
+	case 0:
+		return fmt.Sprintf("releases step record %s, which the outcome does not name", rel.StepRunID)
+	case 1:
+	default:
+		return fmt.Sprintf("releases step record %s, which the outcome names %d times", rel.StepRunID,
+			len(kids))
+	}
+	child := kids[0]
+	if index, ok := intMember(child, "index"); !ok || index != rel.Index {
+		return fmt.Sprintf("releases step record %s at index %d, and the outcome names it at "+
+			"another", rel.StepRunID, rel.Index)
+	}
+	attempt, ok := 0, true
+	if _, present := child["attempt"]; present {
+		attempt, ok = intMember(child, "attempt")
+	}
+	if !ok || attempt != rel.Attempt {
+		return fmt.Sprintf("releases attempt %d of step record %s, and the outcome names another",
+			rel.Attempt, rel.StepRunID)
+	}
+	spec, _ := child["spec_digest"].(string)
+	if spec == "" || spec != rel.SpecDigest {
+		return fmt.Sprintf("releases step record %s with spec %s, and the outcome names spec %q "+
+			"for it", rel.StepRunID, rel.SpecDigest, spec)
+	}
+	return ""
+}
+
+// rootProblem says why root, a decision a release of run runID names, is not one that released it,
+// or returns empty when its content digest names exactly one claim and that claim is a verified
+// decision of runID that approved, rejected, or timed out. A root found to be a verified decision
+// keeps its verdict and who decided, so the report says what released the step.
+func (r *BundleReport) rootProblem(byDigest map[string][]int, root *DisclosedReleaseRoot,
+	runID string) string {
+	at := byDigest[root.ContentDigest]
+	switch {
+	case root.ContentDigest == "" || len(at) == 0:
+		return fmt.Sprintf("names decision %s by a digest no claim here commits", root.ID)
+	case len(at) > 1:
+		return fmt.Sprintf("names decision %s by a digest %d claims commit", root.ID, len(at))
+	}
+	d, ok := r.decisionClaims[at[0]]
+	if !ok {
+		return fmt.Sprintf("names decision %s, and claim %d is not a verified decision", root.ID,
+			at[0])
+	}
+	root.Verdict, root.Actor = d.verdict, d.actor
+	if d.runID != runID {
+		return fmt.Sprintf("names decision %s, which decided run %s, not run %s", root.ID, d.runID,
+			runID)
+	}
+	if !releasesStep(d.verdict) {
+		return fmt.Sprintf("names decision %s, whose verdict %q releases no step", root.ID,
+			d.verdict)
+	}
+	return ""
 }
 
 // disclosedRecordVerifies checks a disclosed decision or correction body against the digest its

@@ -64,6 +64,7 @@ var routeRoles = map[string]user.Role{
 	"GET /v1/audit/bundle":                                   user.Role("admin"),
 	"GET /v1/audit/register":                                 user.Role("admin"),
 	"GET /v1/audit/verify":                                   user.Role("admin"),
+	"GET /v1/audit/witness":                                  user.Role("admin"),
 	"GET /v1/auth/me":                                        user.Role("viewer"),
 	"GET /v1/changes":                                        user.Role("viewer"),
 	"GET /v1/changes/{change}":                               user.Role("viewer"),

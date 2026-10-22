@@ -13,6 +13,11 @@ no separate migration step.
 - Decide every run waiting for approval and let queued runs finish. A run submitted before the
   upgrade that names a stored inventory is refused when it starts afterward, as [runs submitted
   before the upgrade](#runs-submitted-before-the-upgrade) explains.
+- Once every server and worker of v1.102.0 has stopped, copy the database, audit chain included,
+  then run `switchtender adopt --db <database>` with this release's binary and the install's
+  producer identity, before any server of this release starts. It seals the work v1.102.0 left so
+  this release accepts it, as [the first start is refused until adoption has
+  run](#the-first-start-is-refused-until-adoption-has-run) explains.
 - On a server whose clock is not set to UTC, give each schedule that names no time zone the zone it
   is meant to fire in, as [schedules with no time zone run in
   UTC](#schedules-with-no-time-zone-run-in-utc) explains.
@@ -20,6 +25,39 @@ no separate migration step.
   `agent`. Only those are held as an agent's.
 - Upgrade every server and relay worker together, and write a rule with `effect: exempt` only once
   all of them run this release. v1.102.0 does not know that effect.
+
+## The first start is refused until adoption has run
+
+This release seals every run it creates or releases with a key derived from the install's producer
+identity, and checks the seal before the run executes, so a run whose spec or decision was changed
+in the database after it was approved is refused rather than run. A run v1.102.0 left carries no
+seal. A server of this release that finds such work, held, queued, or in the middle of a workflow,
+and finds no adoption record on the audit chain refuses to start, names the runs, and changes
+nothing. A server with no producer identity on a chain no install has signed holds no key and is
+not held back. A server that finds the chain bound to an install whose key it does not hold refuses
+to start, as the [backup page](backup.md#signing-key-lost) explains.
+
+What to do: stop every server and worker of v1.102.0, then run `switchtender adopt --db <database>`
+once, where it reads the same producer identity the servers load. Run it with the seed or identity
+the servers will use, since a server whose key names another install refuses to start. It verifies
+the audit chain, prints every run it would seal, and asks before it writes. Pass `--yes` to skip the
+question, which is for a run by hand and never for an entrypoint, a hook, or a recurring job. Then
+start the servers. Adopt runs once per install. On an install enrolled with a witness, adopt asks
+the witness for the head it countersigned and refuses a chain that does not reach it, or a witness
+that does not answer. After it writes, adopt appends a span beat and pushes it to the witness, so
+the witness's head covers the adoption record before adopt returns. If that push fails, the adoption
+stands and adopt exits non-zero, saying the record is not yet witnessed. The record stays outside
+the witness's memory until the server's first beat reaches the witness, so start the servers and
+check that the witness status shows a countersigned push. Do not run adopt again. To adopt an
+install that no longer uses its witness, remove `witness-enrollment.json` first. If the start is
+refused on an install where adopt already ran, its record was removed from the chain, and adopt
+refuses to run again. Restore the database, audit chain included, from a copy taken before the
+upgrade, such as a copy of the SQLite file or a PostgreSQL dump. A backup file from
+`switchtender backup` holds neither runs nor the chain. A run v1.102.0 creates or finishes after adoption carries
+no seal and is refused when it starts, so submit it again. A held run a v1.102.0 server approves
+after adoption is refused the same way, as changed after it was approved, because the old server's
+approval carries no seal. Nothing was tampered with. Submit it again, and stop every v1.102.0 server
+before adopting to avoid it. [adopt](configuration.md#adopt) has the details.
 
 ## Agent runs are held by default
 
@@ -242,6 +280,15 @@ What to do: nothing, unless a tool of yours reads the chain or the decisions API
 the decider types it already knew. Comments act only for people who link a forge account, which
 needs `--forge-oauth` and `--public-url`. [What the evidence
 holds](pull-request-review.md#what-the-evidence-holds) has the details.
+
+## A license carrying add-ons needs this release
+
+A license can now list add-ons, such as the hosted witness a Team license buys, and its signature
+covers that list. A license carrying add-ons verifies only on this release or later. An earlier
+release does not read the list, so the signature it checks does not match, and the install runs
+Community with a line saying the license did not verify. A license without add-ons is signed over
+the same bytes as before and verifies on every release. Upgrade before you install a license that
+carries add-ons.
 
 ## Smaller changes
 
