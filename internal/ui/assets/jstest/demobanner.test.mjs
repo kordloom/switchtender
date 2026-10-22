@@ -43,6 +43,14 @@ test("the hosted demo says it runs open on purpose and a real install does not",
 	assert.match(text, /An install you run never serves open on a network address/);
 });
 
+// The change register is the document an auditor is handed, and on the hosted demo it is one click
+// from the first page a visitor sees rather than three pages deep behind a download.
+test("the hosted demo links to the change register", () => {
+	const { text, links } = bannerOn("demo.switchtender.com", true);
+	assert.ok(links.includes("/ui/audit/register"), "no link to the change register: " + links);
+	assert.match(text, /the change register an auditor would be handed/);
+});
+
 test("a demo on another host does not claim a nightly reset", () => {
 	for (const host of ["127.0.0.1", "localhost", "demo.example.com"]) {
 		const { text, links } = bannerOn(host, true);

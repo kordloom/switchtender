@@ -130,6 +130,32 @@ const PAGES = [
   ),
 ].map((m) => m[1]).sort();
 
+// CONSOLE_EXCUSED names the one console line a page may log, by path, each with its reason.
+//
+// The demo this suite drives runs Community, and the change register is a Team feature. The
+// register page reads its rows from the API, the API refuses that read with 403, and the browser
+// logs every refused resource load as a console error that no page script can suppress. The page
+// answers the refusal with the Team offer, which the dead-end walk below still reads. One instance
+// of that one line is excused on that one page; a second refusal there, or any other line, fails.
+const CONSOLE_EXCUSED = [
+  {
+    path: "/ui/audit/register",
+    line: "console.error: Failed to load resource: the server responded with a status of 403 (Forbidden)",
+  },
+];
+
+// unexcused returns the console lines a page logged, less one instance of each line excused for
+// that page.
+function unexcused(path, errors) {
+  const left = [...errors];
+  for (const excused of CONSOLE_EXCUSED) {
+    if (excused.path !== path) continue;
+    const at = left.indexOf(excused.line);
+    if (at !== -1) left.splice(at, 1);
+  }
+  return left;
+}
+
 // The demo serves no token store, no credential types, and no federation. The server names the
 // features it runs without and the users and credentials pages skip them, so any 404 logged here is
 // real.
@@ -150,7 +176,8 @@ for (const path of PAGES) {
     await expect(page.locator("body")).toHaveAttribute("data-page", /.+/);
     // Late failures arrive after load, when the page's own fetches come back.
     await page.waitForTimeout(500);
-    expect(errors, `${path} reported browser errors:\n${errors.join("\n")}`).toEqual([]);
+    const left = unexcused(path, errors);
+    expect(left, `${path} reported browser errors:\n${left.join("\n")}`).toEqual([]);
   });
 }
 

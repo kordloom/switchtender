@@ -95,7 +95,7 @@ with a message naming the feature rather than failing in some subtler way:</p>
 <tr>
 <td><code>GET /v1/audit/register</code></td>
 <td>Team</td>
-<td>The period change register, covering the last 90 days unless <code>from</code> and <code>to</code> name another period, each a date or an RFC 3339 timestamp. Per-run dossiers, receipts, bundles, and <code>GET /v1/audit/verify</code> are free.</td>
+<td>The period change register, covering the last 90 days unless <code>from</code> and <code>to</code> name another period, each a date or an RFC 3339 timestamp, and the same rows as JSON with <code>format=json</code>. Per-run dossiers, receipts, bundles, and <code>GET /v1/audit/verify</code> are free.</td>
 </tr>
 <tr>
 <td><code>POST /v1/drift/reconcile</code></td>
@@ -863,7 +863,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/audit/register</code></td>
-<td>The change register as a self-contained HTML document, admin only.</td>
+<td>The change register as a self-contained HTML document, admin only. <code>format=json</code> returns the same rows as data, which the web interface's register page reads.</td>
 </tr>
 <tr>
 <td>GET</td>

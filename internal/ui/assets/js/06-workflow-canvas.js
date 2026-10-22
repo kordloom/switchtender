@@ -474,6 +474,15 @@ document.addEventListener("DOMContentLoaded", async () => {
 		} else {
 			renderAuditForAdminsOnly();
 		}
+	} else if (page === "register") {
+		// The register is drawn from the audit trail, so it takes the trail's role, and a session
+		// below it is told so without asking a server that would only refuse.
+		if (roleAtLeast("admin")) {
+			wireRegister();
+			loadRegister();
+		} else {
+			renderRegisterForAdminsOnly();
+		}
 	} else if (page === "policies") {
 		wireModal("policy");
 		wirePolicyForm();
@@ -623,13 +632,16 @@ function readOnlyBanner() {
 	const held = document.createElement("a");
 	held.href = AGENT_HELD_RUNS;
 	held.textContent = "the runs an AI agent asked for, waiting for a person";
+	const register = document.createElement("a");
+	register.href = "/ui/audit/register";
+	register.textContent = "the change register";
 	const witness = document.createElement("a");
 	witness.href = "https://switchtender.com/#proof";
 	witness.textContent = "point a witness at it";
 	banner.append("Read-only demo on a Team license, so every feature is on, and reset every night on purpose. " +
 		"It runs open on purpose, on made-up data: every page and every API read works without signing in, " +
 		"and every change is refused. An install you run never serves open on a network address. Start with ",
-		held, ". Then ",
+		held, ". Read ", register, " an auditor would be handed. Then ",
 		witness, " today and again tomorrow, and watch it catch the rewrite.");
 	return banner;
 }

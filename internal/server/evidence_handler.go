@@ -101,9 +101,9 @@ func runEvidenceHandler(store run.Store, audits audit.Store, producer audit.Iden
 }
 
 // auditRegisterHandler renders the period change register as a self-contained HTML document, the
-// change-management evidence a compliance review samples from. producer is the install identity the tree
-// profile's leaves bind to. from and to accept a date or an RFC 3339 time; the period defaults to
-// the last 90 days.
+// change-management evidence a compliance review samples from, or as JSON when format=json is asked
+// for. producer is the install identity the tree profile's leaves bind to. from and to accept a date
+// or an RFC 3339 time; the period defaults to the last 90 days.
 //
 // binder holds the row each approval released to its seal, so a rewritten approver is flagged on its
 // row and counted in the banner; nil marks every approval unchecked.
@@ -156,6 +156,21 @@ func auditRegisterHandler(store run.Store, audits audit.Store, producer audit.Id
 			return
 		}
 		dossier.AttachRegisterSeals(r.Context(), in, binder, store)
+		// The register page in the web interface reads the same register as data. The form is
+		// chosen only here, after the license gate and the collection, so the JSON is gated and
+		// bounded exactly as the document is, and its rows come from the one builder the document
+		// renders, so the page and the download cannot disagree.
+		if r.URL.Query().Get("format") == "json" {
+			reg, err := dossier.BuildRegister(in)
+			if err != nil {
+				log.Error("server: build change register: " + err.Error())
+				respondError(w, log, http.StatusInternalServerError, "could not build the register")
+				return
+			}
+			releaseWalk(r.Context())
+			respondJSON(w, log, http.StatusOK, reg, wantsPretty(r))
+			return
+		}
 		doc, err := dossier.RenderRegister(in)
 		if err != nil {
 			log.Error("server: render change register: " + err.Error())

@@ -238,6 +238,7 @@ func (u *UI) Handler() http.Handler {
 	mux.HandleFunc("GET /ui/sources", u.sources)
 	mux.HandleFunc("GET /ui/credentials", u.credentials)
 	mux.HandleFunc("GET /ui/audit", u.audit)
+	mux.HandleFunc("GET /ui/audit/register", u.auditRegister)
 	mux.HandleFunc("GET /ui/policies", u.policies)
 	mux.HandleFunc("GET /ui/projects", u.projects)
 	mux.HandleFunc("GET /ui/templates", u.jobTemplates)
@@ -341,6 +342,13 @@ func (u *UI) credentials(w http.ResponseWriter, _ *http.Request) {
 // audit renders the audit trail page with chain verification and signed bundle download.
 func (u *UI) audit(w http.ResponseWriter, _ *http.Request) {
 	u.render(w, "audit.html", map[string]any{"ReadOnly": u.readOnly})
+}
+
+// auditRegister renders the change register page. It is a shell like every page: the rows are read
+// by the page from the register endpoint with the reader's own credential, so the license gate and
+// the admin role that hold the downloaded document hold this page too.
+func (u *UI) auditRegister(w http.ResponseWriter, _ *http.Request) {
+	u.render(w, "auditregister.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // policies renders the approval policy management page.

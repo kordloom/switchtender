@@ -516,3 +516,26 @@ test("on a phone-wide window Start over and the restored note fit without scroll
   expect(overflow).toBeLessThanOrEqual(0);
   assertNoErrors();
 });
+
+// The change register is one click from the Audit page, beside the Evidence pack button that
+// downloads it, and it opens as a page of the app rather than as a file. The serve instance carries
+// no license, so the page it lands on is the Team offer with its link to what Team includes. The
+// rendered rows on a Team install are pinned by the Go handler tests and the node suite, since
+// neither server this suite starts loads a license. It runs on the writable instance only: the
+// demo walks the same page in the smoke suite.
+test("the Audit page's Change register link opens the register page", async ({ page }) => {
+  test.skip(readOnly(), "the register link is followed once, on the writable serve instance");
+  await page.goto("/ui/audit");
+  await expect(page.locator('[data-page="audit"]')).toBeVisible();
+  await expect(page.locator("#audit-register")).toBeVisible();
+  const link = page.locator("#audit-register-view");
+  await expect(link).toBeVisible();
+  await link.click();
+  await expect(page).toHaveURL(/\/ui\/audit\/register$/);
+  await expect(page.locator("body")).toHaveAttribute("data-page", "register");
+  const status = page.locator("#status");
+  await expect(status).toContainText("requires a Team license");
+  await expect(status.getByRole("link", { name: "See what Team includes" }))
+    .toHaveAttribute("href", "https://switchtender.com/pricing");
+  await expect(page.locator("#register-table")).toBeHidden();
+});

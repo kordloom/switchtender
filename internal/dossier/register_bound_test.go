@@ -151,7 +151,7 @@ func TestRegisterBoundsThePageInTheStoreQuery(t *testing.T) {
 			// told only that something is missing cannot tell where to look for the rest.
 			for _, want := range []string{
 				fmt.Sprintf("at most %d changes", test.Limit),
-				fmt.Sprintf("carries the earliest\n\t%d and stops at", len(test.WantRows)),
+				fmt.Sprintf("carries the earliest %d and stops at", len(test.WantRows)),
 				wantCovered.UTC().Format(time.RFC3339),
 				`<p class="k">Changes shown</p>`,
 			} {

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Change register - SwitchTender</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="register"{{if .ReadOnly}} data-readonly="true"{{end}}{{if .Demo}} data-demo="true"{{end}}{{if .SignIn}} data-signin="required"{{end}}>
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</a></div>
+	</header>
+
+	<main class="content">
+		<a class="back" href="/ui/audit">Back to audit</a>
+		<div class="page-head">
+			<div class="page-head-text">
+				<h1>Change register</h1>
+				<p class="muted">Every change in the period with who asked for it, the decision over it, and how it ended, drawn from the tamper-evident record. These are the rows of the evidence pack an auditor receives, and Download document saves that file.</p>
+				<p class="muted" id="register-period" hidden></p>
+			</div>
+			<div class="head-actions">
+				<button id="register-download" class="button">Download document</button>
+			</div>
+		</div>
+
+		<p id="register-chain" class="muted" hidden></p>
+		<div id="register-pruned" class="warn-note" hidden></div>
+		<div id="register-truncated" class="warn-note" hidden></div>
+		<div class="summary" id="register-summary" hidden></div>
+		<div id="status" class="muted">Loading the change register.</div>
+		<div class="list-scroll">
+		<table class="runs" id="register-table" hidden>
+			<thead>
+				<tr>
+					<th>When (UTC)</th>
+					<th>Run</th>
+					<th>Change</th>
+					<th>Actor</th>
+					<th>Source</th>
+					<th>Risk</th>
+					<th>Held by</th>
+					<th>Decision</th>
+					<th>Outcome</th>
+				</tr>
+			</thead>
+			<tbody id="register-rows"></tbody>
+		</table>
+		</div>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>
