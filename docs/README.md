@@ -33,6 +33,7 @@ the app at `/ui/docs`.
 | [Compliance mapping](compliance.md) | What the record shows for SOC 2, ISO 27001, and HIPAA change controls.|
 | [Threat model](threat-model.md) | Each homepage claim mapped to its mechanism, the adversaries defended against, and the limits.|
 | [Hosted witness](witness.md) | The outside witness that countersigns an enrolled install's chain as it grows: what it receives, the key to pin, and holding an export to it with `verify --witness`.|
+| [Witnessed sample](witness-sample.md) | A real export and the hosted witness's signed statement for it, to verify yourself and to break.|
 | [Sample evidence pack](sample-evidence-pack.md) | What the evidence a reviewer samples actually looks like.|
 | [Advisory AI](ai.md) | The five AI features, the guarantees, providers, and what a model sees.|
 | [AI agents](agents.md) | Run an AI agent through the gate: one token, gated, chained, provable.|
