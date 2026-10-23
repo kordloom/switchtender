@@ -579,8 +579,9 @@ function wfClearCanvas() {
 }
 
 // wfStartOver discards the unsent changes and puts back the starting example, as one undo point so
-// Cmd or Ctrl Z brings the steps back. ask confirms first, naming what is lost, unless the canvas
-// already holds the untouched example and there is nothing to lose.
+// Cmd or Ctrl Z brings the steps back along with the name and inventory it clears. ask confirms
+// first, naming what is lost, unless the canvas already holds the untouched example and there is
+// nothing to lose.
 function wfStartOver(ask) {
 	if (ask && !wfIsUntouchedSample()) {
 		const steps = wfState.nodes.length;
@@ -590,7 +591,7 @@ function wfStartOver(ask) {
 		if (!window.confirm("Start over? This discards your unsent changes (" + lost + ") and puts " +
 			"back the starting example. Saved templates are not touched.")) return;
 	}
-	wfSnapshot();
+	wfSnapshot(null, true);
 	wfDropDraft();
 	wfState.nodes = [];
 	wfState.edges = [];
@@ -698,8 +699,10 @@ function wfRestore() {
 }
 
 // wfSnapshot pushes the current graph onto the undo stack before a mutation. A coalesce key merges
-// rapid repeats, so a burst of arrow-key nudges undoes as one step.
-function wfSnapshot(key) {
+// rapid repeats, so a burst of arrow-key nudges undoes as one step. withFields also records the name
+// and inventory inputs, for a mutation that clears them along with the graph, so undoing it puts
+// them back. An ordinary graph edit leaves it off, and undoing one never rewrites a name typed later.
+function wfSnapshot(key, withFields) {
 	const now = Date.now();
 	if (key && wfState.lastSnapKey === key && now - wfState.lastSnapAt < 1000) {
 		wfState.lastSnapAt = now;
@@ -707,7 +710,28 @@ function wfSnapshot(key) {
 	}
 	wfState.lastSnapKey = key || null;
 	wfState.lastSnapAt = now;
-	wfPushHistory(JSON.stringify({ nodes: wfState.nodes, edges: wfState.edges }));
+	wfPushHistory(wfSerialize(withFields));
+}
+
+// wfSerialize returns the current graph as an undo entry. withFields adds the name and inventory
+// inputs under fields, which an entry without them leaves out.
+function wfSerialize(withFields) {
+	const entry = { nodes: wfState.nodes, edges: wfState.edges };
+	if (withFields) {
+		entry.fields = {
+			name: document.getElementById("wf-name").value,
+			inventory: document.getElementById("wf-inventory").value,
+		};
+	}
+	return JSON.stringify(entry);
+}
+
+// wfApplyFields sets the name and inventory inputs from an undo entry that carries them. An entry
+// without them leaves both inputs as they are.
+function wfApplyFields(entry) {
+	if (!entry.fields) return;
+	document.getElementById("wf-name").value = entry.fields.name;
+	document.getElementById("wf-inventory").value = entry.fields.inventory;
 }
 
 // wfPushHistory records a serialized graph as an undo point and clears the redo stack.
@@ -717,18 +741,24 @@ function wfPushHistory(snapshot) {
 	wfState.future = [];
 }
 
-// wfUndo restores the previous graph state.
+// wfUndo restores the previous graph state. An entry that carries the name and inventory restores
+// them too, and the redo entry then carries the values they replace.
 function wfUndo() {
 	if (wfState.past.length === 0) return;
-	wfState.future.push(JSON.stringify({ nodes: wfState.nodes, edges: wfState.edges }));
-	applyGraph(JSON.parse(wfState.past.pop()));
+	const entry = JSON.parse(wfState.past.pop());
+	wfState.future.push(wfSerialize(Boolean(entry.fields)));
+	wfApplyFields(entry);
+	applyGraph(entry);
 }
 
-// wfRedo reapplies an undone graph state.
+// wfRedo reapplies an undone graph state. An entry that carries the name and inventory applies them
+// too, and the undo entry then carries the values they replace.
 function wfRedo() {
 	if (wfState.future.length === 0) return;
-	wfState.past.push(JSON.stringify({ nodes: wfState.nodes, edges: wfState.edges }));
-	applyGraph(JSON.parse(wfState.future.pop()));
+	const entry = JSON.parse(wfState.future.pop());
+	wfState.past.push(wfSerialize(Boolean(entry.fields)));
+	wfApplyFields(entry);
+	applyGraph(entry);
 }
 
 // applyGraph replaces the graph, redraws, and persists the draft, used by undo and redo.

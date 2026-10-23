@@ -7,10 +7,12 @@ import (
 	"io"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"go.uber.org/zap/zaptest"
 
 	"github.com/kordloom/switchtender/internal/audit"
@@ -147,6 +149,118 @@ func TestAWorkerPlanGatesOverTheRelay(t *testing.T) {
 				if got, _ := applied.Load().(string); got != plantest.File {
 					t.Errorf("the apply carried out plan file %q, want the one the plan saved", got)
 				}
+			}
+		})
+	}
+}
+
+// TestARelayProposalFacesTheFreeSpaceFloor pins the relay's proposal path to the floor every
+// submission faces. A worker's plan asks the control node for its apply, which is a new run the
+// control node records, and the relay stored it without asking the floor, so under a full disk a
+// worker could still write a run every other path refused. Under the floor the relay answers 503
+// with the floor's reason, stores no apply and records no proposal, and the worker fails its plan
+// with that reason, the way the control node's own plan gate fails. With space it proposes as
+// before.
+func TestARelayProposalFacesTheFreeSpaceFloor(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Floor is the control node's free space floor in bytes. No filesystem has 4 EiB free, and
+		// every one has a byte.
+		Floor uint64
+		// WantStatus is where the worker's plan run must end.
+		WantStatus run.Status
+		// WantError holds what the plan run's error must say, empty for a plan that succeeds.
+		WantError []string
+		// WantProposals is how many applies the control node must hold for the plan, and how many
+		// proposals its audit trail must record.
+		WantProposals int
+	}{{ // Test 0: Under the floor the apply is refused, and the plan fails with the reason.
+		Floor: 1 << 62, WantStatus: run.StatusFailed,
+		WantError: []string{"unexpected status 503", "too little free space to record new runs",
+			"MiB floor"},
+	}, { // Test 1: With space the plan proposes its apply, held for a person.
+		Floor: 1, WantStatus: run.StatusSucceeded, WantProposals: 1,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			backing := run.NewMemStore()
+			control := dispatch.New(backing, roundhouse.RunnerFunc(nil), zaptest.NewLogger(t),
+				dispatch.WithNoJanitor(), dispatch.WithFreeSpaceFloor(test.Floor, t.TempDir()),
+				dispatch.WithClaimGate(func() error { return errors.New("closed for this test") }))
+			t.Cleanup(control.Close)
+			audits := audit.NewMemStore()
+			ts := httptest.NewServer(relay.NewHandler(backing, relay.SinglePool(testWorkerToken), nil,
+				planGateRules(t), audits, relay.WithPlanSealer(control),
+				relay.WithAdmission(control.Admit)))
+			t.Cleanup(ts.Close)
+
+			transport := relay.NewHTTPTransport(ts.URL, testWorkerToken, nil)
+			planner := roundhouse.RunnerFunc(
+				func(_ context.Context, spec roundhouse.Spec, out io.Writer) (roundhouse.Result, error) {
+					const summary = "Plan: 0 to add, 0 to change, 3 to destroy."
+					_, err := io.WriteString(out, summary+"\n")
+					if !spec.DryRun {
+						return roundhouse.Result{ExitCode: 1}, errors.New("a held apply ran")
+					}
+					return plantest.Result(summary), err
+				})
+			worker := dispatch.New(relay.NewClient(transport), planner, zaptest.NewLogger(t),
+				dispatch.WithPolicies(relay.NewPolicyClient(transport)), dispatch.WithWorkers(1),
+				dispatch.WithNoJanitor(), dispatch.WithOwner("worker-a"),
+				dispatch.WithClaimInterval(10*time.Millisecond), dispatch.WithQueues([]string{"plans"}),
+				dispatch.WithRunFilesRoot(t.TempDir()))
+			t.Cleanup(worker.Close)
+
+			id := fmt.Sprintf("run_floor_plan_%d", testNum)
+			if err := backing.Save(ctx, &run.Run{
+				ID: id, Tool: run.ToolTerraform, Command: "infra/prod", Status: run.StatusPending,
+				Actor: "operator-1", ActorType: "session", CreatedAt: time.Now(), Queue: "plans",
+			}); err != nil {
+				t.Fatalf("seed Save() error = %v", err)
+			}
+
+			plan := waitTerminal(t, backing, id)
+			if diff := cmp.Diff(test.WantStatus, plan.Status); diff != "" {
+				t.Errorf("plan status mismatch (-want +got):\n%s", diff)
+			}
+			for _, want := range test.WantError {
+				if !strings.Contains(plan.Error, want) {
+					t.Errorf("plan error %q does not say %q", plan.Error, want)
+				}
+			}
+			if len(test.WantError) == 0 && plan.Error != "" {
+				t.Errorf("plan error = %q, want none", plan.Error)
+			}
+			if test.WantProposals > 0 {
+				waitProposal(t, backing, id, run.StatusPendingApproval)
+			}
+			runs, err := backing.List(ctx)
+			if err != nil {
+				t.Fatalf("List() error = %v", err)
+			}
+			proposals := 0
+			for _, r := range runs {
+				if r.ProposedFrom == id {
+					proposals++
+				}
+			}
+			if diff := cmp.Diff(test.WantProposals, proposals); diff != "" {
+				t.Errorf("applies stored mismatch (-want +got):\n%s", diff)
+			}
+			entries, err := audits.List(ctx, 1000)
+			if err != nil {
+				t.Fatalf("audits.List() error = %v", err)
+			}
+			recorded := 0
+			for _, e := range entries {
+				if strings.HasPrefix(e.Path, "/relay/proposed/"+id+"/") {
+					recorded++
+				}
+			}
+			if diff := cmp.Diff(test.WantProposals, recorded); diff != "" {
+				t.Errorf("proposals recorded mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}

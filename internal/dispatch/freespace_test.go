@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -11,6 +12,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -222,6 +225,106 @@ func storedRuns(t *testing.T, store run.Store) int {
 		n += len(shards)
 	}
 	return n
+}
+
+// TestAdmitIsTheFloor pins the exported admission a caller outside the dispatcher stores a run
+// through: one byte under the floor it refuses with ErrLowSpace naming the floor, and at the floor
+// it admits.
+func TestAdmitIsTheFloor(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Free uint64
+		Want error
+	}{{ // Test 0: One byte under the floor.
+		Free: testFloor - 1, Want: ErrLowSpace,
+	}, { // Test 1: At the floor.
+		Free: testFloor,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			f := &testFree{}
+			f.free.Store(test.Free)
+			err := newFloorDispatcher(t, run.NewMemStore(), f).Admit()
+			if !errors.Is(err, test.Want) {
+				t.Fatalf("Admit() error = %v, want %v", err, test.Want)
+			}
+			if test.Want != nil && !strings.Contains(err.Error(), "under the 256 MiB floor") {
+				t.Errorf("Admit() error %q does not name the floor", err)
+			}
+		})
+	}
+}
+
+// TestFloorFailsALocalPlanGateProposal pins what the control node's own plan gate does when the disk
+// drops under the floor while a plan runs: the apply it would propose is refused like any submit,
+// nothing is stored, and the plan run fails with the floor as its reason. The relay's proposal path
+// is held to this same outcome.
+func TestFloorFailsALocalPlanGateProposal(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Drop          bool
+		WantStatus    run.Status
+		WantError     string
+		WantProposals int
+	}{{ // Test 0: The disk drops under the floor during the plan, so no apply is proposed.
+		Drop: true, WantStatus: run.StatusFailed, WantProposals: 0,
+		WantError: "propose apply: too little free space to record new runs: only 0 MiB free at " +
+			"/data, under the 256 MiB floor",
+	}, { // Test 1: With space the plan proposes its apply, held for a person.
+		WantStatus: run.StatusSucceeded, WantProposals: 1,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			policies := policy.NewMemStore()
+			if err := policies.Save(ctx, &policy.Policy{
+				ID: policy.NewID(), Name: "tf-destroy-guard", Tool: run.ToolTerraform, MaxDestroy: 0,
+			}); err != nil {
+				t.Fatalf("policies.Save() error = %v", err)
+			}
+			f := &testFree{}
+			f.free.Store(testFloor)
+			inner := &planGateRunner{summary: "Plan: 0 to add, 0 to change, 3 to destroy.\n"}
+			runner := roundhouse.RunnerFunc(func(ctx context.Context, spec roundhouse.Spec,
+				out io.Writer) (roundhouse.Result, error) {
+				if spec.DryRun && test.Drop {
+					f.free.Store(0)
+				}
+				return inner.Run(ctx, spec, out)
+			})
+			store := run.NewMemStore()
+			d := New(store, runner, zap.NewNop(), WithNoJanitor(), WithPolicies(policies),
+				WithFreeSpaceFloor(testFloor, "/data"), func(c *config) { c.freeBytes = f.read })
+			t.Cleanup(d.Close)
+			plan, err := d.Submit(ctx, "", "", run.WithTool(run.ToolTerraform),
+				run.WithCommand("infra/prod"))
+			if err != nil {
+				t.Fatalf("Submit() error = %v", err)
+			}
+			got := waitTerminal(t, store, plan.ID)
+			if diff := cmp.Diff(test.WantStatus, got.Status); diff != "" {
+				t.Errorf("plan status mismatch (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(test.WantError, got.Error); diff != "" {
+				t.Errorf("plan error mismatch (-want +got):\n%s", diff)
+			}
+			runs, err := store.List(ctx)
+			if err != nil {
+				t.Fatalf("List() error = %v", err)
+			}
+			proposals := 0
+			for _, r := range runs {
+				if r.ProposedFrom == plan.ID {
+					proposals++
+				}
+			}
+			if diff := cmp.Diff(test.WantProposals, proposals); diff != "" {
+				t.Errorf("proposals stored mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
 }
 
 // TestFloorAdmitsWhenSpaceCannotBeRead pins that a failed read admits: a transient error reading

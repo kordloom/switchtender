@@ -125,6 +125,13 @@ func WithBinder(key *binding.Key) Option {
 	return func(srv *Server) { srv.bindingKey = key }
 }
 
+// WithRelayAdmission makes the relay check admit before storing the apply a worker's plan proposes,
+// and refuse the proposal when it returns an error. The dispatcher's Admit is the intended value, so
+// a worker's proposal faces the free space floor every submission faces.
+func WithRelayAdmission(admit func() error) Option {
+	return func(srv *Server) { srv.relayAdmit = admit }
+}
+
 // WithRetrier enables the failed shard retry endpoint backed by r.
 func WithRetrier(r Retrier) Option {
 	return func(srv *Server) { srv.retrier = r }
@@ -410,6 +417,9 @@ type Server struct {
 	// bindingKey is the key the relay holds every run it leases to a worker to, and seals worker
 	// results under, nil when this process holds no producer identity to derive one from.
 	bindingKey *binding.Key
+	// relayAdmit refuses a relay worker's proposed apply the control node has no room to record, nil
+	// when the relay checks nothing.
+	relayAdmit func() error
 	// retrier backs the failed shard retry endpoint when configured.
 	retrier Retrier
 	// approver backs the run approval endpoints when configured.
@@ -968,6 +978,9 @@ func (s *Server) Handler() http.Handler {
 		}
 		if v := dispatch.NewBindingVerifier(s.relayStore, s.audits, s.bindingKey); v != nil {
 			opts = append(opts, relay.WithBinder(v))
+		}
+		if s.relayAdmit != nil {
+			opts = append(opts, relay.WithAdmission(s.relayAdmit))
 		}
 		if s.attention != nil && s.attention.Presence != nil {
 			opts = append(opts, relay.WithPresence(s.attention.Presence))
