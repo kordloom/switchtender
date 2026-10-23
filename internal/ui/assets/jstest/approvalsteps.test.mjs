@@ -197,6 +197,8 @@ test("a run page shows only its own workflow's waiting step", async () => {
 	assert.equal(entries.length, 1, "the run page lists another workflow's step");
 	assert.equal(entries[0].dataset.stepId, "run_gate");
 	assert.doesNotMatch(entries[0].textContent, /Workflow run/, "the run page names the run it is already on");
+	assert.doesNotMatch(page.document.getElementById("approval-steps").textContent, /also one of/,
+		"the run page says its own run is one of the pending runs above");
 });
 
 test("the runs page names the workflow run a waiting step belongs to", async () => {
@@ -207,6 +209,26 @@ test("the runs page names the workflow run a waiting step belongs to", async () 
 		"the step does not say which held run it is, so a reader cannot tell it from one more");
 	const run = [...entry.querySelectorAll("span")].find((s) => /Workflow run/.test(s.textContent));
 	assert.equal(run.title, "run_2a829276bc117fe9", "the full run id is not in the tooltip");
+});
+
+test("the runs page counts workflows and says they are also pending runs", async () => {
+	const tests = [
+		// Test 0: One waiting step.
+		{ Steps: [waitingStep()], WantTitle: "1 workflow is waiting at an approval step" },
+		// Test 1: Two waiting steps.
+		{
+			Steps: [waitingStep(), waitingStep({ id: "run_other", run_id: "run_other_wf", step: "other" })],
+			WantTitle: "2 workflows are waiting at an approval step",
+		},
+	];
+	for (const [testNum, tc] of tests.entries()) {
+		const page = mountRuns(tc.Steps, "admin", "approver");
+		await page.app.loadApprovalSteps("");
+		const host = page.document.getElementById("approval-steps");
+		assert.equal(host.querySelector("h2").textContent, tc.WantTitle, `test ${testNum} title`);
+		assert.match(host.textContent, /Each workflow run is also one of the runs pending approval above\./,
+			`test ${testNum}: the panel does not tie its workflows to the pending runs`);
+	}
 });
 
 test("a workflow's step list names its approval step by where it stands", () => {

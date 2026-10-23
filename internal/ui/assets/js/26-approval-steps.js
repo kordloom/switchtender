@@ -55,10 +55,18 @@ function renderApprovalSteps(host, steps) {
 	head.className = "panel-head";
 	const title = document.createElement("h2");
 	title.textContent = steps.length === 1
-		? "1 approval step is waiting for a decision"
-		: steps.length + " approval steps are waiting for a decision";
+		? "1 workflow is waiting at an approval step"
+		: steps.length + " workflows are waiting at an approval step";
 	head.appendChild(title);
 	host.appendChild(head);
+	// On the runs page each of these workflows is a run held for approval, so the count of
+	// workflows and the Pending approval card describe the same runs and the panel says so.
+	if (!approvalStepsRunID) {
+		const also = document.createElement("p");
+		also.className = "muted";
+		also.textContent = "Each workflow run is also one of the runs pending approval above.";
+		host.appendChild(also);
+	}
 	for (const step of steps) host.appendChild(approvalStepEntry(step));
 }
 
