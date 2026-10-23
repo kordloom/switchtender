@@ -122,23 +122,39 @@ func TestWitnessRefusesARewrittenChain(t *testing.T) {
 	s.stop()
 	wantPrinted(t, "the server log", s.log(), "refusal "+rewrittenHistory)
 	record := w.findings(t, in.keyID)
-	var refusals []witness.RecordedFinding
+	// A beat the chain wrote after the last countersigned one but before the stop was never
+	// pushed, since the queue lives in memory, so the witness may rightly note that one gap. Any
+	// other note after the rewrite is wrong.
+	lostBeat := fmt.Sprintf("beat %d was already witnessed", pre.LastBeat)
+	var refusals, notes []witness.RecordedFinding
+	var gaps int64
 	for _, f := range record.Findings {
-		if f.Class == witness.ClassRefusal {
+		switch {
+		case f.Class == witness.ClassRefusal:
 			refusals = append(refusals, f)
+		case f.Kind == "first_root":
+		case f.Kind == "missing_beat" && strings.Contains(f.Detail, lostBeat) && gaps == 0:
+			gaps++
+			t.Logf("the witness noted the beat lost with the queue: %s", f.Detail)
+		default:
+			notes = append(notes, f)
 		}
 	}
 	if len(refusals) != 1 || refusals[0].Kind != rewrittenHistory {
 		t.Errorf("the witness recorded refusals %+v, want one %s", refusals,
 			rewrittenHistory)
 	}
+	if len(notes) != 0 {
+		t.Errorf("the witness recorded notes %+v after the rewrite, want at most the gap after "+
+			"beat %d", notes, pre.LastBeat)
+	}
 	postRaw, post := w.statement(t, in.keyID)
 	if post.RefusalsTotal != 1 {
 		t.Errorf("refusals_total = %d after the rewrite, want 1", post.RefusalsTotal)
 	}
-	if post.NotesTotal != pre.NotesTotal {
-		t.Errorf("notes_total = %d after the rewrite, want %d as before it", post.NotesTotal,
-			pre.NotesTotal)
+	if post.NotesTotal != pre.NotesTotal+gaps {
+		t.Errorf("notes_total = %d after the rewrite, want %d as before it plus %d for the gap",
+			post.NotesTotal, pre.NotesTotal, gaps)
 	}
 	if post.LastSeq != pre.LastSeq || post.LastHead != pre.LastHead || post.Size != pre.Size ||
 		post.Root != pre.Root {

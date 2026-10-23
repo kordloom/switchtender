@@ -37,7 +37,7 @@ func (c *connCounter) count() int {
 	return len(c.seen)
 }
 
-// TestNotificationDeliveriesReuseOneConnection pins that a run's notifications ride an existing
+// TestNotificationDeliveriesReuseTheirConnection pins that a run's notifications ride an existing
 // connection rather than dialing a new one each time.
 //
 // A notification receiver answers with a body, and net/http only returns a connection to the pool
@@ -45,7 +45,15 @@ func (c *connCounter) count() int {
 // so a controller notifying on every finished run paid a fresh TCP and TLS handshake per run, per
 // channel, forever. This asks a receiver how many connections it was actually served over: one
 // delivery may legitimately need one, but twenty must not need twenty.
-func TestNotificationDeliveriesReuseOneConnection(t *testing.T) {
+//
+// The receiver sends half its body, pauses, then sends the rest. A body that arrives whole can be
+// salvaged by the transport after an unread close, which let the bug pass this test as often as
+// not. With the tail still in flight a delivery that skips the drain leaves its connection busy, so
+// the next one dials: measured, 20 connections undrained against 1 drained. The bound sits well
+// below that because a drained connection is not always reused either. net/http gives its own
+// write goroutine 50 ms to report the request written and drops the connection when it has not, so
+// a starved scheduler under a parallel race run opens a second socket now and then.
+func TestNotificationDeliveriesReuseTheirConnection(t *testing.T) {
 	t.Parallel()
 	conns := &connCounter{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -54,17 +62,21 @@ func TestNotificationDeliveriesReuseOneConnection(t *testing.T) {
 		// A real receiver answers with something. An empty response would let an undrained body
 		// through, which is the bug this test exists to catch.
 		_, _ = w.Write(bytes.Repeat([]byte("x"), 4096))
+		w.(http.Flusher).Flush()
+		time.Sleep(20 * time.Millisecond)
+		_, _ = w.Write(bytes.Repeat([]byte("x"), 4096))
 	}))
 	t.Cleanup(srv.Close)
 
 	d := notifyDispatcher(srv.Client())
-	const deliveries = 20
+	const deliveries, maxConns = 20, 4
 	for i := 0; i < deliveries; i++ {
 		d.deliver(srv.URL, "run_reuse", []byte(`{}`))
 	}
 
-	if got := conns.count(); got != 1 {
-		t.Errorf("connections used = %d, want 1: %d deliveries must share one socket", got, deliveries)
+	if got := conns.count(); got > maxConns {
+		t.Errorf("connections used = %d, want at most %d: %d deliveries must reuse their socket",
+			got, maxConns, deliveries)
 	}
 }
 
