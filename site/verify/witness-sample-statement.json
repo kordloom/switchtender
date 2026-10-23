@@ -1,0 +1,21 @@
+{
+  "switchtender": "witness-statement/1",
+  "install_id": "in_cf6f2cc12770ba430de35b1db479178c",
+  "key_id": "sha256:cf6f2cc12770ba430de35b1db479178c1fd57c5894d988ae907ec12eea97c6c8",
+  "public_key": "rW3rvGIJl+ukRuW8DGWa5W9/AXd2M+7Kxw/glyNO7j0=",
+  "minted_at": "2026-10-23T00:16:36.942466488Z",
+  "checkpoint_at": "2026-10-23T00:16:22.854427437Z",
+  "last_beat": 6,
+  "last_seq": 20,
+  "last_head": "3f6e27a59759d55020fcd35ac1a677899fc971b0aa070942a9ac1cba5caaeb52",
+  "size": 20,
+  "root": "98801fbd74e180cd992547ddfb6677d956748427ca36b46d8e37a604eac03874",
+  "memory_since": "2026-10-23T00:13:52.617448787Z",
+  "silent": false,
+  "last_seen": "2026-10-23T00:16:22.854427437Z",
+  "refusals_total": 0,
+  "notes_total": 1,
+  "witness_key_id": "sha256:82047e9e6247134152a5ca482c61c1f642899586c6bc5562f1dbe3e110ca2804",
+  "witness_public_key": "akNXijRpCjWw1CbuJ3xPWJMHpgghStLfzEd9qwEeFAM=",
+  "sig": "x8DliPc70TlvuCh6HuLxUAyEil/wnJW4L+XJ2Lw6jdLa52lBad0jUgIP8PFpnI+YaJhm78xrlbffvFlb1jg+AA=="
+}

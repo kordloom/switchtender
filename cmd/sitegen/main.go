@@ -34,7 +34,7 @@ var order = []string{
 	"tutorial-set-a-secret", "tutorial-migrate",
 	"tool-ansible", "tool-bash", "tool-terraform", "tool-opentofu", "tool-python", "tool-powershell", "tool-go",
 	"concepts", "reliability", "configuration", "desktop", "features", "secrets", "drift",
-	"compliance", "threat-model", "side-door", "agent-red-team", "sample-evidence-pack", "api", "comparison",
+	"compliance", "threat-model", "side-door", "agent-red-team", "sample-evidence-pack", "witness-sample", "api", "comparison",
 }
 
 // titles overrides the sidebar label for a slug where its first heading reads poorly.

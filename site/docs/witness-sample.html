@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Witnessed sample | SwitchTender docs</title>
+	<meta name="description" content="This is a real export from an install enrolled with the hosted witness, published with the witness&#39;s signed statement for that install. Download both and run switchtender verify">
+	<link rel="canonical" href="https://switchtender.com/docs/witness-sample">
+	<meta property="og:title" content="Witnessed sample | SwitchTender docs">
+	<meta property="og:description" content="This is a real export from an install enrolled with the hosted witness, published with the witness&#39;s signed statement for that install. Download both and run switchtender verify">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/witness-sample">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
+	<meta name="twitter:card" content="summary_large_image">
+	<meta name="twitter:title" content="Witnessed sample | SwitchTender docs">
+	<meta name="twitter:description" content="This is a real export from an install enrolled with the hosted witness, published with the witness&#39;s signed statement for that install. Download both and run switchtender verify">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
+	<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "TechArticle",
+ "about": {
+  "@type": "SoftwareApplication",
+  "name": "SwitchTender",
+  "url": "https://switchtender.com/"
+ },
+ "description": "This is a real export from an install enrolled with the hosted witness, published with the witness's signed statement for that install. Download both and run switchtender verify",
+ "headline": "Witnessed sample",
+ "isPartOf": {
+  "@type": "WebSite",
+  "name": "SwitchTender docs",
+  "url": "https://switchtender.com/docs/"
+ },
+ "publisher": {
+  "@type": "Organization",
+  "name": "KordLoom LLC",
+  "url": "https://kordloom.com"
+ },
+ "url": "https://switchtender.com/docs/witness-sample"
+}
+</script>
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=2">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/side-door">The side door</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/witness-sample" class="active">Witnessed sample</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/ansible-runtime">Managed Ansible runtime</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/community-baseline">The Community Baseline</a><a href="/docs/continuity">Continuity</a><a href="/docs/federation">Federated cloud credentials</a><a href="/docs/inventories">Inventories</a><a href="/docs/policy">Approval policies in YAML and Rego</a><a href="/docs/pull-request-review">Pull request review</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/run-files">Run files</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/supertest">The supertest</a><a href="/docs/upgrading">Upgrading</a><a href="/docs/vendor-risk">Vendor risk review</a><a href="/docs/witness">Hosted witness</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="witnessed-sample">Witnessed sample</h1>
+<p>This is a real export from an install enrolled with the <a href="/docs/witness">hosted witness</a>, published with
+the witness's signed statement for that install. Download both and run <code>switchtender verify --witness</code> to see what the check holds an export to, and edit either file to watch it fail.</p>
+<h2 id="what-was-captured">What was captured</h2>
+<p>On October 22, 2026, a fresh install of the signed v1.106.1 Linux build was initialized in a
+container under an account named <code>operator</code>. It loaded the starter templates, enrolled with the
+hosted witness at <code>https://witness.switchtender.com</code>, ran three jobs, and pushed a span beat every 30
+seconds. Once the witness had countersigned six beats, the install exported its bundle and fetched
+the witness's statement. Neither file was changed after that.</p>
+<p>The install was a test, so its record was then retired at the witness, and the live statement route
+no longer answers for it. The statement here is the witness's signed copy, and it verifies offline
+against the published witness key.</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>What</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="https://switchtender.com/verify/witness-sample-bundle.json">witness-sample-bundle.json</a></td>
+<td>The install's signed audit bundle, 20 chain entries.</td>
+</tr>
+<tr>
+<td><a href="https://switchtender.com/verify/witness-sample-statement.json">witness-sample-statement.json</a></td>
+<td>The witness's signed statement for the install's producer key.</td>
+</tr>
+</tbody>
+</table>
+<p>The two keys to pin:</p>
+<ul>
+<li>Producer key, the install that signed the bundle:
+<code>sha256:cf6f2cc12770ba430de35b1db479178c1fd57c5894d988ae907ec12eea97c6c8</code></li>
+<li>Witness key, the one <a href="/docs/witness#the-witness-key">the hosted witness page</a> publishes:
+<code>sha256:82047e9e6247134152a5ca482c61c1f642899586c6bc5562f1dbe3e110ca2804</code></li>
+</ul>
+<h2 id="verify-it">Verify it</h2>
+<pre><code>curl -fsSO https://switchtender.com/verify/witness-sample-bundle.json
+curl -fsSO https://switchtender.com/verify/witness-sample-statement.json
+switchtender verify witness-sample-bundle.json \
+  --pubkey sha256:cf6f2cc12770ba430de35b1db479178c1fd57c5894d988ae907ec12eea97c6c8 \
+  --witness witness-sample-statement.json \
+  --witness-pubkey sha256:82047e9e6247134152a5ca482c61c1f642899586c6bc5562f1dbe3e110ca2804
+</code></pre>
+<p>It prints:</p>
+<pre><code>subject      fleet in_cf6f2cc12770ba430de35b1db479178c
+signed by    sha256:cf6f2cc12770ba430de35b1db479178c1fd57c5894d988ae907ec12eea97c6c8
+signature    OK
+pin          OK (matches the fingerprint you pinned, so this is that install's key)
+chain        OK (20 entries recompute, head seq 20)
+anchors      none (nothing outside this install fixes its position)
+witness      OK (6 beats countersigned by sha256:82047e9e6247134152a5ca482c61c1f642899586c6bc5562f1dbe3e110ca2804, newest seq 20, for producer sha256:cf6f2cc12770ba430de35b1db479178c1fd57c5894d988ae907ec12eea97c6c8, 1 note)
+  this bundle reproduces seq 20, the newest entry the witness countersigned. The tree over its first 20 entries matches the root the witness holds. The witness refused no push.
+disclosed    24 checked, 0 unchecked, 0 redacted
+  checked    beat 6, cadence_s 6, count 6, stream 6
+
+VERIFIED: nothing has been altered since this bundle was signed
+</code></pre>
+<h2 id="how-to-read-it">How to read it</h2>
+<ul>
+<li><strong>signature</strong> and <strong>pin</strong> say the bundle was signed by the producer key you pinned, so it came from
+that install.</li>
+<li><strong>chain</strong> recomputes every entry's link from its content. An entry edited after it was written
+breaks the link at that entry.</li>
+<li><strong>anchors</strong> reads none because this install never anchored to a public timestamp authority. The
+witness is the only party outside the install that holds its position here.</li>
+<li><strong>witness</strong> holds the bundle to the statement. The statement verifies under the pinned witness
+key and names the same producer key and install. The bundle carries entry 20, the newest one the
+witness countersigned, and the tree over its 20 entries has the root the witness holds. The
+witness refused no push from this install. The one note is the witness's record of the first
+tree it saw, which is where its memory of the install starts.</li>
+<li><strong>disclosed</strong> lists the beat fields verify checked against the chain.</li>
+</ul>
+<h2 id="break-it">Break it</h2>
+<p>Edit the statement so it claims a refusal, then verify again:</p>
+<pre><code>jq '.refusals_total = 1' witness-sample-statement.json &gt; edited.json
+switchtender verify witness-sample-bundle.json \
+  --pubkey sha256:cf6f2cc12770ba430de35b1db479178c1fd57c5894d988ae907ec12eea97c6c8 \
+  --witness edited.json \
+  --witness-pubkey sha256:82047e9e6247134152a5ca482c61c1f642899586c6bc5562f1dbe3e110ca2804
+</code></pre>
+<p>The witness signed the statement, so any edit to it fails under the witness key:</p>
+<pre><code>NOT VERIFIED: the witness statement does not hold: the witness statement does not verify: verify statement: signature: does not verify under key sha256:82047e9e6247134152a5ca482c61c1f642899586c6bc5562f1dbe3e110ca2804
+</code></pre>
+<h2 id="what-it-does-not-show">What it does not show</h2>
+<ul>
+<li>The witness fixes the chain from the first tree it countersigned onward. It shows the entries
+have not changed since that beat. It cannot show they were honest when they were written.</li>
+<li>Between two beats the witness sees nothing. This install beat every 30 seconds, and the cadence
+is the install's to choose.</li>
+<li>Root on the witness host, or a holder of the witness key's backup and its passphrase, can sign
+false countersignatures. <a href="/docs/witness#limits">The hosted witness page</a> lists the rest of its limits.</li>
+<li>This is a test install with three short jobs, not a production fleet.</li>
+</ul>
+
+		</main>
+	</div>
+	<div class="foot-legal" style="text-align:center;margin:26px auto 34px;font-size:12px;opacity:.75">SwitchTender&trade; is a trademark of KordLoom LLC. Copyright 2026 KordLoom LLC.</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>
