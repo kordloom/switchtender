@@ -288,3 +288,19 @@ test("an unknown ui path is refused rather than served as the overview", async (
     expect(response.status(), `${missing} should be refused, not rendered`).toBe(404);
   }
 });
+
+test("the bare address lands on the agent's held runs, each saying why it waits", async ({ page }) => {
+  // The demo's first screen is the gate: what an agent asked for, held before anything ran, with the
+  // reason and who can decide it. It used to be the runs list with a raw search in the box, install-wide
+  // counts, and a person's workflow above the agent's rows, and a visitor could not tell what to do.
+  const assertNoErrors = attachErrorGuards(page);
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/ui\/held\?who=agent$/);
+  await expect(page.locator("#held-title")).toHaveText("An AI agent asked. A person decides.");
+  const item = page.locator("#held-list .attn-item").first();
+  await expect(item).toBeVisible();
+  await expect(item.locator(".attn-reason")).toContainText("requested by an agent");
+  await expect(page.locator("#held-list button")).toHaveCount(0);
+  await expect(page.locator("#held-decide")).toContainText("On a writable install");
+  assertNoErrors();
+});

@@ -133,6 +133,10 @@ const GOOD = (() => {
 // GOOD_OVERRIDES cover the two pages whose records are not shaped like a list row: the task trend
 // spark is a list of durations rather than outcomes, and a comparison's tasks carry both sides.
 const GOOD_OVERRIDES = {
+	held: { counts: { approval_needed: 1 }, items: [{ key: "run_1", kind: "run", run_id: "run_1",
+		name: "site.yml", blocker: "approval_needed", since: "2026-08-04T12:00:00Z",
+		main: { blocker: "approval_needed", run_id: "run_1", reason: "It is held for approval.",
+			approval: { held_by: "prod changes" } } }] },
 	tasks: { tasks: [Object.assign({}, GOOD.tasks[0], { recent: [1.4, 1.5, 1.6] })] },
 	compare: {
 		tasks: [{ task: "install nginx", a_seconds: 1.4, b_seconds: 1.6, delta_seconds: -0.2 }],

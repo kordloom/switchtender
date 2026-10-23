@@ -186,7 +186,7 @@ async function loadRuns() {
 			return;
 		}
 		showListControls();
-		renderSummary(data.summary || {});
+		renderSummary(data.summary || {}, runs.length, runsFiltered(), data.has_more);
 		appendRunRows(tbody, runs);
 		wireRunsMore(tbody, data.next_offset || runs.length, data.has_more);
 	} catch (e) {
@@ -615,10 +615,27 @@ function wireRunsMore(tbody, offset, hasMore) {
 	};
 }
 
-// renderSummary draws the at-a-glance stat cards above the run history.
-function renderSummary(summary) {
+// renderSummary draws the at-a-glance stat cards above the run history. The cards count every run the
+// caller can see whatever the search says, so when the table is filtered a caption above them says so
+// and gives the number of rows the table holds, rather than leaving a visitor to reconcile the two.
+// When more matching rows wait behind Load more, the caption says the table shows the first of them.
+function renderSummary(summary, shown, filtered, more) {
 	const el = document.getElementById("summary");
 	el.innerHTML = "";
+	let note = document.getElementById("summary-scope");
+	if (filtered) {
+		if (!note) {
+			note = document.createElement("p");
+			note.id = "summary-scope";
+			note.className = "muted";
+			el.parentNode.insertBefore(note, el);
+		}
+		const cover = summary.scope === "visible" ? "every run you can see" : "every run on this install";
+		note.textContent = "Counts cover " + cover + ". The table shows the " + (more ? "first " : "") +
+			shown + " " + plural(shown, "run", "runs") + " matching this search.";
+	} else if (note) {
+		note.remove();
+	}
 	// The server says what its counts cover. Grants can restrict a caller to one organization's
 	// runs, and quoting the install's totals to them published every other tenant's volume in one
 	// number, so the counts are now over what they can see and the card has to say so rather than

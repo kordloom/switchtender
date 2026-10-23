@@ -239,6 +239,7 @@ func (u *UI) Handler() http.Handler {
 	mux.HandleFunc("GET /ui/credentials", u.credentials)
 	mux.HandleFunc("GET /ui/audit", u.audit)
 	mux.HandleFunc("GET /ui/audit/register", u.auditRegister)
+	mux.HandleFunc("GET /ui/held", u.held)
 	mux.HandleFunc("GET /ui/policies", u.policies)
 	mux.HandleFunc("GET /ui/projects", u.projects)
 	mux.HandleFunc("GET /ui/templates", u.jobTemplates)
@@ -349,6 +350,12 @@ func (u *UI) audit(w http.ResponseWriter, _ *http.Request) {
 // the admin role that hold the downloaded document hold this page too.
 func (u *UI) auditRegister(w http.ResponseWriter, _ *http.Request) {
 	u.render(w, "auditregister.html", map[string]any{"ReadOnly": u.readOnly})
+}
+
+// held renders the page of changes waiting for a person, with ?who=agent only the runs an AI agent
+// asked for. It is a shell: the page reads the items from the attention endpoint, a viewer read.
+func (u *UI) held(w http.ResponseWriter, _ *http.Request) {
+	u.render(w, "held.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // policies renders the approval policy management page.

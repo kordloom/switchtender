@@ -31,6 +31,7 @@ export const PLACEHOLDER_PAGES = [
 	{ page: "changes", text: "Loading changes.", load: (app) => app.loadChanges() },
 	{ page: "estate", text: "Loading the estate.", load: (app) => app.loadEstate() },
 	{ page: "fleet", text: "Loading fleet health.", load: (app) => app.loadFleet() },
+	{ page: "held", text: "Loading what is waiting for a person.", load: (app) => app.loadHeld() },
 	{ page: "host", text: "Loading host history.", load: (app) => app.loadHost("web01"),
 		vars: { Host: "web01" } },
 	{ page: "inventories", text: "Loading inventories.", load: (app) => app.loadInventories() },

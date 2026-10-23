@@ -13,7 +13,7 @@ import { drive, PLACEHOLDER_PAGES, statusLine } from "./failures.mjs";
 const NOTHING = {
 	runs: [], hosts: [], entries: [], policies: [], users: [], templates: [], projects: [],
 	inventories: [], sources: [], workers: [], credentials: [], schedules: [], tasks: [],
-	findings: [], events: [], shards: [], steps: [], tokens: [],
+	findings: [], events: [], shards: [], steps: [], tokens: [], items: [],
 	count: 0, next_after: 0, has_more: false,
 	checked_templates: 0, checked_schedules: 0, checked_credentials: 0,
 	summary: { total: 0, succeeded: 0, failed: 0 },

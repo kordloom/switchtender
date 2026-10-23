@@ -474,6 +474,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 		} else {
 			renderAuditForAdminsOnly();
 		}
+	} else if (page === "held") {
+		loadHeld();
 	} else if (page === "register") {
 		// The register is drawn from the audit trail, so it takes the trail's role, and a session
 		// below it is told so without asking a server that would only refuse.
@@ -646,10 +648,9 @@ function readOnlyBanner() {
 	return banner;
 }
 
-// AGENT_HELD_RUNS lists the runs the built-in agent hold is keeping waiting, by the name the server
-// records on each, the same search the policies page builds for a rule's held runs.
-const AGENT_HELD_RUNS = "/ui/runs?q=" +
-	encodeURIComponent('held_by:"requested by an agent, held by default" status:pending_approval');
+// AGENT_HELD_RUNS is the held page narrowed to the runs an AI agent asked for, each with why it is
+// held, who can decide it, and what each answer runs.
+const AGENT_HELD_RUNS = "/ui/held?who=agent";
 
 function applyReadOnly() {
 	const main = document.querySelector(".content");

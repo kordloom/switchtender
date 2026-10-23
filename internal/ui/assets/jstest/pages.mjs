@@ -14,6 +14,7 @@ const PAGE_PATHS = {
 	runs: () => "/ui/runs",
 	detail: (vars) => "/ui/runs/" + (vars.RunID || ""),
 	overview: () => "/ui/",
+	held: () => "/ui/held",
 };
 
 // mountPage parses a template into the sandbox document and points location at that page. Values in

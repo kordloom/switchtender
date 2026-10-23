@@ -67,7 +67,9 @@ func init() {
 			"previous --seed-only run prepared, so a public demo can swap in fresh data without "+
 			"a gap in service.")
 	demoCmd.Flags().BoolVar(&demoSeedOnly, "seed-only", false,
-		"Seed the database and exit without serving, so the result can be swapped in later.")
+		"Seed the database and exit without serving, so the result can be swapped in later. "+
+			"The result is served by demo --no-seed. serve refuses it on purpose: seeded runs "+
+			"carry no approval seal and no adoption record.")
 	demoCmd.Flags().StringVar(&demoAnchorTSA, "anchor-tsa", defaultTSA,
 		"RFC 3161 authority that anchors the seeded chain, so the demo shows a real anchor. "+
 			"Empty seeds without anchoring; an unreachable authority is skipped with a warning.")

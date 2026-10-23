@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kordloom/switchtender/internal/audit"
@@ -90,6 +91,23 @@ func TestDemoTakesTheProxyFlagsServeTakes(t *testing.T) {
 		if serveCmd.Flags().Lookup(name) == nil {
 			t.Errorf("serve has no --%s, which this test assumed as the reference", name)
 		}
+	}
+}
+
+// TestDemoSeedOnlyHelpSaysWhatTheResultIsFor covers the --seed-only help text.
+//
+// A database seeded with --seed-only is served by demo --no-seed and refused by serve, because
+// seeded runs carry no approval seal and no adoption record. Without the sentence, the refusal from
+// serve reads as a bug in the seeding rather than a boundary.
+func TestDemoSeedOnlyHelpSaysWhatTheResultIsFor(t *testing.T) {
+	flag := demoCmd.Flags().Lookup("seed-only")
+	if flag == nil {
+		t.Fatal("demo has no --seed-only")
+	}
+	want := "The result is served by demo --no-seed. serve refuses it on purpose: seeded runs " +
+		"carry no approval seal and no adoption record."
+	if !strings.Contains(flag.Usage, want) {
+		t.Errorf("--seed-only help = %q, want it to contain %q", flag.Usage, want)
 	}
 }
 
