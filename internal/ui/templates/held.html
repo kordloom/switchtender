@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Waiting for a person - SwitchTender</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="held"{{if .ReadOnly}} data-readonly="true"{{end}}{{if .Demo}} data-demo="true"{{end}}{{if .SignIn}} data-signin="required"{{end}}>
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</a></div>
+	</header>
+
+	<main class="content">
+		<a class="back" href="/ui/runs">Back to runs</a>
+		<div class="page-head">
+			<div class="page-head-text">
+				<h1 id="held-title">Waiting for a person</h1>
+				<p class="muted" id="held-lede">Held runs and workflows waiting at an approval step. Nothing in them runs until a person decides.</p>
+				<p class="muted" id="held-how" hidden><a href="/ui/docs/policy#agent-runs-are-held-by-default">How the hold works</a></p>
+			</div>
+		</div>
+
+		<p id="held-count" class="held-count" hidden></p>
+		<div id="status" class="muted">Loading what is waiting for a person.</div>
+		<div id="held-list" class="attn-list"></div>
+		<p id="held-decide" class="muted held-decide" hidden></p>
+
+		<section id="held-next" class="held-next" hidden>
+			<h2>Where to go next</h2>
+			<ul id="held-next-links"></ul>
+		</section>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

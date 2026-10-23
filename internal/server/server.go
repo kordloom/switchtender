@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io/fs"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -643,28 +642,24 @@ func (s *Server) anyToken() bool {
 	return n > 0
 }
 
-// demoLanding is where the demo's bare address lands: the runs an AI agent asked for that the
-// built-in hold is keeping waiting, the list the hosted demo's banner and the homepage's first
-// button open. The gate is the product, so a visitor who types the address, or follows a link
-// naming only the host, starts at a change the gate stopped rather than at a dashboard any
-// automation tool could show. The demo seeds the agent's held restart whatever tools the machine
-// has, so the list has a run to show. The search is encoded the way the browser encodes it, so the
-// address is the one the hosted demo's banner links to.
-func demoLanding() string {
-	q := `held_by:"` + policy.AgentDefaultName + `" status:pending_approval`
-	return "/ui/runs?q=" + strings.ReplaceAll(url.QueryEscape(q), "+", "%20")
-}
+// demoLanding is where the demo's bare address lands: the held page narrowed to the runs an AI agent
+// asked for, the page the hosted demo's banner and the homepage's first button open. The gate is the
+// product, so a visitor who types the address, or follows a link naming only the host, starts at a
+// change the gate stopped, with why it was held and who can decide it, rather than at a dashboard any
+// automation tool could show. The demo seeds the agent's held restart whatever tools the machine has,
+// so the page has a run to show.
+const demoLanding = "/ui/held?who=agent"
 
-// heldLanding is where a read-only install that is not the demo lands: every run a rule is
-// holding, since an install may have no agent runs at all.
-const heldLanding = "/ui/runs?status=pending_approval"
+// heldLanding is where a read-only install that is not the demo lands: everything waiting for a
+// person, since an install may have no agent runs at all.
+const heldLanding = "/ui/held"
 
 // landing returns where the bare address sends a visitor: the agent's held runs on the read-only
 // demo, every held run on any other read-only server, and the overview on a writable one.
 func (s *Server) landing() string {
 	switch {
 	case s.readOnly && s.demo:
-		return demoLanding()
+		return demoLanding
 	case s.readOnly:
 		return heldLanding
 	default:

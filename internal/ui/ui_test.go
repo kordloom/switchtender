@@ -77,6 +77,10 @@ func TestUIRoutes(t *testing.T) {
 			Name: "register", Path: "/ui/audit/register", WantStatus: http.StatusOK,
 			WantContains: `data-page="register"`,
 		},
+		{ // Test 11: The held page renders as its own page with the list the attention items fill.
+			Name: "held", Path: "/ui/held", WantStatus: http.StatusOK,
+			WantContains: `id="held-list"`,
+		},
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

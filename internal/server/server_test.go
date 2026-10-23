@@ -613,21 +613,19 @@ func TestHealth(t *testing.T) {
 // TestTheDemoLandsOnTheGate pins where the bare address goes. A link to the demo that names only
 // the host, such as a README badge or an address typed from a comment, starts at the change the
 // gate is holding rather than at the overview dashboard every automation tool has. The read-only
-// demo starts at the runs an AI agent asked for, the list the hosted demo's banner and the
-// homepage's first button open. A read-only install that is not the demo may have no agent runs,
-// so it starts at every held run, and a writable install keeps its overview.
+// demo starts at the held page narrowed to the runs an AI agent asked for, the page the hosted
+// demo's banner and the homepage's first button open. A read-only install that is not the demo may
+// have no agent runs, so it starts at everything held, and a writable install keeps its overview.
 func TestTheDemoLandsOnTheGate(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		WantLocation string
 		ReadOnly     bool
 		Demo         bool
-	}{{ // Test 0: The read-only demo starts at the agent's held runs, encoded as the browser does.
-		ReadOnly: true, Demo: true,
-		WantLocation: "/ui/runs?q=held_by%3A%22requested%20by%20an%20agent%2C%20" +
-			"held%20by%20default%22%20status%3Apending_approval",
-	}, { // Test 1: A read-only install that is not the demo starts at every held run.
-		ReadOnly: true, Demo: false, WantLocation: "/ui/runs?status=pending_approval",
+	}{{ // Test 0: The read-only demo starts at the runs an AI agent asked for.
+		ReadOnly: true, Demo: true, WantLocation: "/ui/held?who=agent",
+	}, { // Test 1: A read-only install that is not the demo starts at everything held.
+		ReadOnly: true, Demo: false, WantLocation: "/ui/held",
 	}, { // Test 2: A writable install starts at its overview.
 		ReadOnly: false, Demo: false, WantLocation: "/ui/",
 	}, { // Test 3: A writable server marked as the demo keeps its overview too.

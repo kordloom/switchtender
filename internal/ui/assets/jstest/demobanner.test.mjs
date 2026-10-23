@@ -22,9 +22,9 @@ function bannerOn(host, demo) {
 	return { text: banner.textContent, links };
 }
 
-// agentHeld is where the hosted demo's banner starts: the runs the agent hold is keeping waiting.
-const agentHeld = "/ui/runs?q=" +
-	encodeURIComponent('held_by:"requested by an agent, held by default" status:pending_approval');
+// agentHeld is where the hosted demo's banner starts: the held page narrowed to the runs an AI agent
+// asked for.
+const agentHeld = "/ui/held?who=agent";
 
 test("the hosted demo says it resets every night and starts at the agent's held runs", () => {
 	const { text, links } = bannerOn("demo.switchtender.com", true);
