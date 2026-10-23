@@ -218,7 +218,9 @@ func TestAForgedTimeoutIsNotTimedOut(t *testing.T) {
 				}
 			}
 			time.Sleep(test.Wait)
-			d.sweepApprovalSteps()
+			if err := sweepSteps(d, node); err != nil {
+				t.Fatal(err)
+			}
 			got := parent
 			if test.WantWorkflow == run.StatusPendingApproval {
 				if got, err = store.Get(ctx, parent.ID); err != nil {
