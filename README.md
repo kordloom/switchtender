@@ -11,7 +11,7 @@
   <a href="https://switchtender.com"><img
     src="https://img.shields.io/badge/website-switchtender.com-0969da"
     alt="Website"></a>
-  <a href="https://demo.switchtender.com/ui/runs?status=pending_approval"><img
+  <a href="https://demo.switchtender.com/ui/held?who=agent"><img
     src="https://img.shields.io/badge/live%20demo-demo.switchtender.com-1f883d"
     alt="Live demo"></a>
   <a href="https://github.com/kordloom/switchtender/actions/workflows/ci.yml"><img
@@ -245,7 +245,7 @@ place.
 
 ## See it
 
-Poke at the [live demo](https://demo.switchtender.com/ui/runs?status=pending_approval), read-only and seeded with real runs, nothing to install.
+Poke at the [live demo](https://demo.switchtender.com/ui/held?who=agent), read-only and seeded with real runs, nothing to install.
 
 A two-shard split executing live: the merged host matrix fills in as hosts report, one shard
 fails on the broken database host while the other lands clean, and the timeline draws itself:
@@ -271,7 +271,7 @@ host, remembered across every run:
 
 ## Quick start
 
-Try the [live demo](https://demo.switchtender.com/ui/runs?status=pending_approval) without installing anything, or run it yourself.
+Try the [live demo](https://demo.switchtender.com/ui/held?who=agent) without installing anything, or run it yourself.
 
 One line with a Go toolchain installed:
 

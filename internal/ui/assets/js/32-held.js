@@ -65,6 +65,7 @@ function renderHeld(who, data) {
 		for (const it of items) list.appendChild(attentionItem(it));
 	}
 	renderHeldCount(who, items.length, total);
+	renderHeldOthers(who, all.filter((it) => !heldByAgent(it)));
 	if (!items.length) {
 		showEmpty(who === "agent"
 			? "No run an AI agent asked for is waiting right now."
@@ -96,6 +97,33 @@ function renderHeldCount(who, shown, total) {
 		link.textContent = "See all " + total + " waiting for a person on this install";
 		el.append(" ", link, ".");
 	}
+	el.hidden = false;
+}
+
+// renderHeldOthers says, on the agent's page, what the rest of the waiting changes are, counted from the
+// answer, so "See all" does not promise changes the page never names.
+function renderHeldOthers(who, others) {
+	const el = document.getElementById("held-others");
+	if (!el) return;
+	el.textContent = "";
+	if (who !== "agent" || !others.length) {
+		el.hidden = true;
+		return;
+	}
+	let rules = 0;
+	let steps = 0;
+	for (const it of others) {
+		const approval = (it.main || {}).approval || {};
+		if (approval.scope === "workflow_step") steps++;
+		else if (approval.held_by) rules++;
+	}
+	const rest = others.length - rules - steps;
+	const parts = [];
+	if (rules) parts.push(rules + " " + plural(rules, "run", "runs") + " held by a policy rule");
+	if (steps) parts.push(steps + " " + plural(steps, "workflow", "workflows") + " at an approval step");
+	if (rest) parts.push(rest + " other " + plural(rest, "change", "changes") + " waiting for approval");
+	const last = parts.pop();
+	el.textContent = "Also waiting: " + (parts.length ? parts.join(", ") + " and " + last : last) + ".";
 	el.hidden = false;
 }
 
