@@ -30,6 +30,17 @@ function heldItem(key, kind, name, heldBy, reason) {
 	};
 }
 
+// stepItem builds a workflow waiting at its approval step as GET /v1/attention answers it.
+function stepItem(key, name, step) {
+	const it = heldItem(key, "workflow", name, "",
+		"The workflow is waiting at approval step \"" + step + "\".");
+	it.main.step = step;
+	it.main.approval = { scope: "workflow_step", workflow_state: "paused", decision_id: key + "_step", step,
+		approvers: { role: "admin", agents: false }, on_approve: "Runs deploy.",
+		on_deny: "No step handles a denial, so the workflow fails." };
+	return it;
+}
+
 // liveAnswer is the hosted demo's attention answer: a bot's apply held by a rule, the agent's two
 // held runs, and a person's workflow waiting at its approval step.
 function liveAnswer() {
@@ -41,8 +52,7 @@ function liveAnswer() {
 			"It is held for approval: requested by an agent, held by default."),
 		heldItem("run_apply", "run", "terraform run_apply", AGENT_HOLD,
 			"It is held for approval: requested by an agent, held by default. An agent asked for this apply."),
-		heldItem("run_release", "workflow", "Release 4.3", "",
-			"The workflow is waiting at approval step \"approve-release\"."),
+		stepItem("run_release", "Release 4.3", "approve-release"),
 	];
 	return { counts: { worker_lost: 0, no_worker: 0, approval_needed: 4, blocked: 0 },
 		total: 4, count: 4, items };
@@ -137,4 +147,52 @@ test("an agent's page with nothing held says so", async () => {
 	assert.deepEqual(listed(document), []);
 	assert.match(document.getElementById("status").textContent, /No run an AI agent asked for is waiting right now\./);
 	assert.equal(document.getElementById("held-decide").hidden, true);
+});
+
+test("the agent's page names what else is waiting, counted from the answer", async () => {
+	const { document } = await heldWith(reply(liveAnswer()), "?who=agent");
+	const others = document.getElementById("held-others");
+	assert.equal(others.hidden, false);
+	assert.equal(others.textContent, "Also waiting: 1 run held by a policy rule and 1 workflow at an approval step.");
+});
+
+test("the others line counts each kind and keeps a change it cannot place", async () => {
+	const body = liveAnswer();
+	body.items.push(
+		heldItem("run_rule2", "run", "terraform run_rule2", "any production run", "Held by a rule."),
+		heldItem("run_wf", "workflow", "Release 4.4", "any production run", "Held by a rule."),
+		heldItem("run_odd", "run", "odd", "", "Held."),
+		stepItem("run_release2", "Release 4.5", "approve-release"));
+	body.counts.approval_needed = body.items.length;
+	const { document } = await heldWith(reply(body), "?who=agent");
+	assert.equal(document.getElementById("held-others").textContent,
+		"Also waiting: 3 runs held by a policy rule, 2 workflows at an approval step and " +
+		"1 other change waiting for approval.");
+});
+
+test("no others line shows when only the agent's runs wait or on the page of everything", async () => {
+	const body = liveAnswer();
+	body.items = [body.items[1], body.items[2]];
+	body.counts.approval_needed = 2;
+	const only = await heldWith(reply(body), "?who=agent");
+	assert.equal(only.document.getElementById("held-others").hidden, true);
+	assert.equal(only.document.getElementById("held-others").textContent, "");
+	const all = await heldWith(reply(liveAnswer()), "");
+	assert.equal(all.document.getElementById("held-others").hidden, true);
+});
+
+test("an agent's page with nothing of its own still says what is waiting", async () => {
+	const body = liveAnswer();
+	body.items = [body.items[0]];
+	body.counts.approval_needed = 1;
+	const { document } = await heldWith(reply(body), "?who=agent");
+	assert.equal(document.getElementById("held-others").textContent, "Also waiting: 1 run held by a policy rule.");
+});
+
+test("drawing the page again replaces the others line", async () => {
+	const page = await heldWith(reply(liveAnswer()), "?who=agent");
+	await page.app.loadHeld();
+	for (let i = 0; i < 4; i++) await page.clock.flush();
+	assert.equal(page.document.getElementById("held-others").textContent,
+		"Also waiting: 1 run held by a policy rule and 1 workflow at an approval step.");
 });
