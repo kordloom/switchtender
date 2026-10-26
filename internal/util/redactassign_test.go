@@ -516,11 +516,59 @@ func TestRedactAssignmentsIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestRedactAssignmentsStrayQuoteInEarlierValue pins that a quote an earlier value took as an
+// ordinary byte does not hide a later secret on the same line. The quote count once ran over the
+// whole line, values included, so the stray quote in 0" read as open, the next value opened with it
+// and read as the end of a quoted string, and the password after it stayed in the clear. The earlier
+// value need not be secret, and in that shape redacting twice gave the same leak, so the
+// idempotence fuzz could not see it.
+func TestRedactAssignmentsStrayQuoteInEarlierValue(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		In         string
+		WantResult string
+		WantValue  string
+	}{{ // Test 0: The fuzz crash, a stray double quote in an earlier secret.
+		In: `pass:0"&pass:"hunter2`, WantResult: `pass:X&pass:X`, WantValue: `"hunter2`,
+	}, { // Test 1: The same with single quotes.
+		In: `pass:0'&pass:'hunter2`, WantResult: `pass:X&pass:X`, WantValue: `'hunter2`,
+	}, { // Test 2: The earlier value is not secret.
+		In:         `note: it"s here & password: "hunter2`,
+		WantResult: `note: it"s here & password: X`, WantValue: `"hunter2`,
+	}, { // Test 3: A quote open before a value is still open after it.
+		In:         `sh -c "user=a; password=hunter2"`,
+		WantResult: `sh -c "user=a; password=X"`, WantValue: "hunter2",
+	}, { // Test 4: A quote open before a value that continues onto the next line is still open after it.
+		In:         "sh -c \"cmd=x\\\ny; password=hunter2\"",
+		WantResult: "sh -c \"cmd=x\\\ny; password=X\"", WantValue: "hunter2",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			got, found := RedactAssignments(test.In, "X")
+			if diff := cmp.Diff(test.WantResult, got); diff != "" {
+				t.Errorf("RedactAssignments(%q) mismatch (-want +got):\n%s", test.In, diff)
+			}
+			if twice, _ := RedactAssignments(got, "X"); twice != got {
+				t.Errorf("redacting %q again gave %q", got, twice)
+			}
+			var values []string
+			for _, a := range found {
+				values = append(values, a.Value)
+			}
+			if !slices.Contains(values, test.WantValue) {
+				t.Errorf("found values %q, want %q among them", values, test.WantValue)
+			}
+		})
+	}
+}
+
 // FuzzRedactAssignmentsIsIdempotent searches for text whose redaction changes when it is redacted
 // again, seeded with shapes that once did.
 func FuzzRedactAssignmentsIsIdempotent(f *testing.F) {
 	for _, seed := range []string{`password=''x`, `pass:'' b@`, `token="a"b`, `{"password":"x","u":"y"}`,
-		"key: |\n  a\nnext: 1", `sh -c "password=a\"b c"`, `password: "abc" # note`} {
+		"key: |\n  a\nnext: 1", `sh -c "password=a\"b c"`, `password: "abc" # note`,
+		`pAss:0"&pAss:"`} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, in string) {
