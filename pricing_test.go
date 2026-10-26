@@ -88,6 +88,28 @@ func thousands(n int) string {
 	return s
 }
 
+// TestTeamClockCarriesItsRemedy fails on any public page that states Team's one-business-day clock
+// without the remedy for missing it, so no page promises the clock with the consequence left off.
+func TestTeamClockCarriesItsRemedy(t *testing.T) {
+	t.Parallel()
+	clock := regexp.MustCompile(`(?i)within (<b>)?one business day`)
+	remedy := regexp.MustCompile(`(?i)adds a month to your license|adds a month to the license term|by one month at no charge`)
+	var stated int
+	for _, f := range pricingSurfaces(t) {
+		text := readFlat(t, f)
+		if !clock.MatchString(text) {
+			continue
+		}
+		stated++
+		if !remedy.MatchString(text) {
+			t.Errorf("%s states the one-business-day clock without the missed-clock remedy", f)
+		}
+	}
+	if stated == 0 {
+		t.Fatal("no page states the one-business-day clock, so the guard checks nothing")
+	}
+}
+
 // TestRetiredPricingClaimsStayGone fails on any public page that still makes a commitment KordLoom
 // withdrew before launch. Each one was removed from several pages at once, and a single page left
 // behind would keep the promise alive in writing.
