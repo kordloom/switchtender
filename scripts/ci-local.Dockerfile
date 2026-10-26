@@ -1,6 +1,6 @@
 # The Linux machine scripts/ci-local.sh runs the GitHub workflows on.
 #
-# CI runs on GitHub's ubuntu-latest runner, and a macOS run of the suite kept passing while CI
+# CI runs on GitHub's ubuntu-24.04 runner, and a macOS run of the suite kept passing while CI
 # failed: on a Linux-only file the linter only reads for GOOS=linux, on ext4 handing a deleted
 # directory's inode to the next directory made, on the runner's own ansible-core and botocore, and
 # on jobs nobody ran locally at all. This image is that runner as far as those failures reach: the

@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   refresh:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     # One refresh at a time, finishing what it starts: two dispatches racing the same droplet is
     # the one way this could leave the demo half-upgraded.

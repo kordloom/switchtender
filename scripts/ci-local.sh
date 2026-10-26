@@ -80,7 +80,7 @@ supertest   | supertest.yml   | supertest             |
 gitleaks    | ci.yml          | checks                | Secret scan
 '
 
-# RUNNER_CPUS and RUNNER_MEMORY_GIB are what a hosted ubuntu-latest runner has to itself. Each job
+# RUNNER_CPUS and RUNNER_MEMORY_GIB are what a hosted ubuntu-24.04 runner has to itself. Each job
 # container is given as many CPUs, when Docker has them, and Go sizes GOMAXPROCS, and with it how
 # many test binaries go test runs at once, from that limit, as it does on the runner.
 RUNNER_CPUS=4

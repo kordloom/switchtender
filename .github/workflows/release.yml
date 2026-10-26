@@ -33,7 +33,7 @@ jobs:
   # gets none of the workflow's write grants: no id-token that could mint a Fulcio certificate
   # identical to a genuine release signature, no persisted contents token in .git/config.
   gate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: read
@@ -555,7 +555,7 @@ jobs:
   docker:
     needs: gate
     if: github.ref_type == 'tag'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
