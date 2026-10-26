@@ -15,7 +15,7 @@ jobs:
   # Everything the suite does not cover, run once: the build, vet, the JS tests, the public dare,
   # the chart, the generated site, and the secret scan. The suite itself runs split in test below.
   checks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       # Full depth: the secret scan below reads every commit, and a shallow clone
@@ -201,7 +201,7 @@ jobs:
   # without anyone listing it.
   test:
     name: test (shard ${{ matrix.shard }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -324,7 +324,7 @@ jobs:
   # matrix and those lists drift apart, so moving to a newer patch is a reviewed change.
   inventory-conformance:
     name: inventory conformance (ansible-core ${{ matrix.ansible-core }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -355,7 +355,7 @@ jobs:
         run: go test -count=1 -run 'TestConformance' ./internal/inventory/
 
   crossverify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -403,7 +403,7 @@ jobs:
   # breaks the browser verifier fails the pull request rather than the deploy after merge. The
   # deploy keeps its own copy of the check as the last line; this is the first.
   verifier:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -455,7 +455,7 @@ jobs:
   # agreement with the command, or its recovery from a file too large for it fails here, while it
   # can still be fixed before it merges.
   assessment:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -479,7 +479,7 @@ jobs:
             test/supertest/manifests/awx-export.json
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -491,7 +491,7 @@ jobs:
           version: v2.12.2
 
   integration:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -566,7 +566,7 @@ jobs:
         run: go test -tags integration -v -timeout 10m ./internal/integration/...
 
   vuln:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -589,7 +589,7 @@ jobs:
   # and navigation, and a writable serve instance where it launches a run and creates objects and checks
   # the change persisted. It catches layout, CSS, and browser-only breakage the simulated DOM cannot see.
   ui-e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
       run:
