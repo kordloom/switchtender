@@ -84,30 +84,35 @@ func TestShellWord(t *testing.T) {
 	}
 }
 
-// TestOpenQuote pins which quote a line leaves open, which is how a value learns that a quote opened
-// before its name holds it.
-func TestOpenQuote(t *testing.T) {
+// TestAdvanceQuote pins which quote a line leaves open, which is how a value learns that a quote
+// opened before its name holds it.
+func TestAdvanceQuote(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		// In is the line before a value.
+		// In is the text before a value.
 		In string
+		// Entered is the quote already open where In begins, or zero.
+		Entered byte
 		// WantResult is the quote still open at its end, or zero.
 		WantResult byte
 	}{
-		{In: "", WantResult: 0},                          // Test 0: Nothing.
-		{In: `psql "host=db password=`, WantResult: '"'}, // Test 1: The ordinary shape.
-		{In: `echo 'a' "b" `, WantResult: 0},             // Test 2: Closed runs.
-		{In: `echo 'say "hi' x=`, WantResult: 0},         // Test 3: A double quote inside single ones.
-		{In: `sh -c "echo \"hi\" x=`, WantResult: '"'},   // Test 4: Escaped quotes do not toggle.
-		{In: `echo 'a\' x=`, WantResult: 0},              // Test 5: Inside single quotes a backslash is literal.
-		{In: `echo \' x=`, WantResult: 0},                // Test 6: An escaped quote outside any.
-		{In: `don't x=`, WantResult: '\''},               // Test 7: An apostrophe reads as an open quote.
+		{In: "", WantResult: 0},                            // Test 0: Nothing.
+		{In: `psql "host=db password=`, WantResult: '"'},   // Test 1: The ordinary shape.
+		{In: `echo 'a' "b" `, WantResult: 0},               // Test 2: Closed runs.
+		{In: `echo 'say "hi' x=`, WantResult: 0},           // Test 3: A double quote inside single ones.
+		{In: `sh -c "echo \"hi\" x=`, WantResult: '"'},     // Test 4: Escaped quotes do not toggle.
+		{In: `echo 'a\' x=`, WantResult: 0},                // Test 5: Inside single quotes a backslash is literal.
+		{In: `echo \' x=`, WantResult: 0},                  // Test 6: An escaped quote outside any.
+		{In: `don't x=`, WantResult: '\''},                 // Test 7: An apostrophe reads as an open quote.
+		{In: `; password=`, Entered: '"', WantResult: '"'}, // Test 8: A quote entered stays open.
+		{In: `" x=`, Entered: '"', WantResult: 0},          // Test 9: A quote entered closes.
+		{In: `'a' x=`, Entered: '"', WantResult: '"'},      // Test 10: The other quote inside does not close it.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			if diff := cmp.Diff(test.WantResult, openQuote(test.In)); diff != "" {
-				t.Errorf("openQuote(%q) mismatch (-want +got):\n%s", test.In, diff)
+			if diff := cmp.Diff(test.WantResult, advanceQuote(test.Entered, test.In)); diff != "" {
+				t.Errorf("advanceQuote(%q, %q) mismatch (-want +got):\n%s", test.Entered, test.In, diff)
 			}
 		})
 	}

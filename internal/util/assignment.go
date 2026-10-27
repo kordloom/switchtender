@@ -145,6 +145,12 @@ func (a Assignment) Readings() []string {
 // to come out the same on every path that redacts it.
 func redactPatternDepth(form assignmentForm, text, mask string, found *[]Assignment, depth int) string {
 	var out strings.Builder
+	// quote is the quote open at pos, counted over the text between values since the last newline
+	// outside one. A value already read is left out of the count, because its reader has decided what
+	// its bytes mean, and after redaction a secret one is a mask with no quote or newline in it.
+	// Counting a stray quote that a plain value took as an ordinary byte, as in pass:0"&pass:"hunter2,
+	// read the next value as the end of a quoted string and left the password after it in the clear.
+	var quote byte
 	pos := 0
 	for pos < len(text) {
 		loc := form.pattern.FindStringSubmatchIndex(text[pos:])
@@ -154,7 +160,12 @@ func redactPatternDepth(form assignmentForm, text, mask string, found *[]Assignm
 		name := text[pos+loc[2] : pos+loc[3]]
 		valueStart := pos + loc[6]
 		line := lineBefore(text, valueStart)
-		closer := openQuote(line)
+		between := text[pos:valueStart]
+		if i := strings.LastIndexByte(between, '\n'); i >= 0 {
+			quote, between = 0, between[i+1:]
+		}
+		quote = advanceQuote(quote, between)
+		closer := quote
 		// A value that opens with the quote the line left open is either the end of that quoted
 		// string, so nothing was assigned, or a quote of its own the line's count got wrong, as an
 		// apostrophe earlier in a sentence does. A quote that closes again is the second, and reading

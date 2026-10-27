@@ -295,13 +295,13 @@ func hexRun(s string, width int) int {
 	return n
 }
 
-// openQuote returns the quote a shell is still inside at the end of line, or zero. It is how a value
-// learns that a quote opened before its name holds it, as in psql "host=db password=hunter2", where
-// the closing quote belongs to the string and not to the password.
-func openQuote(line string) byte {
-	var q byte
-	for i := 0; i < len(line); i++ {
-		switch c := line[i]; {
+// advanceQuote returns the quote a shell is still inside at the end of s, having entered s inside q,
+// or zero. It is how a value learns that a quote opened before its name holds it, as in
+// psql "host=db password=hunter2", where the closing quote belongs to the string and not to the
+// password.
+func advanceQuote(q byte, s string) byte {
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
 		case c == '\\' && q != '\'':
 			i++
 		case q == 0 && (c == '\'' || c == '"'):
