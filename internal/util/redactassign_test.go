@@ -521,13 +521,15 @@ func TestRedactAssignmentsIsIdempotent(t *testing.T) {
 // whole line, values included, so the stray quote in 0" read as open, the next value opened with it
 // and read as the end of a quoted string, and the password after it stayed in the clear. The earlier
 // value need not be secret, and in that shape redacting twice gave the same leak, so the
-// idempotence fuzz could not see it.
+// idempotence fuzz could not see it. Nor need the two values be of one form: a pass per form counted
+// quotes inside values only the other form had read.
 func TestRedactAssignmentsStrayQuoteInEarlierValue(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		In         string
 		WantResult string
-		WantValue  string
+		// WantValue is a value found, or empty when nothing is assigned.
+		WantValue string
 	}{{ // Test 0: The fuzz crash, a stray double quote in an earlier secret.
 		In: `pass:0"&pass:"hunter2`, WantResult: `pass:X&pass:X`, WantValue: `"hunter2`,
 	}, { // Test 1: The same with single quotes.
@@ -541,6 +543,19 @@ func TestRedactAssignmentsStrayQuoteInEarlierValue(t *testing.T) {
 	}, { // Test 4: A quote open before a value that continues onto the next line is still open after it.
 		In:         "sh -c \"cmd=x\\\ny; password=hunter2\"",
 		WantResult: "sh -c \"cmd=x\\\ny; password=X\"", WantValue: "hunter2",
+	}, { // Test 5: The stray quote sits in a name: value and the secret in a name=value.
+		In: `pass:0"&pass="hunter2`, WantResult: `pass:X&pass=X`, WantValue: `"hunter2`,
+	}, { // Test 6: The stray quote sits in a name=value value and the secret in a name: value.
+		In: `note=it"s & password: "hunter2`, WantResult: `note=it"s & password: "X`, WantValue: "hunter2",
+	}, { // Test 7: A non-secret name: value ahead of a name=value secret on one line.
+		In:         `note: it"s here & password="hunter2"`,
+		WantResult: `note: it"s here & password=X`, WantValue: "hunter2",
+	}, { // Test 8: Text joined onto the quote that closes the string is the value.
+		In: `echo "a password="hunter2`, WantResult: `echo "a password="X`, WantValue: "hunter2",
+	}, { // Test 9: A quote that closes the string before a space assigns nothing.
+		In: `psql "password=" -c x`, WantResult: `psql "password=" -c x`,
+	}, { // Test 10: A quote that closes the string before a separator assigns nothing.
+		In: `sh -c "token=" && x`, WantResult: `sh -c "token=" && x`,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -556,6 +571,12 @@ func TestRedactAssignmentsStrayQuoteInEarlierValue(t *testing.T) {
 			for _, a := range found {
 				values = append(values, a.Value)
 			}
+			if test.WantValue == "" {
+				if len(values) != 0 {
+					t.Errorf("found values %q, want none", values)
+				}
+				return
+			}
 			if !slices.Contains(values, test.WantValue) {
 				t.Errorf("found values %q, want %q among them", values, test.WantValue)
 			}
@@ -568,7 +589,7 @@ func TestRedactAssignmentsStrayQuoteInEarlierValue(t *testing.T) {
 func FuzzRedactAssignmentsIsIdempotent(f *testing.F) {
 	for _, seed := range []string{`password=''x`, `pass:'' b@`, `token="a"b`, `{"password":"x","u":"y"}`,
 		"key: |\n  a\nnext: 1", `sh -c "password=a\"b c"`, `password: "abc" # note`,
-		`pAss:0"&pAss:"`} {
+		`pAss:0"&pAss:"`, `pAss:0"&pAss="`} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, in string) {
