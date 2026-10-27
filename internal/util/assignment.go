@@ -30,8 +30,8 @@ type assignmentForm struct {
 	decode func(raw string, closer byte) string
 }
 
-// assignmentForms are the textual forms, applied in order to text no parser accepted and to the
-// string leaves of text one did.
+// assignmentForms are the textual forms, read together in one scan of text no parser accepted and of
+// the string leaves of text one did.
 var assignmentForms = []assignmentForm{
 	{pattern: iniAssignment, read: shellWordLen, decode: shellValue},
 	{pattern: yamlAssignment, read: yamlValue, decode: yamlValueDecode},
@@ -79,9 +79,7 @@ type Assignment struct {
 // still found. The scan never rewinds, so it stays linear in the length of the text.
 func RedactAssignments(text, mask string) (string, []Assignment) {
 	var found []Assignment
-	for _, form := range assignmentForms {
-		text = redactPatternDepth(form, text, mask, &found, maxNestedAssignmentDepth)
-	}
+	text = redactDepth(text, mask, &found, maxNestedAssignmentDepth)
 	// A credential can also ride inside a URL, as scheme://user:password@host, where no name=value
 	// pattern sees it: pg_dump postgres://backup:pass@db and git clone https://x:token@host both
 	// carry a secret no assignment names. Only the audit digest scrubbed this shape, so a receipt
@@ -131,20 +129,32 @@ func (a Assignment) Readings() []string {
 	return out
 }
 
-// redactPatternDepth applies one assignment form across text, replacing the values whose names the
+// redactDepth applies every assignment form across text, replacing the values whose names the
 // classifier calls secret and recording each one, with the remaining nesting budget carried
-// explicitly. It makes a single forward pass, and for a non-secret assignment whose value may itself
-// hold a joined assignment it scans that value once rather than rewinding the outer scan into it. The
-// budget stops a value that is really a long chain of joined assignments from being descended into
-// without end.
+// explicitly. It makes a single forward pass that takes the leftmost assignment of any form, and for
+// a non-secret assignment whose value may itself hold a joined assignment it scans that value once
+// rather than rewinding the outer scan into it. The budget stops a value that is really a long chain
+// of joined assignments from being descended into without end.
+//
+// The forms share the pass because each value's reader decides what its bytes mean, and a pass per
+// form could not know what another form had read. The name=value pass counted the stray quote inside
+// a name: value it never read, so pass:0"&pass="hunter2 left the password in the clear until a
+// second redaction masked it.
 //
 // Redacting the result again changes nothing. A value ends where its syntax ends, at a space, a
 // separator, the quote holding the text, or the end of a line, and a mask written in its place ends
 // at that same boundary, so a second pass reads the mask as the whole value and writes it back. The
 // redacted text is what gets stored, signed, and disclosed, and a record whose digest covers it has
 // to come out the same on every path that redacts it.
-func redactPatternDepth(form assignmentForm, text, mask string, found *[]Assignment, depth int) string {
+func redactDepth(text, mask string, found *[]Assignment, depth int) string {
 	var out strings.Builder
+	// next holds each form's leftmost match at or after pos, with offsets into text, searched again
+	// only once pos passes its start, and nil for a form with no match left. A match ahead of pos is
+	// still the leftmost from pos, so no byte is searched twice by one form.
+	next := make([][]int, len(assignmentForms))
+	for i, form := range assignmentForms {
+		next[i] = matchFrom(form.pattern, text, 0)
+	}
 	// quote is the quote open at pos, counted over the text between values since the last newline
 	// outside one. A value already read is left out of the count, because its reader has decided what
 	// its bytes mean, and after redaction a secret one is a mask with no quote or newline in it.
@@ -153,12 +163,21 @@ func redactPatternDepth(form assignmentForm, text, mask string, found *[]Assignm
 	var quote byte
 	pos := 0
 	for pos < len(text) {
-		loc := form.pattern.FindStringSubmatchIndex(text[pos:])
-		if loc == nil {
+		best := -1
+		for i, form := range assignmentForms {
+			if next[i] != nil && next[i][0] < pos {
+				next[i] = matchFrom(form.pattern, text, pos)
+			}
+			if next[i] != nil && (best < 0 || next[i][0] < next[best][0]) {
+				best = i
+			}
+		}
+		if best < 0 {
 			break
 		}
-		name := text[pos+loc[2] : pos+loc[3]]
-		valueStart := pos + loc[6]
+		form, loc := assignmentForms[best], next[best]
+		name := text[loc[2]:loc[3]]
+		valueStart := loc[6]
 		line := lineBefore(text, valueStart)
 		between := text[pos:valueStart]
 		if i := strings.LastIndexByte(between, '\n'); i >= 0 {
@@ -170,8 +189,20 @@ func redactPatternDepth(form assignmentForm, text, mask string, found *[]Assignm
 		// string, so nothing was assigned, or a quote of its own the line's count got wrong, as an
 		// apostrophe earlier in a sentence does. A quote that closes again is the second, and reading
 		// it as the first left the password inside it in the clear.
-		if closer != 0 && text[valueStart] == closer && quotedEnd(text, valueStart, 0, closer == '"') > 0 {
-			closer = 0
+		//
+		// Text joined onto the end of the quoted string is the value after all: the shell hands
+		// echo "a password="hunter2 the word a password=hunter2, and reading nothing assigned there
+		// left the password in the clear. The quote is kept as written and the joined text is read
+		// as a value outside any quote.
+		if closer != 0 && text[valueStart] == closer {
+			switch {
+			case quotedEnd(text, valueStart, 0, closer == '"') > 0:
+				closer = 0
+			case valueStart+1 < len(text) && !wordEnds[text[valueStart+1]]:
+				valueStart++
+				line = lineBefore(text, valueStart)
+				closer, quote = 0, 0
+			}
 		}
 		n, keepQuotes := form.read(text[valueStart:], line, closer)
 		valueEnd := valueStart + n
@@ -203,7 +234,7 @@ func redactPatternDepth(form assignmentForm, text, mask string, found *[]Assignm
 			// events, and the live stream while the receipt showed it redacted.
 			open, inner, close := splitQuoted(value)
 			out.WriteString(open)
-			out.WriteString(redactPatternDepth(form, inner, mask, found, depth-1))
+			out.WriteString(redactDepth(inner, mask, found, depth-1))
 			out.WriteString(close)
 		default:
 			out.WriteString(value)
@@ -212,6 +243,18 @@ func redactPatternDepth(form assignmentForm, text, mask string, found *[]Assignm
 	}
 	out.WriteString(text[pos:])
 	return out.String()
+}
+
+// matchFrom returns the leftmost match of pattern in text at or after from, with its offsets into
+// text, or nil when there is none.
+func matchFrom(pattern *regexp.Regexp, text string, from int) []int {
+	loc := pattern.FindStringSubmatchIndex(text[from:])
+	for i := range loc {
+		if loc[i] >= 0 {
+			loc[i] += from
+		}
+	}
+	return loc
 }
 
 // shellSeparators end an unquoted value on a command line. A value that is not held open by a quote
