@@ -305,6 +305,13 @@ func Allow(f Feature) error {
 	return allowAt(current.Load(), f, time.Now())
 }
 
+// Unlicensed returns the refusal a Community install gets for f, whatever license this process
+// holds. A Community build refuses a paid feature with this line because the code that does it is
+// not in the binary, so a license file alone cannot turn it on.
+func Unlicensed(f Feature) error {
+	return allowAt(nil, f, time.Now())
+}
+
 // allowAt is Allow against an explicit license and clock, which is what makes the rule testable.
 //
 // The license leads each sentence and the feature follows it, because "is required for" agrees with
