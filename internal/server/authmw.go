@@ -20,6 +20,7 @@ import (
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/federation"
 	"github.com/kordloom/switchtender/internal/notification"
+	"github.com/kordloom/switchtender/internal/paid"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/user"
 )
@@ -36,7 +37,7 @@ type authGate struct {
 	// users resolves token owners to roles, nil when accounts are not configured.
 	users user.Store
 	// jwt validates a bearer JWT when configured, nil when JWT sign-in is off.
-	jwt *JWTAuth
+	jwt paid.JWTDirectory
 	// audits records authenticated mutations, nil when the trail is off.
 	audits audit.Store
 	// tickets mints and redeems the short-lived permissions the event stream is opened with, since

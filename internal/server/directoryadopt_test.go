@@ -36,7 +36,7 @@ func TestDirectoryWillNotTakeOverAnotherSourcesAccount(t *testing.T) {
 			t.Fatalf("Save: %v", err)
 		}
 
-		_, err = provisionFromDirectory(ctx, users, zap.NewNop(), "root", user.RoleViewer, true, "jwt")
+		_, err = ProvisionFromDirectory(ctx, users, zap.NewNop(), "root", user.RoleViewer, true, "jwt")
 		if err == nil {
 			t.Fatal("a directory identity signed in as the local administrator")
 		}
@@ -57,7 +57,7 @@ func TestDirectoryWillNotTakeOverAnotherSourcesAccount(t *testing.T) {
 		t.Parallel()
 		users := user.NewMemStore()
 		// First sign-in provisions.
-		first, err := provisionFromDirectory(ctx, users, zap.NewNop(), "jane", user.RoleOperator,
+		first, err := ProvisionFromDirectory(ctx, users, zap.NewNop(), "jane", user.RoleOperator,
 			true, "ldap")
 		if err != nil {
 			t.Fatalf("first sign-in: %v", err)
@@ -66,7 +66,7 @@ func TestDirectoryWillNotTakeOverAnotherSourcesAccount(t *testing.T) {
 			t.Errorf("source = %q, want the directory that made it", first.Source)
 		}
 		// Second sign-in reuses it, and group-driven roles still apply.
-		second, err := provisionFromDirectory(ctx, users, zap.NewNop(), "jane", user.RoleAdmin,
+		second, err := ProvisionFromDirectory(ctx, users, zap.NewNop(), "jane", user.RoleAdmin,
 			true, "ldap")
 		if err != nil {
 			t.Fatalf("second sign-in: %v", err)
@@ -91,7 +91,7 @@ func TestDirectoryWillNotTakeOverAnotherSourcesAccount(t *testing.T) {
 			t.Fatalf("Save: %v", err)
 		}
 		// Refusing these would lock out every directory user on upgrade, so it is allowed and logged.
-		if _, err := provisionFromDirectory(ctx, users, zap.NewNop(), "olduser",
+		if _, err := ProvisionFromDirectory(ctx, users, zap.NewNop(), "olduser",
 			user.RoleOperator, false, "ldap"); err != nil {
 			t.Errorf("an account with no recorded source was refused: %v", err)
 		}
@@ -100,11 +100,11 @@ func TestDirectoryWillNotTakeOverAnotherSourcesAccount(t *testing.T) {
 	t.Run("a different directory is refused", func(t *testing.T) {
 		t.Parallel()
 		users := user.NewMemStore()
-		if _, err := provisionFromDirectory(ctx, users, zap.NewNop(), "sam", user.RoleOperator,
+		if _, err := ProvisionFromDirectory(ctx, users, zap.NewNop(), "sam", user.RoleOperator,
 			false, "ldap"); err != nil {
 			t.Fatalf("provision: %v", err)
 		}
-		if _, err := provisionFromDirectory(ctx, users, zap.NewNop(), "sam", user.RoleAdmin,
+		if _, err := ProvisionFromDirectory(ctx, users, zap.NewNop(), "sam", user.RoleAdmin,
 			true, "saml"); err == nil {
 			t.Error("a SAML identity took over an account LDAP provisioned")
 		}

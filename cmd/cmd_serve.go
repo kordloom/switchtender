@@ -51,6 +51,7 @@ import (
 	"github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/org"
 	"github.com/kordloom/switchtender/internal/outcome"
+	"github.com/kordloom/switchtender/internal/paid"
 	"github.com/kordloom/switchtender/internal/pgstore"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
@@ -1875,32 +1876,48 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			zap.Int("sinks", len(sinks)))
 	}
 
-	var oidcAuth *server.OIDCAuth
+	// Directory sign-in is built by the paid module through the seam. A Community build has only
+	// the stub, which refuses here naming Pro, in the same words the license gate above uses.
+	directory := paid.CurrentDirectory()
+	var oidcAuth paid.OIDCDirectory
 	if serveOIDCIssuer != "" {
-		oidcAuth, err = server.NewOIDCAuth(cmd.Context(), serveOIDCIssuer, serveOIDCClientID,
-			os.Getenv("SWITCHTENDER_OIDC_CLIENT_SECRET"), serveOIDCRedirectURL,
-			user.Role(serveOIDCDefaultRole), bundle.Users(), bundle.Tokens(), log)
+		oidcAuth, err = directory.OIDC(cmd.Context(), paid.OIDCConfig{
+			Directory: paid.DirectoryConfig{Users: bundle.Users(), Tokens: bundle.Tokens(),
+				DefaultRole: user.Role(serveOIDCDefaultRole), Log: log},
+			Issuer: serveOIDCIssuer, ClientID: serveOIDCClientID,
+			ClientSecret: os.Getenv("SWITCHTENDER_OIDC_CLIENT_SECRET"),
+			RedirectURL:  serveOIDCRedirectURL,
+		})
 		if err != nil {
 			return err
 		}
 	}
 
-	var ldapAuth *server.LDAPAuth
+	var ldapAuth paid.LDAPDirectory
 	if serveLDAPURL != "" {
-		ldapAuth, err = server.NewLDAPAuth(serveLDAPURL, serveLDAPBindDN,
-			os.Getenv("SWITCHTENDER_LDAP_PASSWORD"), serveLDAPBaseDN, serveLDAPUserFilter,
-			user.Role(serveLDAPDefaultRole), parseRoleMap(serveLDAPRoleMap), bundle.Users(), log)
+		ldapAuth, err = directory.LDAP(cmd.Context(), paid.LDAPConfig{
+			Directory: paid.DirectoryConfig{Users: bundle.Users(),
+				DefaultRole: user.Role(serveLDAPDefaultRole),
+				RoleMap:     parseRoleMap(serveLDAPRoleMap), Log: log},
+			URL: serveLDAPURL, BindDN: serveLDAPBindDN,
+			BindPassword: os.Getenv("SWITCHTENDER_LDAP_PASSWORD"),
+			BaseDN:       serveLDAPBaseDN, UserFilter: serveLDAPUserFilter,
+		})
 		if err != nil {
 			return err
 		}
 	}
 
-	var samlAuth *server.SAMLAuth
+	var samlAuth paid.SAMLDirectory
 	if serveSAMLIDPMetadataURL != "" {
-		samlAuth, err = server.NewSAMLAuth(cmd.Context(), serveSAMLIDPMetadataURL, serveSAMLBaseURL,
-			serveSAMLCert, serveSAMLKey, serveSAMLUsernameAttr, serveSAMLGroupsAttr,
-			user.Role(serveSAMLDefaultRole), parseRoleMap(serveSAMLRoleMap),
-			bundle.Users(), bundle.Tokens(), log)
+		samlAuth, err = directory.SAML(cmd.Context(), paid.SAMLConfig{
+			Directory: paid.DirectoryConfig{Users: bundle.Users(), Tokens: bundle.Tokens(),
+				DefaultRole: user.Role(serveSAMLDefaultRole),
+				RoleMap:     parseRoleMap(serveSAMLRoleMap), Log: log},
+			IDPMetadataURL: serveSAMLIDPMetadataURL, BaseURL: serveSAMLBaseURL,
+			CertFile: serveSAMLCert, KeyFile: serveSAMLKey,
+			UsernameAttr: serveSAMLUsernameAttr, GroupsAttr: serveSAMLGroupsAttr,
+		})
 		if err != nil {
 			return err
 		}
@@ -1921,7 +1938,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	var jwtAuth *server.JWTAuth
+	var jwtAuth paid.JWTDirectory
 	if serveJWTJWKSURL != "" {
 		// An issuer usually mints tokens for more than one application, and the audience claim is
 		// what says which one a token was for. Without it every token that issuer signs is accepted
@@ -1933,13 +1950,17 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			log.Warn("jwt sign-in accepts any audience: set --jwt-audience so a token minted for " +
 				"another application at the same issuer is not accepted here")
 		}
-		jwtAuth, err = server.NewJWTAuth(cmd.Context(), serveJWTJWKSURL, serveJWTIssuer,
-			serveJWTAudience, serveJWTUsernameClaim, serveJWTGroupsClaim,
-			user.Role(serveJWTDefaultRole), parseRoleMap(serveJWTRoleMap), bundle.Users(), log)
+		jwtAuth, err = directory.JWT(cmd.Context(), paid.JWTConfig{
+			Directory: paid.DirectoryConfig{Users: bundle.Users(),
+				DefaultRole: user.Role(serveJWTDefaultRole),
+				RoleMap:     parseRoleMap(serveJWTRoleMap), Log: log},
+			JWKSURL: serveJWTJWKSURL, Issuer: serveJWTIssuer, Audience: serveJWTAudience,
+			UsernameClaim: serveJWTUsernameClaim, GroupsClaim: serveJWTGroupsClaim,
+			AgentClaim: serveJWTAgentClaim,
+		})
 		if err != nil {
 			return err
 		}
-		jwtAuth = jwtAuth.WithAgentClaim(serveJWTAgentClaim)
 	}
 
 	aiProvider, err := ai.New(serveAIProvider, serveAIModel, serveAIURL, os.Getenv("SWITCHTENDER_AI_KEY"))

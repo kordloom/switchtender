@@ -16,6 +16,7 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/forgelink"
+	"github.com/kordloom/switchtender/internal/paid"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/user"
 )
@@ -387,7 +388,7 @@ func (b *loginBudgets) recordFailure(ctx context.Context, addr string) error {
 // loginHandler authenticates a username and password and mints a session token owned by the user.
 // Attempts are rate limited per client and username so stolen password lists cannot be replayed at
 // full speed, and are counted in store's shared budgets when it keeps them.
-func loginHandler(users user.Store, guard *user.Guard, tokens auth.Store, ldap *LDAPAuth,
+func loginHandler(users user.Store, guard *user.Guard, tokens auth.Store, ldap paid.LDAPDirectory,
 	store run.Store, log *zap.Logger) http.HandlerFunc {
 	return budgetedLoginHandler(users, guard, tokens, ldap, log, newLoginBudgets(store, nil))
 }
@@ -397,13 +398,13 @@ func loginHandler(users user.Store, guard *user.Guard, tokens auth.Store, ldap *
 // machine was rather than for anything about the limiter. The clock is per handler rather than a
 // package variable, because a variable a test writes while a parallel handler reads it is a data
 // race, and the race detector finds it.
-func loginHandlerWithClock(users user.Store, guard *user.Guard, tokens auth.Store, ldap *LDAPAuth,
+func loginHandlerWithClock(users user.Store, guard *user.Guard, tokens auth.Store, ldap paid.LDAPDirectory,
 	log *zap.Logger, now func() time.Time) http.HandlerFunc {
 	return budgetedLoginHandler(users, guard, tokens, ldap, log, newLoginBudgets(nil, now))
 }
 
 // budgetedLoginHandler is the sign-in handler, counting attempts in budgets.
-func budgetedLoginHandler(users user.Store, guard *user.Guard, tokens auth.Store, ldap *LDAPAuth,
+func budgetedLoginHandler(users user.Store, guard *user.Guard, tokens auth.Store, ldap paid.LDAPDirectory,
 	log *zap.Logger, budgets *loginBudgets) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if users == nil || tokens == nil {

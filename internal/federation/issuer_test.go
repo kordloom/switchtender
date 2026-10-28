@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
@@ -393,22 +393,22 @@ func TestSubject(t *testing.T) {
 	}
 }
 
-// TestTokenVerifiesWithAStandardRelyingParty runs a minted token through go-oidc, an independent
-// OpenID Connect verifier that discovers the issuer over HTTP and fetches the key set the way a
-// cloud does, and pins audience and expiry enforcement from the relying party's side.
+// TestTokenVerifiesWithAStandardRelyingParty runs a minted token through the steps a standard
+// relying party takes: discover the issuer over HTTP, fetch the key set the discovery document
+// names, verify the signature with a key from that set, and enforce audience and expiry from the
+// relying party's side, with nothing from the issuer's own code in the path.
 func TestTokenVerifiesWithAStandardRelyingParty(t *testing.T) {
 	t.Parallel()
 	clock := &testClock{now: time.Now().Truncate(time.Second)}
 	iss, _ := serveIssuer(t, clock)
 	ctx := context.Background()
-	provider, err := oidc.NewProvider(ctx, iss.URL())
-	if err != nil {
-		t.Fatalf("NewProvider() error = %v", err)
-	}
 	token, _, err := iss.Mint(ctx, sampleClaims(), 5*time.Minute)
 	if err != nil {
 		t.Fatalf("Mint() error = %v", err)
 	}
+	// The key set is read after the first token, as a relying party reads it: the issuer publishes
+	// a key once it has signed with it.
+	keys := discoverKeys(t, iss.URL())
 	tests := []struct {
 		Audience string
 		At       time.Time
@@ -423,25 +423,61 @@ func TestTokenVerifiesWithAStandardRelyingParty(t *testing.T) {
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			verifier := provider.Verifier(&oidc.Config{
-				ClientID: test.Audience, Now: func() time.Time { return test.At },
-			})
-			idt, err := verifier.Verify(ctx, token)
+			parsed, err := jwt.ParseSigned(token, []jose.SignatureAlgorithm{jose.RS256})
+			if err != nil {
+				t.Fatalf("ParseSigned() error = %v", err)
+			}
+			kid := parsed.Headers[0].KeyID
+			matches := keys.Key(kid)
+			if len(matches) != 1 {
+				t.Fatalf("key set holds %d keys for kid %q, want 1", len(matches), kid)
+			}
+			var std jwt.Claims
+			var c Claims
+			if err := parsed.Claims(matches[0].Key, &std, &c); err != nil {
+				t.Fatalf("Claims() error = %v", err)
+			}
+			err = std.ValidateWithLeeway(jwt.Expected{
+				Issuer: iss.URL(), AnyAudience: jwt.Audience{test.Audience}, Time: test.At,
+			}, 0)
 			if (err == nil) != test.WantOK {
-				t.Fatalf("Verify() error = %v, want ok %v", err, test.WantOK)
+				t.Fatalf("Validate() error = %v, want ok %v", err, test.WantOK)
 			}
 			if err != nil {
 				return
-			}
-			var c Claims
-			if err := idt.Claims(&c); err != nil {
-				t.Fatalf("Claims() error = %v", err)
 			}
 			if c.RunID != "run_abc" || !c.Approved || c.ApprovedBy != "approver-two" {
 				t.Errorf("claims read by the relying party = %+v", c)
 			}
 		})
 	}
+}
+
+// discoverKeys fetches the issuer's discovery document and the key set it names, the way a cloud
+// relying party does.
+func discoverKeys(t *testing.T, issuer string) *jose.JSONWebKeySet {
+	t.Helper()
+	resp, err := http.Get(issuer + DiscoveryPath)
+	if err != nil {
+		t.Fatalf("discovery: %v", err)
+	}
+	defer resp.Body.Close()
+	var doc struct {
+		JWKSURI string `json:"jwks_uri"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+		t.Fatalf("decode discovery: %v", err)
+	}
+	keysResp, err := http.Get(doc.JWKSURI)
+	if err != nil {
+		t.Fatalf("jwks: %v", err)
+	}
+	defer keysResp.Body.Close()
+	var set jose.JSONWebKeySet
+	if err := json.NewDecoder(keysResp.Body).Decode(&set); err != nil {
+		t.Fatalf("decode jwks: %v", err)
+	}
+	return &set
 }
 
 // TestEnsureIsIdempotent pins that a key is generated once, so every process starting against one

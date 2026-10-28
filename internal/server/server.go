@@ -31,6 +31,7 @@ import (
 	"github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/org"
 	"github.com/kordloom/switchtender/internal/outcome"
+	"github.com/kordloom/switchtender/internal/paid"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/relay"
@@ -304,19 +305,19 @@ func WithMatrixCap(cap int) Option {
 
 // WithOIDC enables single sign-on through the given OpenID Connect provider. When set, the sign-in
 // page offers an SSO button and the /auth/oidc routes are served.
-func WithOIDC(o *OIDCAuth) Option {
+func WithOIDC(o paid.OIDCDirectory) Option {
 	return func(srv *Server) { srv.oidc = o }
 }
 
 // WithLDAP enables sign-in against an LDAP directory. When set, the login handler tries a local
 // account first and then the directory, so directory and local accounts both work.
-func WithLDAP(l *LDAPAuth) Option {
+func WithLDAP(l paid.LDAPDirectory) Option {
 	return func(srv *Server) { srv.ldap = l }
 }
 
 // WithSAML enables single sign-on through a SAML identity provider. When set, the sign-in page
 // offers a SAML button and the /auth/saml routes are served.
-func WithSAML(a *SAMLAuth) Option {
+func WithSAML(a paid.SAMLDirectory) Option {
 	return func(srv *Server) { srv.saml = a }
 }
 
@@ -336,7 +337,7 @@ func WithEnforcedAuth() Option {
 	return func(s *Server) { s.enforceAuth = true }
 }
 
-func WithJWT(j *JWTAuth) Option {
+func WithJWT(j paid.JWTDirectory) Option {
 	return func(srv *Server) { srv.jwt = j }
 }
 
@@ -506,13 +507,13 @@ type Server struct {
 	// matrixCap is the largest host matrix, in cells, the UI draws. Zero or less means no limit.
 	matrixCap int
 	// oidc enables single sign-on when configured, nil when SSO is off.
-	oidc *OIDCAuth
+	oidc paid.OIDCDirectory
 	// saml enables SAML single sign-on when configured, nil when SAML is off.
-	saml *SAMLAuth
+	saml paid.SAMLDirectory
 	// ldap enables directory sign-in when configured, nil when LDAP is off.
-	ldap *LDAPAuth
+	ldap paid.LDAPDirectory
 	// jwt validates a bearer JWT when configured, nil when JWT sign-in is off.
-	jwt *JWTAuth
+	jwt paid.JWTDirectory
 	// relayStore backs the mesh relay worker endpoints when a worker token is set, nil when the
 	// relay is off.
 	relayStore run.Store
@@ -803,8 +804,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /v1/tokens/{id}", deleteTokenHandler(s.tokens, s.log))
 	mux.Handle("POST /v1/auth/login", loginHandler(s.users, s.guard, s.tokens, s.ldap, s.store, s.log))
 	if s.oidc != nil {
-		mux.HandleFunc("GET /auth/oidc/login", s.oidc.login)
-		mux.HandleFunc("GET /auth/oidc/callback", s.oidc.callback)
+		mux.HandleFunc("GET /auth/oidc/login", s.oidc.Login)
+		mux.HandleFunc("GET /auth/oidc/callback", s.oidc.Callback)
 	}
 	mux.Handle("GET /v1/me/forge-links",
 		forgeLinksListHandler(s.forgeLinks, s.forgeApps, s.reviewPublicURL, s.log))
@@ -814,9 +815,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /auth/forge/callback", forgeLinkCallbackHandler(s.forgeLinks, s.forgeApps,
 		s.users, s.audits, s.sealer, s.reviewClient, s.reviewPublicURL, s.log))
 	if s.saml != nil {
-		mux.HandleFunc("GET /auth/saml/login", s.saml.login)
-		mux.HandleFunc("POST /auth/saml/acs", s.saml.acs)
-		mux.HandleFunc("GET /auth/saml/metadata", s.saml.metadata)
+		mux.HandleFunc("GET /auth/saml/login", s.saml.Login)
+		mux.HandleFunc("POST /auth/saml/acs", s.saml.ACS)
+		mux.HandleFunc("GET /auth/saml/metadata", s.saml.Metadata)
 	}
 	mux.Handle("POST /v1/users", createUserHandler(s.users, s.log))
 	mux.Handle("PUT /v1/users/{id}", updateUserHandler(s.users, s.log))

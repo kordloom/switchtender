@@ -176,7 +176,7 @@ func forgeLinkStartHandler(links forgelink.Store, apps []forgelink.App, sealer *
 				"which signs each link request: an administrator sets SWITCHTENDER_ENCRYPTION_KEY")
 			return
 		}
-		nonce, err := randToken()
+		nonce, err := RandToken()
 		if err != nil {
 			log.Error("server: forge link nonce: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not start linking")

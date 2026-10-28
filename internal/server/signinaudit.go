@@ -9,7 +9,7 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 )
 
-// recordSignIn writes a successful sign-in to the audit trail, and does not fail the sign-in when it
+// RecordSignIn writes a successful sign-in to the audit trail, and does not fail the sign-in when it
 // cannot.
 //
 // Sign-in is exempt from the fail-closed append that covers every other mutation, and it has to be:
@@ -21,7 +21,7 @@ import (
 // identity provider already authenticated, so it is bounded by real accounts rather than by whoever
 // can reach the port, and who signed in and when is exactly what an auditor asks for. Recording it
 // here keeps it in the chain without putting the audit store in front of the door.
-func recordSignIn(ctx context.Context, audits audit.Store, log *zap.Logger,
+func RecordSignIn(ctx context.Context, audits audit.Store, log *zap.Logger,
 	method, username, path string) {
 	if audits == nil || username == "" {
 		return
