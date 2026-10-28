@@ -1,0 +1,5 @@
+[submodule "internal/paid/impl"]
+	path = internal/paid/impl
+	url = git@github.com:kordloom/switchtender-paid.git
+	branch = main
+	update = none
