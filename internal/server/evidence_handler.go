@@ -186,7 +186,7 @@ func registerFailed(w http.ResponseWriter, log *zap.Logger, err error, verb stri
 	switch {
 	case err == nil:
 		return false
-	case errors.Is(err, paid.ErrRequiresTier):
+	case errors.Is(err, license.ErrRequiresTier):
 		respondError(w, log, http.StatusForbidden, err.Error())
 	default:
 		log.Error("server: " + verb + " change register: " + err.Error())

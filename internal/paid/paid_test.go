@@ -67,7 +67,7 @@ func TestStubsRefuseNamingTheTier(t *testing.T) {
 			if err == nil {
 				t.Fatal("stub returned nil, which is the silent unlock the seam exists to prevent")
 			}
-			if !errors.Is(err, ErrRequiresTier) {
+			if !errors.Is(err, license.ErrRequiresTier) {
 				t.Errorf("error does not wrap ErrRequiresTier: %v", err)
 			}
 			msg := err.Error()
@@ -105,7 +105,7 @@ func TestSlotReturnsStubUntilRegistered(t *testing.T) {
 	if s.Registered() {
 		t.Fatal("fresh slot reports registered")
 	}
-	if err := s.Get().Run(context.Background(), WorkerConfig{}); !errors.Is(err, ErrRequiresTier) {
+	if err := s.Get().Run(context.Background(), WorkerConfig{}); !errors.Is(err, license.ErrRequiresTier) {
 		t.Fatalf("stub did not refuse: %v", err)
 	}
 	s.Set(testWorker{})
@@ -128,7 +128,7 @@ func TestSlotReturnsStubUntilRegistered(t *testing.T) {
 // which is what makes the public build Community.
 func TestNothingRegisteredInTheCommunityBuild(t *testing.T) {
 	t.Parallel()
-	if Registered() {
+	if license.PaidBuild() {
 		t.Fatal("a paid implementation is registered in the public tree")
 	}
 }
@@ -138,3 +138,18 @@ type testWorker struct{}
 
 // Run accepts.
 func (testWorker) Run(context.Context, WorkerConfig) error { return nil }
+
+// TestSlotDeclaresWhatItBacks checks that registering a slot is what marks its features carried, so
+// a build without the registration refuses them whatever license is installed.
+func TestSlotDeclaresWhatItBacks(t *testing.T) {
+	const f license.Feature = "test-slot-feature"
+	t.Cleanup(func() { license.Uncarry(f) })
+	s := NewSlot[Worker]("test carried worker", stubWorker{}, f)
+	if license.Carried(f) {
+		t.Fatal("feature carried before the slot registered")
+	}
+	s.Set(testWorker{})
+	if !license.Carried(f) {
+		t.Fatal("feature not carried after the slot registered")
+	}
+}

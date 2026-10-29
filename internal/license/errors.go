@@ -12,3 +12,8 @@ import "errors"
 // a billing dispute. Any gate that can stop an install from running has to tell the two apart and
 // pick the side that keeps it running.
 var ErrLapsed = errors.New("license term lapsed")
+
+// ErrRequiresTier marks a refusal for a feature this build does not carry: the paid code that would
+// do it is not in the binary, so no license file can turn it on. The wrapped text is the line an
+// unlicensed install prints, so a Community build and an unlicensed paid build refuse in one voice.
+var ErrRequiresTier = errors.New("requires a paid tier")

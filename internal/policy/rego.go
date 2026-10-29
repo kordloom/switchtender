@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/paid"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -184,7 +185,7 @@ func regoPackage(pkg string) string {
 // not have, a module that reads input.plan without ever asking for a plan, and warn set to note on a
 // package with no warn rule for it to change.
 //
-// A Community build has no compiler and refuses with paid.ErrRequiresTier naming Team, wrapped in
+// A Community build has no compiler and refuses with license.ErrRequiresTier naming Team, wrapped in
 // ErrRego, so the policy file does not load and the refusal reads as the license refusal does.
 func CompileRego(pkg, syntax string, modules []RegoModule, opts ...RegoOption) (*RegoProgram, error) {
 	settings := regoSettings{warn: RegoWarnHold, timeout: DefaultRegoTimeout}
@@ -207,7 +208,7 @@ func CompileRego(pkg, syntax string, modules []RegoModule, opts ...RegoOption) (
 		Package: regoPackage(pkg), Syntax: syntax, Timeout: settings.timeout, Warn: settings.warn,
 	})
 	if err != nil {
-		if errors.Is(err, paid.ErrRequiresTier) {
+		if errors.Is(err, license.ErrRequiresTier) {
 			return nil, fmt.Errorf("%w: %w", ErrRego, err)
 		}
 		return nil, err
@@ -338,7 +339,7 @@ func (p *RegoProgram) UnmarshalJSON(raw []byte) error {
 	})
 	switch {
 	case err == nil:
-	case errors.Is(err, paid.ErrRequiresTier):
+	case errors.Is(err, license.ErrRequiresTier):
 		compiled = nil
 	default:
 		return err

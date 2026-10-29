@@ -1449,6 +1449,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if lic := license.Current(); lic != nil {
 		log.Info("licensed: " + lic.Claims.Tier + " (" + lic.Claims.Org + "), expires " +
 			lic.Claims.Expires)
+		if !license.PaidBuild() {
+			log.Warn("licensed: this is the Community build, so the license unlocks nothing " +
+				"here: paid features need the paid build")
+		}
 	}
 	// SSO is configured explicitly by flag, so a missing license here is a misconfiguration worth
 	// refusing at startup with one line, not a silently unauthenticated directory.

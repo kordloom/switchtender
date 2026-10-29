@@ -13,7 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/handoff"
-	"github.com/kordloom/switchtender/internal/paid"
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/relay"
 	"github.com/kordloom/switchtender/internal/run"
@@ -129,7 +129,7 @@ func (e *recordingEngine) Handler(cfg relay.HandlerConfig) (http.Handler, error)
 
 // Dial refuses.
 func (e *recordingEngine) Dial(relay.DialConfig) (*relay.Worker, error) {
-	return nil, paid.ErrRequiresTier
+	return nil, license.ErrRequiresTier
 }
 
 // recordedPools is the pool set a recordingEngine hands out.

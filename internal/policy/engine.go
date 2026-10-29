@@ -39,7 +39,8 @@ type Engine interface {
 }
 
 // engineSlot holds the rule engine, the Community stub until the paid module registers one.
-var engineSlot = paid.NewSlot[Engine]("rule engine", communityEngine{})
+var engineSlot = paid.NewSlot[Engine]("rule engine", communityEngine{},
+	license.FeaturePolicyRules, license.FeaturePolicyFull)
 
 // RegisterEngine registers the paid rule engine. A second registration panics.
 func RegisterEngine(e Engine) { engineSlot.Set(e) }

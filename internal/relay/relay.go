@@ -165,7 +165,7 @@ func (stubEngine) Dial(DialConfig) (*Worker, error) {
 }
 
 // engineSlot holds the relay engine, the Community stub until the paid module registers one.
-var engineSlot = paid.NewSlot[Engine]("relay engine", stubEngine{})
+var engineSlot = paid.NewSlot[Engine]("relay engine", stubEngine{}, license.FeatureWorkers)
 
 // RegisterEngine registers the paid relay engine. A second registration panics.
 func RegisterEngine(e Engine) { engineSlot.Set(e) }

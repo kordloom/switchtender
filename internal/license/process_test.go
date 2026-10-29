@@ -18,6 +18,12 @@ import (
 func TestProcessLicenseCarriesTheGate(t *testing.T) {
 	before := Current()
 	t.Cleanup(func() { Set(before) })
+	Carry(FeatureSSO, FeaturePolicyFull, FeaturePolicyRules, FeatureRegister, FeatureWorkers,
+		FeatureReconcile)
+	t.Cleanup(func() {
+		Uncarry(FeatureSSO, FeaturePolicyFull, FeaturePolicyRules, FeatureRegister, FeatureWorkers,
+			FeatureReconcile)
+	})
 
 	tests := []struct {
 		Install   *License

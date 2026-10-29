@@ -27,12 +27,15 @@ import (
 // a door the gate is not standing in.
 //
 // A lapsed Team install reaches the same state by a different route, which is why the lapse is
-// covered here as well.
+// covered here as well. So does a live Team license on a build that does not carry the worker code,
+// and that one must refuse as a missing tier, not as a license problem.
 func TestAQueueInheritedFromAnInventoryIsLicensed(t *testing.T) {
 	tests := []struct {
-		Name    string
-		License *license.License
-		WantErr bool
+		Name     string
+		License  *license.License
+		Uncarry  []license.Feature
+		WantErr  bool
+		WantTier bool
 	}{{ // Test 0: No license at all. Nothing can serve the queue.
 		Name: "community", License: nil, WantErr: true,
 	}, { // Test 1: A lapsed Team license. The workers it paid for have stopped.
@@ -47,6 +50,13 @@ func TestAQueueInheritedFromAnInventoryIsLicensed(t *testing.T) {
 			V: 1, ID: "lic_live", Org: "Example", Tier: license.TierTeam,
 			Issued: "2026-01-01T00:00:00Z", Expires: "2099-01-01T00:00:00Z",
 		}},
+	}, { // Test 3: A live Team license on a build without the worker code. Nothing can serve it.
+		Name: "team without workers", WantErr: true, WantTier: true,
+		Uncarry: []license.Feature{license.FeatureWorkers},
+		License: &license.License{Claims: license.Claims{
+			V: 1, ID: "lic_live", Org: "Example", Tier: license.TierTeam,
+			Issued: "2026-01-01T00:00:00Z", Expires: "2099-01-01T00:00:00Z",
+		}},
 	}}
 
 	for testNum, test := range tests {
@@ -55,6 +65,10 @@ func TestAQueueInheritedFromAnInventoryIsLicensed(t *testing.T) {
 			held := license.Current()
 			license.Set(test.License)
 			t.Cleanup(func() { license.Set(held) })
+			if len(test.Uncarry) > 0 {
+				license.Uncarry(test.Uncarry...)
+				t.Cleanup(func() { license.Carry(test.Uncarry...) })
+			}
 
 			ctx := context.Background()
 			invStore := inventory.NewMemStore()
@@ -87,6 +101,14 @@ func TestAQueueInheritedFromAnInventoryIsLicensed(t *testing.T) {
 				t.Fatalf("test %d: Submit() error = %v, want %v.\nThe run was accepted and pinned "+
 					"to a queue no worker serves, so it sits pending forever with nothing to "+
 					"explain it", testNum, err, ErrQueueUnlicensed)
+			}
+			if got := errors.Is(err, license.ErrRequiresTier); got != test.WantTier {
+				t.Errorf("test %d: errors.Is(err, ErrRequiresTier) = %v, want %v: %v",
+					testNum, got, test.WantTier, err)
+			}
+			// Negative control: the default queue stays open, so Community did not shrink.
+			if _, err := d.Submit(ctx, "play.yml", ""); err != nil {
+				t.Errorf("test %d: Submit() with no queue error = %v, want accepted", testNum, err)
 			}
 		})
 	}

@@ -12,8 +12,9 @@ import (
 	"github.com/kordloom/switchtender/internal/user"
 )
 
-// TestMain runs the package under a Team license, because the suite exercises Team features
-// throughout: deny policies, risk floors, reconcile proposals. The refusal paths are proven by the
+// TestMain runs the package under a Team license, carrying the paid code as the paid build does,
+// because the suite exercises Team features throughout: deny policies, risk floors, reconcile
+// proposals. The refusal paths are proven by the
 // gate tests, which swap the license out and back around themselves and stay sequential for it.
 //
 // It also hashes passwords at the lowest bcrypt cost. The suite builds accounts by the hundred, and
@@ -24,6 +25,8 @@ func TestMain(m *testing.M) {
 		V: 1, ID: "lic_test", Org: "test", Tier: license.TierTeam,
 		Issued: "2026-01-01T00:00:00Z", Expires: "2099-01-01T00:00:00Z",
 	}})
+	license.Carry(license.FeatureSSO, license.FeaturePolicyFull, license.FeaturePolicyRules,
+		license.FeatureRegister, license.FeatureWorkers, license.FeatureReconcile)
 	user.UseMinCostForTests()
 	os.Exit(m.Run())
 }

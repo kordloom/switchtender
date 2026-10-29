@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kordloom/switchtender/internal/paid"
+	"github.com/kordloom/switchtender/internal/license"
 )
 
 // TestFileStoreRefusesARegoModuleOutsideThePolicyDir pins that a rego policy's files entry cannot
@@ -36,7 +36,7 @@ func TestFileStoreRefusesARegoModuleOutsideThePolicyDir(t *testing.T) {
 	if err := os.WriteFile(policyFile, []byte(doc), 0o600); err != nil {
 		t.Fatalf("write policy file: %v", err)
 	}
-	if _, err := NewFileStore(policyFile); err == nil || errors.Is(err, paid.ErrRequiresTier) {
+	if _, err := NewFileStore(policyFile); err == nil || errors.Is(err, license.ErrRequiresTier) {
 		t.Fatalf("NewFileStore(%q outside %q) error = %v, want the path refused before anything "+
 			"compiles; a files entry that climbs out with .. (or an absolute path) must be refused",
 			outside, policyDir, err)
@@ -47,7 +47,7 @@ func TestFileStoreRefusesARegoModuleOutsideThePolicyDir(t *testing.T) {
 	if err := os.WriteFile(policyFile, []byte(absDoc), 0o600); err != nil {
 		t.Fatalf("write policy file: %v", err)
 	}
-	if _, err := NewFileStore(policyFile); err == nil || errors.Is(err, paid.ErrRequiresTier) {
+	if _, err := NewFileStore(policyFile); err == nil || errors.Is(err, license.ErrRequiresTier) {
 		t.Fatalf("NewFileStore(absolute %q) error = %v, want the path refused before anything "+
 			"compiles", outside, err)
 	}
@@ -62,7 +62,7 @@ func TestFileStoreRefusesARegoModuleOutsideThePolicyDir(t *testing.T) {
 	if err := os.WriteFile(policyFile, []byte(okDoc), 0o600); err != nil {
 		t.Fatalf("write policy file: %v", err)
 	}
-	if _, err := NewFileStore(policyFile); !errors.Is(err, paid.ErrRequiresTier) {
+	if _, err := NewFileStore(policyFile); !errors.Is(err, license.ErrRequiresTier) {
 		t.Fatalf("NewFileStore(inside) error = %v, want the tier refusal the compiler gives, which "+
 			"only a module that passed the path check reaches", err)
 	}

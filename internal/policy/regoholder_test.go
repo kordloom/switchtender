@@ -12,7 +12,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/kordloom/switchtender/internal/paid"
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/policytest"
 	"github.com/kordloom/switchtender/internal/run"
@@ -50,7 +50,7 @@ func storedWire(t *testing.T, replace map[string]any) []byte {
 func TestCommunityRefusesToCompileRegoNamingTeam(t *testing.T) {
 	t.Parallel()
 	_, err := policy.CompileRego("", "", []policy.RegoModule{holdModule})
-	if !errors.Is(err, paid.ErrRequiresTier) || !errors.Is(err, policy.ErrRego) {
+	if !errors.Is(err, license.ErrRequiresTier) || !errors.Is(err, policy.ErrRego) {
 		t.Fatalf("CompileRego() error = %v, want ErrRequiresTier inside ErrRego", err)
 	}
 	if !strings.Contains(err.Error(), "Team") {
@@ -72,7 +72,7 @@ func TestCommunityRefusesAPolicyFileWithRegoNamingTeam(t *testing.T) {
 		t.Fatalf("write policy file: %v", err)
 	}
 	_, err := policy.NewFileStore(file)
-	if !errors.Is(err, paid.ErrRequiresTier) || !strings.Contains(err.Error(), "Team") {
+	if !errors.Is(err, license.ErrRequiresTier) || !strings.Contains(err.Error(), "Team") {
 		t.Fatalf("NewFileStore() error = %v, want the Team refusal", err)
 	}
 }

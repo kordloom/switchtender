@@ -27,6 +27,7 @@ import (
 	"github.com/kordloom/switchtender/internal/importer"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/live"
 	"github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/org"
@@ -1126,7 +1127,7 @@ func (s *Server) relayHandler() http.Handler {
 		return handler
 	}
 	status, msg := http.StatusForbidden, err.Error()
-	if !errors.Is(err, paid.ErrRequiresTier) {
+	if !errors.Is(err, license.ErrRequiresTier) {
 		s.log.Error("server: relay worker endpoints: " + err.Error())
 		status, msg = http.StatusInternalServerError, "the relay worker endpoints could not start"
 	}

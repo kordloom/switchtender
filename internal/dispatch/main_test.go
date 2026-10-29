@@ -7,7 +7,7 @@ import (
 	"github.com/kordloom/switchtender/internal/license"
 )
 
-// TestMain runs this package under a Team license.
+// TestMain runs this package under a Team license, carrying the paid code as the paid build does.
 //
 // A run pinned to a named queue is refused on an install that cannot run a worker to serve it,
 // because nothing could ever claim it. Most tests here are about scheduling, leases, splits and
@@ -19,5 +19,7 @@ func TestMain(m *testing.M) {
 		V: 1, ID: "lic_test", Org: "test", Tier: license.TierTeam,
 		Issued: "2026-01-01T00:00:00Z", Expires: "2099-01-01T00:00:00Z",
 	}})
+	license.Carry(license.FeatureSSO, license.FeaturePolicyFull, license.FeaturePolicyRules,
+		license.FeatureRegister, license.FeatureWorkers, license.FeatureReconcile)
 	os.Exit(m.Run())
 }

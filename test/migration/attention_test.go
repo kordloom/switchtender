@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -89,9 +90,10 @@ func (in *install) waitNotListed(s *server, actor, key string) {
 
 // TestNeedsAttentionNamesWhatStopsImportedWork is the attention scenario. On an imported install a
 // real server has to name a workflow waiting at its imported approval node as an approval, with the
-// step's own id and the workflow paused, name a run on a queue no worker serves as having none,
-// while the default queue the server's own dispatcher serves reads as served, and drop each once it
-// moves.
+// step's own id and the workflow paused, and drop it once it moves. The server is a Community build,
+// so a run on a named queue is refused up front instead of waiting for a worker this build cannot
+// run, and nothing reads as missing a worker. The paid build's side of the queue is
+// TestNeedsAttentionNamesAQueueNoWorkerServes.
 func TestNeedsAttentionNamesWhatStopsImportedWork(t *testing.T) {
 	t.Parallel()
 	in := newInstall(t, installOptions{Store: onSQLite})
@@ -131,25 +133,20 @@ func TestNeedsAttentionNamesWhatStopsImportedWork(t *testing.T) {
 		t.Errorf("the waiting workflow's approval (-want +got):\n%s", diff)
 	}
 
-	// A run on a queue nothing serves has no worker, and says so with the queue and a zero count.
-	unserved := in.must(a, "admin", "POST", "/v1/runs", map[string]any{
+	// A named queue needs the worker code, so this build refuses the run instead of stranding it.
+	refused := in.must(a, "admin", "POST", "/v1/runs", map[string]any{
 		"tool": "bash", "command": "true", "queue": "unserved",
-	}, 202)
-	queued := decodeRun(t, unserved.Body)
-	lonely := in.waitAttention(a, "operator", queued.ID, "no_worker")
-	if lonely.Main.Queue == nil || *lonely.Main.Queue != "unserved" ||
-		lonely.Main.EligibleWorkers == nil || *lonely.Main.EligibleWorkers != 0 {
-		t.Errorf("the unserved run's item = %+v, want queue unserved with no eligible worker", lonely)
+	}, 403)
+	if !strings.Contains(strings.ToLower(string(refused.Body)), "running distributed workers") {
+		t.Errorf("the queued run's refusal does not name workers: %s", refused.Body)
 	}
-	if n := in.attention(a, "operator").Counts["no_worker"]; n != 1 {
-		t.Errorf("no worker count = %d, want 1: the default queue the server serves is not missing", n)
+	if n := in.attention(a, "operator").Counts["no_worker"]; n != 0 {
+		t.Errorf("no worker count = %d, want 0: the default queue the server serves is not missing", n)
 	}
 
-	// Each item leaves the view once it moves.
+	// The item leaves the view once it moves.
 	in.must(a, "approver", "POST", "/v1/runs/"+step.ID+"/approve",
 		map[string]any{"state_digest": step.StateDigest}, 200)
 	in.waitNotListed(a, "operator", wf.ID)
-	in.must(a, "admin", "POST", "/v1/runs/"+queued.ID+"/cancel", nil, 200, 202)
-	in.waitNotListed(a, "operator", queued.ID)
 	in.waitDone(a, wf.ID)
 }

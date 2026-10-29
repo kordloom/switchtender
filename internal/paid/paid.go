@@ -9,8 +9,8 @@
 //
 // This package sits below every package that consumes a capability, so the interfaces name only
 // leaf types: run, user, auth, audit, binding, and the license features that name the tiers. The
-// stubs never return a silent nil. Each one refuses with ErrRequiresTier wrapping the same line
-// license.Allow prints, so a Community refusal reads the same as an unlicensed one.
+// stubs never return a silent nil. Each one refuses with license.ErrRequiresTier wrapping the same
+// line license.Allow prints, so a Community refusal reads the same as an unlicensed one.
 package paid
 
 import (
@@ -24,12 +24,15 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/binding"
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/user"
 )
 
 // Slot holds one capability's implementation, or its stub until one is registered. A second
 // registration panics, since two paid modules in one binary is a build mistake, not a choice.
+// Registering is also how the build declares what it carries: Set tells the license package that
+// the features the slot backs are in this binary.
 type Slot[T any] struct {
 	// mu guards value and set.
 	mu sync.RWMutex
@@ -39,14 +42,18 @@ type Slot[T any] struct {
 	set bool
 	// name is the capability, for the panic message.
 	name string
+	// backs are the license features the registered code implements.
+	backs []license.Feature
 }
 
-// NewSlot returns a slot that answers with stub until something registers.
-func NewSlot[T any](name string, stub T) *Slot[T] {
-	return &Slot[T]{value: stub, name: name}
+// NewSlot returns a slot that answers with stub until something registers, and that marks the
+// features it backs as carried once something does.
+func NewSlot[T any](name string, stub T, backs ...license.Feature) *Slot[T] {
+	return &Slot[T]{value: stub, name: name, backs: backs}
 }
 
-// Set registers v, panicking when the slot was already registered.
+// Set registers v and marks the slot's features carried, panicking when the slot was already
+// registered.
 func (s *Slot[T]) Set(v T) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -55,6 +62,7 @@ func (s *Slot[T]) Set(v T) {
 	}
 	s.value = v
 	s.set = true
+	license.Carry(s.backs...)
 }
 
 // Get returns the registered implementation, or the stub when there is none.
@@ -386,11 +394,16 @@ type Reconciler interface {
 // The registry: one slot per capability, each answering with its stub until the paid module's
 // init registers the implementation.
 var (
-	directorySlot      = NewSlot[Directory]("directory", stubDirectory{})
-	regoCompilerSlot   = NewSlot[RegoCompiler]("rego compiler", stubRegoCompiler{})
-	changeRegisterSlot = NewSlot[ChangeRegister]("change register", stubChangeRegister{})
-	workerSlot         = NewSlot[Worker]("worker", stubWorker{})
-	reconcilerSlot     = NewSlot[Reconciler]("reconciler", stubReconciler{})
+	directorySlot = NewSlot[Directory]("directory", stubDirectory{},
+		license.FeatureSSO)
+	regoCompilerSlot = NewSlot[RegoCompiler]("rego compiler", stubRegoCompiler{},
+		license.FeaturePolicyFull)
+	changeRegisterSlot = NewSlot[ChangeRegister]("change register", stubChangeRegister{},
+		license.FeatureRegister)
+	workerSlot = NewSlot[Worker]("worker", stubWorker{},
+		license.FeatureWorkers)
+	reconcilerSlot = NewSlot[Reconciler]("reconciler", stubReconciler{},
+		license.FeatureReconcile)
 )
 
 // RegisterDirectory installs the paid directory sign-in. It panics on a second call.
@@ -422,11 +435,3 @@ func RegisterReconciler(r Reconciler) { reconcilerSlot.Set(r) }
 
 // CurrentReconciler returns the reconciler, the Community stub when none is registered.
 func CurrentReconciler() Reconciler { return reconcilerSlot.Get() }
-
-// Registered reports whether every capability has a paid implementation, which is true only in
-// the paid build with the module present.
-func Registered() bool {
-	return directorySlot.Registered() && regoCompilerSlot.Registered() &&
-		changeRegisterSlot.Registered() &&
-		workerSlot.Registered() && reconcilerSlot.Registered()
-}

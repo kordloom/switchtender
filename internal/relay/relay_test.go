@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kordloom/switchtender/internal/paid"
+	"github.com/kordloom/switchtender/internal/license"
 )
 
 // TestTheCommunityEngineRefusesNamingTeam pins the Community relay: no relay code is in the build,
@@ -29,8 +29,8 @@ func TestTheCommunityEngineRefusesNamingTeam(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			err := test.Call()
-			if !errors.Is(err, paid.ErrRequiresTier) {
-				t.Fatalf("error = %v, want paid.ErrRequiresTier", err)
+			if !errors.Is(err, license.ErrRequiresTier) {
+				t.Fatalf("error = %v, want license.ErrRequiresTier", err)
 			}
 			if !strings.Contains(err.Error(), "A Team license is required") {
 				t.Errorf("error %q does not name Team", err)

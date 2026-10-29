@@ -278,7 +278,7 @@ func reconcileDriftHandler(store run.Store, submitter Submitter, reconciler paid
 		spec, err := reconciler.Propose(r.Context(), paid.ReconcileRequest{
 			Check: check, Host: host, PlanFile: sealed,
 		})
-		if errors.Is(err, paid.ErrRequiresTier) {
+		if errors.Is(err, license.ErrRequiresTier) {
 			respondError(w, log, http.StatusForbidden, err.Error())
 			return
 		}

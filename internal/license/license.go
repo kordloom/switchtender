@@ -295,13 +295,91 @@ func Set(l *License) { current.Store(l) }
 // Current returns the process's license, nil for Community.
 func Current() *License { return current.Load() }
 
+// builtIn holds the features every build carries, because their code is part of the Community
+// source. A feature in neither builtIn nor a registered paid slot is refused on every build, which
+// fails toward the paid side the way featureTier does.
+var builtIn = map[Feature]bool{
+	FeaturePostgresInit:  true,
+	FeatureHostedWitness: true,
+}
+
+// carried holds the features the paid module registered code for. Copy on write, because gates read
+// it from request handlers while the paid module's init, and tests, extend it.
+var carried atomic.Pointer[map[Feature]bool]
+
+// Carry records that this build carries the code behind fs. The paid module's slots call it when
+// they register, so registering an implementation is the declaration and nothing can drift from it.
+func Carry(fs ...Feature) {
+	for {
+		old := carried.Load()
+		next := make(map[Feature]bool, len(fs))
+		if old != nil {
+			for f := range *old {
+				next[f] = true
+			}
+		}
+		for _, f := range fs {
+			next[f] = true
+		}
+		if carried.CompareAndSwap(old, &next) {
+			return
+		}
+	}
+}
+
+// Uncarry removes fs from what this build carries. Only tests call it, to stand for a build that
+// holds a license but not the code.
+func Uncarry(fs ...Feature) {
+	for {
+		old := carried.Load()
+		next := make(map[Feature]bool)
+		if old != nil {
+			for f := range *old {
+				if !slices.Contains(fs, f) {
+					next[f] = true
+				}
+			}
+		}
+		if carried.CompareAndSwap(old, &next) {
+			return
+		}
+	}
+}
+
+// Carried reports whether this build carries the code behind f.
+func Carried(f Feature) bool {
+	if builtIn[f] {
+		return true
+	}
+	m := carried.Load()
+	return m != nil && (*m)[f]
+}
+
+// PaidBuild reports whether the paid module registered code in this binary, which is what a
+// license file needs to unlock anything.
+func PaidBuild() bool {
+	m := carried.Load()
+	return m != nil && len(*m) > 0
+}
+
+// Absent returns the refusal for a feature this build does not carry, whatever license the process
+// holds. It is the one place the Community refusal is built.
+func Absent(f Feature) error {
+	return fmt.Errorf("%w: %w", ErrRequiresTier, Unlicensed(f))
+}
+
 // Allow reports whether a feature may be used right now, and if not, why not, in one line.
 //
 // The error is the entire user experience of hitting a gate, so it names the feature, the tier, and
-// where to go, and never says more. The clock is checked here, on every call, so a license lapsing
-// while the server runs drops it to Community without a restart, exactly as the pricing page
-// promises.
+// where to go, and never says more. Whether the build carries the feature is settled first, so a
+// Community build refuses moved features with the same line whatever license is installed, and
+// never calls a feature lapsed or uncovered when its code is not there. The clock is checked here,
+// on every call, so a license lapsing while the server runs drops it to Community without a
+// restart, exactly as the pricing page promises.
 func Allow(f Feature) error {
+	if !Carried(f) {
+		return Absent(f)
+	}
 	return allowAt(current.Load(), f, time.Now())
 }
 

@@ -81,6 +81,47 @@ func TestGatesRefuseInOneLineOnCommunity(t *testing.T) {
 	}
 }
 
+// TestPolicyAPIRefusesRulesTheBuildDoesNotCarry covers a live Team license on a build without the
+// paid rule engine, which is a Community build with a license installed. The license covers deny,
+// actor, and distinct rules, but nothing in the binary can evaluate them, so the API refuses them
+// as a missing tier instead of storing rules that could only ever hold.
+func TestPolicyAPIRefusesRulesTheBuildDoesNotCarry(t *testing.T) {
+	license.Uncarry(license.FeaturePolicyRules, license.FeaturePolicyFull)
+	defer license.Carry(license.FeaturePolicyRules, license.FeaturePolicyFull)
+
+	store := policy.NewMemStore()
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithPolicies(store)).Handler()
+
+	tests := []struct {
+		Name     string
+		Body     string
+		WantCode int
+	}{{ // Test 0: A deny rule needs the Pro rule engine.
+		Name: "deny", Body: `{"name":"no drops","effect":"deny"}`, WantCode: http.StatusForbidden,
+	}, { // Test 1: An actor-scoped rule needs the full engine.
+		Name: "actor", Body: `{"name":"bob","actor":"bob"}`, WantCode: http.StatusForbidden,
+	}, { // Test 2: Separation of duties needs the full engine.
+		Name: "distinct", Body: `{"name":"two people","require_distinct_approver":true}`,
+		WantCode: http.StatusForbidden,
+	}, { // Test 3: Negative control: the plain require-approval policy is Community and saves.
+		Name: "plain", Body: `{"name":"hold prod"}`, WantCode: http.StatusCreated,
+	}}
+	for testNum, test := range tests {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/policies",
+			strings.NewReader(test.Body)))
+		if rec.Code != test.WantCode {
+			t.Fatalf("test %d: %s policy = %d, want %d: %s", testNum, test.Name, rec.Code,
+				test.WantCode, rec.Body.String())
+		}
+		if test.WantCode == http.StatusForbidden &&
+			!strings.Contains(rec.Body.String(), "requires a paid tier") {
+			t.Errorf("test %d: %s refusal does not name the missing tier: %s", testNum, test.Name,
+				rec.Body.String())
+		}
+	}
+}
+
 // TestChangeRegisterIsTeamOverHTTP pins the period register to Team on the HTTP surface. The CLI
 // gated it from the start and this endpoint did not, so a Community install served the paid
 // artifact to anyone who pressed the button on the audit page. The free proofs beside it, the

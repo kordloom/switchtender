@@ -7,7 +7,7 @@ import (
 	"github.com/kordloom/switchtender/internal/license"
 )
 
-// TestMain runs this package under a Team license.
+// TestMain runs this package under a Team license, carrying the paid code as the paid build does.
 //
 // The file store checks the license on every read, because the file hot-reloads and a startup-only
 // check was one edit away from not existing. These tests are about parsing and reload behavior, so
@@ -18,5 +18,7 @@ func TestMain(m *testing.M) {
 		V: 1, ID: "lic_test", Org: "test", Tier: license.TierTeam,
 		Issued: "2026-01-01T00:00:00Z", Expires: "2099-01-01T00:00:00Z",
 	}})
+	license.Carry(license.FeatureSSO, license.FeaturePolicyFull, license.FeaturePolicyRules,
+		license.FeatureRegister, license.FeatureWorkers, license.FeatureReconcile)
 	os.Exit(m.Run())
 }
