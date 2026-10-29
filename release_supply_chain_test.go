@@ -898,6 +898,13 @@ func TestReleaseProvesTheSourceTarballHoldsNoPaidCode(t *testing.T) {
 	if !strings.Contains(steps[sign], "steps.paidcheck.outcome") {
 		t.Error("the signing step does not stop when the paid-code check fails")
 	}
+	// No public file builds under the paid tag, so the check exempts none: an allowlist entry is a
+	// path the check has stopped looking at.
+	for _, exemption := range []string{"allow=", "continue"} {
+		if strings.Contains(steps[check], exemption) {
+			t.Errorf("the paid-code check exempts a path (%q); it must allow nothing", exemption)
+		}
+	}
 }
 
 // TestCIToolDownloadsArePinnedByChecksum requires each CI tool download that has a published

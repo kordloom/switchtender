@@ -1,0 +1,29 @@
+---
+- name: Rotate the database password over the relay
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Wait until the target answers, which a loaded machine can delay
+      ansible.builtin.wait_for_connection:
+        timeout: 60
+    - name: Ask the target how it was reached
+      ansible.builtin.command: printenv SSH_CONNECTION
+      register: reached
+      changed_when: false
+      failed_when: false
+    - name: Read the key file Ansible was handed
+      ansible.builtin.set_fact:
+        key_sum: "{{ lookup('ansible.builtin.file', ansible_private_key_file, rstrip=False)
+          | hash('sha256') }}"
+    - name: Record digests of what the play received
+      ansible.builtin.copy:
+        content: |
+          {{ db_password | hash('sha256') }}
+          {{ key_sum }}
+          {{ ansible_private_key_file }}
+          {{ reached.stdout | default('') }}
+        dest: "{{ marker_dir }}/relay-{{ inventory_hostname }}"
+        mode: "0600"
+    - name: Print the answer, which the log has to mask
+      ansible.builtin.debug:
+        msg: "rotating to {{ db_password }}"

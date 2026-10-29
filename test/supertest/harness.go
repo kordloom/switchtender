@@ -153,7 +153,7 @@ func (h *harness) bootstrap(namespace string) error {
 		return fmt.Errorf("mint human token: %w", err)
 	}
 	if err := h.apiCall("POST", "/v1/tokens", admin, map[string]any{
-		"name": "supertest-agent", "username": "release-agent", "kind": "agent",
+		"name": agentTokenName, "username": "release-agent", "kind": "agent",
 	}, &agent); err != nil {
 		return fmt.Errorf("mint agent token: %w", err)
 	}
@@ -172,6 +172,10 @@ func (h *harness) bootstrap(namespace string) error {
 	h.agent = actor{Name: "release-agent", Type: "agent", Token: agent.Token}
 	return nil
 }
+
+// agentTokenName is the name of the agent's token. The chain names the credential that asked for a
+// run, so a decision made on the agent's behalf is recorded on behalf of this name.
+const agentTokenName = "supertest-agent"
 
 // parseInitialToken pulls the one-time admin token out of the server's boot log, for a server that
 // printed it. The banner prints it indented on its own line after the "shown only this once" notice.

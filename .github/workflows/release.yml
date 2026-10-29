@@ -417,7 +417,6 @@ jobs:
           set -euo pipefail
           VERSION=${GITHUB_REF_NAME#v}
           tarball="dist/switchtender_${VERSION}_source.tar.gz"
-          allow="switchtender-${VERSION}/test/migration/attention_paid_test.go"
           work=$(mktemp -d)
           trap 'rm -rf "$work"' EXIT
           offenders=""
@@ -432,9 +431,6 @@ jobs:
           tar -xzf "$tarball" -C "$work/src"
           while IFS= read -r file; do
             rel=${file#"$work/src/"}
-            if [ "$rel" = "$allow" ]; then
-              continue
-            fi
             if grep -Eq '^//go:build (.*[^!])?paid' "$file"; then
               offenders="${offenders} ${rel}"
             fi

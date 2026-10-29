@@ -1,0 +1,12 @@
+---
+- name: Change a host well after the play began
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Begin, wait, then change the host
+      ansible.builtin.shell: >-
+        echo $$ > {{ marker_dir }}/orphan-pid-{{ inventory_hostname }};
+        echo started > {{ marker_dir }}/orphan-start-{{ inventory_hostname }};
+        sleep {{ hold_seconds }};
+        date +%s > {{ marker_dir }}/orphan-after-{{ inventory_hostname }}
+      changed_when: true

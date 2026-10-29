@@ -37,4 +37,7 @@ var (
 	// ErrTeamNeedsPaid is returned when the Team phases are asked of the Community build. The
 	// Community build refuses every Team feature by naming the tier, so those phases could only fail.
 	ErrTeamNeedsPaid = errors.New("the Team phases need the paid build")
+	// ErrUnknownPhase is returned when -only names a phase this run does not have. A misspelled
+	// name would otherwise select nothing, and a run of only the base phases reads as a pass.
+	ErrUnknownPhase = errors.New("-only names a phase this run does not have")
 )

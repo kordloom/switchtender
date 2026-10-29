@@ -10,8 +10,12 @@ The harness is
 standalone Go package. Run it yourself from the repository root with Docker, kind, kubectl, and helm
 installed:
 
-    go run ./test/supertest -skip-team          # the free tier alone
-    go run ./test/supertest -license lic.json   # both tiers, the whole arc
+    go run ./test/supertest -skip-team                # the free tier alone
+    go run ./test/supertest -paid -license lic.json   # both tiers, on the paid build
+
+The Team phases need the paid build, which public clones do not carry, so public CI runs the
+Community phases and the paid pipeline runs the rest. `-only team,relay` runs the named phases on
+top of the cluster and fleet they all stand on.
 
 The
 [supertest workflow](https://github.com/kordloom/switchtender/blob/main/.github/workflows/supertest.yml)
@@ -48,6 +52,24 @@ with a shared signing identity.** Then it walks the arc the product exists for:
 7. The estate answers with every machine the runs touched, and the two runs read back as one
    change whose outcome was derived rather than typed.
 8. A queue-pinned run is claimed by the dedicated worker, not the server.
+9. A run on a queue no worker serves is named in the attention view as waiting for one, with the
+   queue and a count of zero, while the served queues are not, and it leaves the view once
+   canceled.
+
+**Policy as code and relay workers hold on an install of their own.** A SQLite control node reads
+its worker pools and a Rego policy from files on its volume. The Rego policy refuses a labeled
+run: the refusal names the bundle digest, no run is created, and the chain records the refusal by
+the policy engine on behalf of the agent that asked. The module is edited in place, the digest
+changes without a restart, the same submission is held instead, and the approved run's receipt
+names the new bundle and never the old one. A Rego warning set to note lets a run through with the
+note on it and in its receipt, and set back to the default holds the same run instead. Then two
+relay workers start as pods with no database and no encryption key. The one whose pool registered
+a delivery key runs a play across the fleet over real SSH with the fleet key and a secret survey
+answer delivered sealed: the play received exactly those values, the key's file is gone from the
+worker afterward, the chain names the pool and worker that received them, and neither value is in
+any log, API answer, export, or byte of the database. The pool with no key fails its run with the
+reason. Last, the relay worker is killed mid-task: the run is recorded interrupted, and the play it
+started never changes the host afterward.
 
 **The previous published release upgrades in place with nothing lost.** The harness installs the
 last tagged release exactly as the chart installs it, does real recorded work on it, and then

@@ -459,6 +459,7 @@ func (h *harness) phaseTeam(license string) error {
 		h.pass(phase, "a queue-pinned run was claimed by the dedicated worker",
 			"claimed_by "+claimedBy)
 	}
+	h.checkAnUnservedQueueNeedsAttention(phase)
 	return nil
 }
 

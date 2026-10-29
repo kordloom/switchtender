@@ -1,0 +1,58 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: __NAME__
+  namespace: relay
+  labels:
+    app: relay-worker
+spec:
+  # Never restarted: a worker killed on purpose has to stay dead for the check that follows.
+  restartPolicy: Never
+  containers:
+    - name: worker
+      image: switchtender:supertest
+      imagePullPolicy: Never
+      command: ["sh", "-c"]
+      args: [__SCRIPT__]
+      env:
+        - name: SWITCHTENDER_WORKER_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: relay-pool-tokens
+              key: __POOL__
+        - name: SWITCHTENDER_LICENSE
+          value: /etc/switchtender/license/license.jwt
+        - name: SWITCHTENDER_RUNFILES_DIR
+          value: /run/switchtender/runfiles
+      volumeMounts:
+        - name: run
+          mountPath: /run/switchtender
+        - name: license
+          mountPath: /etc/switchtender/license
+          readOnly: true
+        - name: playbooks
+          mountPath: /data/relay
+          readOnly: true
+        - name: keysrc
+          mountPath: /keysrc
+          readOnly: true
+  volumes:
+    - name: run
+      emptyDir:
+        medium: Memory
+    - name: license
+      secret:
+        secretName: __LICENSE_SECRET__
+        items:
+          - key: license.jwt
+            path: license.jwt
+    - name: playbooks
+      configMap:
+        name: relay-playbooks
+    # A Secret volume's files are owned by root, so the key is mounted readable and the worker's
+    # script copies it to a file only its own account can read: the worker refuses any other.
+    - name: keysrc
+      secret:
+        secretName: __KEY_SECRET__
+        defaultMode: 0444
+        optional: true

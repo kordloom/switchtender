@@ -92,8 +92,8 @@ func (in *install) waitNotListed(s *server, actor, key string) {
 // real server has to name a workflow waiting at its imported approval node as an approval, with the
 // step's own id and the workflow paused, and drop it once it moves. The server is a Community build,
 // so a run on a named queue is refused up front instead of waiting for a worker this build cannot
-// run, and nothing reads as missing a worker. The paid build's side of the queue is
-// TestNeedsAttentionNamesAQueueNoWorkerServes.
+// run, and nothing reads as missing a worker. The paid build's side of the queue runs in the
+// supertest's Team phase, against the chart's install and its dedicated worker.
 func TestNeedsAttentionNamesWhatStopsImportedWork(t *testing.T) {
 	t.Parallel()
 	in := newInstall(t, installOptions{Store: onSQLite})

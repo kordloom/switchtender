@@ -15,6 +15,7 @@
 //
 //	go run ./test/supertest -paid -license path/to/team-license.json
 //	go run ./test/supertest -skip-team
+//	go run ./test/supertest -paid -license path/to/team-license.json -only team,relay
 //
 // The Team phases need the paid build, which carries the code the Team tier sells, so they run
 // with -paid from a checkout that has the paid module mounted and its superset go.mod in place.
@@ -27,6 +28,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"time"
 )
@@ -60,6 +63,9 @@ func run() int {
 	shots := flag.String("shots", "", "Directory to write UI screenshots into. Empty skips them.")
 	report := flag.String("report", "", "File to append the markdown report to. Empty writes stdout only.")
 	keep := flag.Bool("keep", false, "Leave the cluster running afterward, for poking at a failure.")
+	only := flag.String("only", "",
+		"Comma-separated phases to run, beside cluster and fleet, which every phase needs. Empty "+
+			"runs them all. For iterating on one phase; the report names only what ran.")
 	flag.Parse()
 
 	repo, err := repositoryRoot()
@@ -125,9 +131,18 @@ func run() int {
 			return h.phaseUpgradeTeam(previous, *license)
 		}})
 		phases = append(phases, phase{"ha", func() error { return h.phaseHA(*license) }})
+		// Last, because it bootstraps an install of its own, and bootstrap replaces the two actors
+		// every Team phase before it acts as.
+		phases = append(phases, phase{"relay", func() error { return h.phaseRelay(*license) }})
 	}
 	if *shots != "" {
 		phases = append(phases, phase{"screenshots", func() error { return h.phaseShots(*shots) }})
+	}
+
+	phases, err = selectPhases(phases, *only)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
 	}
 
 	for i, ph := range phases {
@@ -165,6 +180,53 @@ func run() int {
 	}
 	fmt.Printf("\nall %d checks held\n", len(h.checks))
 	return 0
+}
+
+// basePhases are the phases every other phase stands on, kept whatever -only names.
+var basePhases = []string{"cluster", "fleet"}
+
+// selectPhases keeps the base phases and the ones named in only, in run order, and refuses a name
+// that is not in phases, since a typo would otherwise run nothing and pass. An empty only keeps
+// every phase.
+func selectPhases(phases []phase, only string) ([]phase, error) {
+	if strings.TrimSpace(only) == "" {
+		return phases, nil
+	}
+	want := map[string]bool{}
+	for _, name := range strings.Split(only, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			want[name] = true
+		}
+	}
+	known := map[string]bool{}
+	var kept []phase
+	for _, ph := range phases {
+		known[ph.Name] = true
+		if want[ph.Name] || slices.Contains(basePhases, ph.Name) {
+			kept = append(kept, ph)
+		}
+	}
+	var unknown []string
+	for name := range want {
+		if !known[name] {
+			unknown = append(unknown, name)
+		}
+	}
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		return nil, fmt.Errorf("%w: %s; this run's phases are %s", ErrUnknownPhase,
+			strings.Join(unknown, ", "), strings.Join(phaseNames(phases), ", "))
+	}
+	return kept, nil
+}
+
+// phaseNames lists the phases' names in run order.
+func phaseNames(phases []phase) []string {
+	names := make([]string, len(phases))
+	for i, ph := range phases {
+		names[i] = ph.Name
+	}
+	return names
 }
 
 // repositoryRoot requires the supertest to run from the repository root, where the chart and the
