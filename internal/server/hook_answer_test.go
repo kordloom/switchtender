@@ -32,6 +32,8 @@ type slowGateRunner struct {
 	roundhouse.Runner
 	// release is closed to let every download finish.
 	release chan struct{}
+	// begun is closed when the first download begins.
+	begun chan struct{}
 	// mu guards started.
 	mu sync.Mutex
 	// started counts the downloads begun.
@@ -43,6 +45,9 @@ func (s *slowGateRunner) FetchModules(ctx context.Context, _ roundhouse.Spec,
 	_ io.Writer) (roundhouse.Result, error) {
 	s.mu.Lock()
 	s.started++
+	if s.started == 1 {
+		close(s.begun)
+	}
 	s.mu.Unlock()
 	select {
 	case <-s.release:
@@ -103,7 +108,7 @@ func newSlowHook(t *testing.T, rule *policy.Policy) *slowHook {
 	gate := &slowGateRunner{Runner: roundhouse.RunnerFunc(func(context.Context, roundhouse.Spec,
 		io.Writer) (roundhouse.Result, error) {
 		return roundhouse.Result{ExitCode: 0}, nil
-	}), release: make(chan struct{})}
+	}), release: make(chan struct{}), begun: make(chan struct{})}
 	disp := dispatch.New(runs, gate, zap.NewNop(), dispatch.WithPolicies(policies),
 		dispatch.WithRunFilesRoot(t.TempDir()), dispatch.WithNoJanitor())
 	sealer := testSealer()
@@ -178,6 +183,14 @@ func TestAPushTriggerAnswersBeforeTheGateFinishes(t *testing.T) {
 	if first["accepted"] == nil || first["run"] != nil {
 		t.Fatalf("answer = %v, want the delivery accepted before any run exists", first)
 	}
+	// The answer comes before the launch reaches the gate, so wait for the download to begin. A
+	// redelivery sent before it begins tests nothing about joining, and the count read below raced
+	// the launch on a loaded machine.
+	select {
+	case <-h.gate.begun:
+	case <-time.After(time.Minute):
+		t.Fatal("the launch never began the gate's download")
+	}
 	if again := h.deliver(t); again["accepted"] == nil {
 		t.Errorf("redelivery while the launch runs = %v, want it accepted too", again)
 	}
@@ -244,7 +257,8 @@ func chainPaths(t *testing.T, audits audit.Store) []string {
 // the pull request still gets its status once the pre-check finishes after the answer.
 func TestAReviewAnswersBeforeTheGateFinishes(t *testing.T) {
 	t.Parallel()
-	gate := &slowGateRunner{Runner: planRunner(&specLog{}), release: make(chan struct{})}
+	gate := &slowGateRunner{Runner: planRunner(&specLog{}), release: make(chan struct{}),
+		begun: make(chan struct{})}
 	rs := newReviewServer(t, reviewSetup{Runner: gate, AnswerWithin: 50 * time.Millisecond,
 		PRFiles: map[string]string{"infra/plan.txt": "Plan: 1 to add, 0 to change, 0 to destroy.\n",
 			"infra/main.tf": "module \"net\" {\n  source = \"registry.example.test/acme/net/null\"\n}\n"}})
