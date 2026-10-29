@@ -854,6 +854,52 @@ func TestReleaseStaplesTheAppBeforeBuildingTheDmg(t *testing.T) {
 	}
 }
 
+// TestReleaseProvesTheSourceTarballHoldsNoPaidCode requires the release to inspect the source
+// tarball for paid code after packing it and before the manifest is signed.
+func TestReleaseProvesTheSourceTarballHoldsNoPaidCode(t *testing.T) {
+	t.Parallel()
+	const (
+		packName = "name: Pack the source tree"
+		signName = "name: Sign and attach the checksums manifest"
+		checkKey = "id: paidcheck"
+	)
+	steps := workflowSteps(t, ".github/workflows/release.yml")
+	index := func(marker string) int {
+		for i, step := range steps {
+			if strings.Contains(step, marker) {
+				return i
+			}
+		}
+		return -1
+	}
+	pack, check, sign := index(packName), index(checkKey), index(signName)
+	if pack < 0 || check < 0 || sign < 0 {
+		t.Fatalf("release.yml steps missing: pack=%d check=%d sign=%d", pack, check, sign)
+	}
+	if pack >= check || check >= sign {
+		t.Errorf("order wrong: pack=%d check=%d sign=%d, want pack < check < sign", pack, check, sign)
+	}
+	tests := []struct {
+		Want string
+	}{
+		{Want: "internal/paid/impl/"},
+		{Want: "go:build"},
+		{Want: "::error title="},
+		{Want: "exit 1"},
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			if !strings.Contains(steps[check], test.Want) {
+				t.Errorf("the paid-code check never mentions %q", test.Want)
+			}
+		})
+	}
+	if !strings.Contains(steps[sign], "steps.paidcheck.outcome") {
+		t.Error("the signing step does not stop when the paid-code check fails")
+	}
+}
+
 // TestCIToolDownloadsArePinnedByChecksum requires each CI tool download that has a published
 // SHA-256 to be checked against that hash, held in the step's env, before the download is run.
 func TestCIToolDownloadsArePinnedByChecksum(t *testing.T) {

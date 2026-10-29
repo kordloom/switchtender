@@ -405,8 +405,47 @@ jobs:
           git archive --format=tar.gz --prefix "switchtender-${VERSION}/" \
             -o "dist/switchtender_${VERSION}_source.tar.gz" "$GITHUB_REF_NAME"
 
-      - name: Sign and attach the checksums manifest
+      # The Community release must carry no paid code. The private module is a gitlink, which
+      # git archive writes as one empty directory entry, so anything else under it, or a Go file
+      # built under the paid tag, means paid source reached the public tarball. The signing step
+      # below skips itself when this one fails, because it runs under !cancelled() and would
+      # otherwise sign the manifest anyway.
+      - name: Prove the source tarball carries no paid code
+        id: paidcheck
         if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          VERSION=${GITHUB_REF_NAME#v}
+          tarball="dist/switchtender_${VERSION}_source.tar.gz"
+          allow="switchtender-${VERSION}/test/migration/attention_paid_test.go"
+          work=$(mktemp -d)
+          trap 'rm -rf "$work"' EXIT
+          offenders=""
+          tar -tzf "$tarball" > "$work/list.txt"
+          while IFS= read -r entry; do
+            case "$entry" in
+              "switchtender-${VERSION}/internal/paid/impl/") ;;
+              "switchtender-${VERSION}/internal/paid/impl/"*) offenders="${offenders} ${entry}" ;;
+            esac
+          done < "$work/list.txt"
+          mkdir "$work/src"
+          tar -xzf "$tarball" -C "$work/src"
+          while IFS= read -r file; do
+            rel=${file#"$work/src/"}
+            if [ "$rel" = "$allow" ]; then
+              continue
+            fi
+            if grep -Eq '^//go:build (.*[^!])?paid' "$file"; then
+              offenders="${offenders} ${rel}"
+            fi
+          done < <(find "$work/src" -type f -name '*.go')
+          if [ -n "$offenders" ]; then
+            echo "::error title=Community source tarball carries paid code::these paths are paid or build under the paid tag:${offenders}"
+            exit 1
+          fi
+
+      - name: Sign and attach the checksums manifest
+        if: ${{ !cancelled() && steps.paidcheck.outcome != 'failure' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
