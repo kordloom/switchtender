@@ -264,9 +264,13 @@ func workerStore(log *zap.Logger) (run.Store, []dispatch.Option, func(), error) 
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		client := &http.Client{Timeout: relayClientTimeout}
-		transport := relay.NewHTTPTransport(workerServer, token, client)
-		store := relay.NewClient(transport)
+		// The relay is Team code a Community build does not carry, so there the dial refuses naming
+		// Team before anything is contacted.
+		dialed, err := relay.CurrentEngine().Dial(relay.DialConfig{Server: workerServer, Token: token,
+			Client: &http.Client{Timeout: relayClientTimeout}, Keys: ring})
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		if ring.Len() > 0 {
 			log.Info("relay secret delivery enabled", zap.Strings("delivery_keys", ring.IDs()))
 		}
@@ -283,9 +287,9 @@ func workerStore(log *zap.Logger) (run.Store, []dispatch.Option, func(), error) 
 		// first needs one. It is set even with no key, so a delivery the worker cannot open, or one the
 		// control node refused, fails the run with that reason rather than an unexplained missing key.
 		opts = append(opts, dispatch.WithNoJanitor(),
-			dispatch.WithPolicies(relay.NewPolicyClient(transport)),
-			dispatch.WithSecretDelivery(relay.NewReceiver(transport, ring)))
-		return store, opts, func() {}, nil
+			dispatch.WithPolicies(dialed.Policies),
+			dispatch.WithSecretDelivery(dialed.Delivery))
+		return dialed.Store, opts, func() {}, nil
 	}
 
 	bundle, err := openBundle(workerDB)

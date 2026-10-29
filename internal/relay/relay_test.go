@@ -1,70 +1,43 @@
-package relay_test
+package relay
 
 import (
-	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
-	"time"
 
-	"github.com/kordloom/switchtender/internal/event"
-	"github.com/kordloom/switchtender/internal/relay"
-	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/paid"
 )
 
-// TestClientExecutionPath proves a run flows through the relay Client and its loopback transport into
-// the backing store: a saved run claims, heartbeats, and records events and summaries, and the writes
-// land in the backing store as if the worker held it directly.
-func TestClientExecutionPath(t *testing.T) {
+// TestTheCommunityEngineRefusesNamingTeam pins the Community relay: no relay code is in the build,
+// so every way in refuses with the tier refusal naming Team, and nothing is registered.
+func TestTheCommunityEngineRefusesNamingTeam(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
-	backing := run.NewMemStore()
-	c := relay.NewClient(relay.Loopback(backing))
-
-	r := &run.Run{ID: "run_1", Playbook: "site.yml", Status: run.StatusPending, CreatedAt: time.Now()}
-	if err := c.Save(ctx, r); err != nil {
-		t.Fatalf("Save() error = %v", err)
+	engine := CurrentEngine()
+	tests := []struct {
+		Call func() error
+	}{{ // Test 0: Loading a pool file.
+		Call: func() error { _, err := engine.LoadPools("pools.yaml"); return err },
+	}, { // Test 1: A lone worker token.
+		Call: func() error { _, err := engine.SinglePool("token"); return err },
+	}, { // Test 2: The control node's endpoints.
+		Call: func() error { _, err := engine.Handler(HandlerConfig{}); return err },
+	}, { // Test 3: A worker dialing its control node.
+		Call: func() error { _, err := engine.Dial(DialConfig{Server: "https://x"}); return err },
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			err := test.Call()
+			if !errors.Is(err, paid.ErrRequiresTier) {
+				t.Fatalf("error = %v, want paid.ErrRequiresTier", err)
+			}
+			if !strings.Contains(err.Error(), "A Team license is required") {
+				t.Errorf("error %q does not name Team", err)
+			}
+		})
 	}
-	claimed, err := c.Claim(ctx, "worker-a", []string{""})
-	if err != nil {
-		t.Fatalf("Claim() error = %v", err)
-	}
-	if claimed.ID != "run_1" {
-		t.Fatalf("claimed %q, want run_1", claimed.ID)
-	}
-	if err := c.Heartbeat(ctx, "run_1", "worker-a"); err != nil {
-		t.Fatalf("Heartbeat() error = %v", err)
-	}
-	if err := c.AppendEvents(ctx, "run_1", []event.Event{{Type: event.TypeRunnerOK, Host: "web01"}}); err != nil {
-		t.Fatalf("AppendEvents() error = %v", err)
-	}
-	if err := c.SaveHostSummary(ctx, "run_1", []run.HostSummary{{Host: "web01", Changed: 1}}); err != nil {
-		t.Fatalf("SaveHostSummary() error = %v", err)
-	}
-	got, err := c.Get(ctx, "run_1")
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-	if got.ClaimedBy != "worker-a" {
-		t.Errorf("claimed_by = %q, want worker-a", got.ClaimedBy)
-	}
-	// The writes reached the backing store through the relay.
-	events, err := backing.Events(ctx, "run_1")
-	if err != nil {
-		t.Fatalf("backing Events() error = %v", err)
-	}
-	if len(events) != 1 {
-		t.Errorf("backing events = %d, want 1", len(events))
-	}
-}
-
-// TestClientRefusesControlNodeReads confirms a worker Client refuses the control-node-only queries.
-func TestClientRefusesControlNodeReads(t *testing.T) {
-	t.Parallel()
-	c := relay.NewClient(relay.Loopback(run.NewMemStore()))
-	if _, err := c.List(context.Background()); !errors.Is(err, relay.ErrUnsupported) {
-		t.Errorf("List() error = %v, want ErrUnsupported", err)
-	}
-	if _, err := c.FleetHealth(context.Background(), 5); !errors.Is(err, relay.ErrUnsupported) {
-		t.Errorf("FleetHealth() error = %v, want ErrUnsupported", err)
+	if Registered() {
+		t.Error("Registered() = true in a build without the paid module")
 	}
 }

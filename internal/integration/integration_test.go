@@ -12,9 +12,7 @@ package integration_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -26,150 +24,13 @@ import (
 	"go.uber.org/zap/zaptest"
 
 	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/integrationtest"
 	"github.com/kordloom/switchtender/internal/live"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/server"
 	"github.com/kordloom/switchtender/internal/sqlitestore"
 )
-
-// image is the tag for the throwaway SSH host image built once per machine.
-const image = "switchtender-it-sshhost:1"
-
-// dockerfile builds a minimal SSH server with Python for Ansible modules. The public key arrives
-// through the SSH_PUBKEY environment variable at run time.
-const dockerfile = `
-FROM alpine:3.22
-RUN apk add --no-cache openssh python3 && ssh-keygen -A && mkdir -p /root/.ssh && chmod 700 /root/.ssh
-CMD ["/bin/sh", "-c", "echo \"$SSH_PUBKEY\" > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && exec /usr/sbin/sshd -D -e"]
-`
-
-// sshHost is one running SSH container.
-type sshHost struct {
-	// Name is the inventory host name.
-	Name string
-	// Container is the docker container name.
-	Container string
-	// Port is the host port mapped to the container's SSH port.
-	Port string
-}
-
-// standDownOrFail skips on a machine allowed to lack something, and fails where the gate provides
-// everything.
-//
-// The job that runs this suite installs docker, ansible and every advertised engine, and then a
-// missing one of them stood the test down and reported a pass. That is the same shape that refused
-// v1.97.0's predecessor publication one job over: a gate expected to supply a thing, quietly
-// proving less than it claims when the thing is absent.
-//
-// A developer's machine is still allowed to lack any of it and say so. The variable below is the
-// switch the PostgreSQL contract, the drift tests, the loomseal cross-check and the engine contract
-// already read for exactly this, so this reads the same one rather than inventing another.
-func standDownOrFail(t *testing.T, format string, args ...any) {
-	t.Helper()
-	if os.Getenv("SWITCHTENDER_REQUIRE_FULL_SUITE") == "1" {
-		t.Fatalf("SWITCHTENDER_REQUIRE_FULL_SUITE is set and "+format, args...)
-	}
-	t.Skipf(format, args...)
-}
-
-// requireStack skips the test unless docker and ansible are usable.
-func requireStack(t *testing.T) {
-	t.Helper()
-	for _, bin := range []string{"docker", "ansible-playbook", "ansible-inventory", "ssh-keygen"} {
-		if _, err := exec.LookPath(bin); err != nil {
-			standDownOrFail(t, "%s is not on PATH", bin)
-		}
-	}
-	if err := exec.Command("docker", "info").Run(); err != nil {
-		standDownOrFail(t, "the docker daemon is not running: %v", err)
-	}
-}
-
-// buildImage builds the SSH host image once; the docker cache makes repeats instant.
-func buildImage(t *testing.T) {
-	t.Helper()
-	cmd := exec.Command("docker", "build", "-t", image, "-")
-	cmd.Stdin = strings.NewReader(dockerfile)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build image: %v\n%s", err, out)
-	}
-}
-
-// keypair generates an ed25519 SSH keypair and returns the private key path and public key text.
-func keypair(t *testing.T) (string, string) {
-	t.Helper()
-	dir := t.TempDir()
-	private := filepath.Join(dir, "id_ed25519")
-	if out, err := exec.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-q", "-f", private).CombinedOutput(); err != nil {
-		t.Fatalf("ssh-keygen: %v\n%s", err, out)
-	}
-	pub, err := os.ReadFile(private + ".pub")
-	if err != nil {
-		t.Fatalf("read public key: %v", err)
-	}
-	return private, strings.TrimSpace(string(pub))
-}
-
-// startHosts launches n SSH containers carrying the public key and returns them, cleaned up when
-// the test ends.
-func startHosts(t *testing.T, n int, pubkey string) []sshHost {
-	t.Helper()
-	hosts := make([]sshHost, 0, n)
-	for i := 0; i < n; i++ {
-		name := fmt.Sprintf("node%02d", i+1)
-		container := fmt.Sprintf("switchtender-it-%s-%d", name, time.Now().UnixNano())
-		out, err := exec.Command("docker", "run", "-d", "--rm",
-			"--name", container, "-e", "SSH_PUBKEY="+pubkey, "-p", "127.0.0.1:0:22", image).CombinedOutput()
-		if err != nil {
-			t.Fatalf("start %s: %v\n%s", name, err, out)
-		}
-		t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", container).Run() })
-
-		portOut, err := exec.Command("docker", "port", container, "22/tcp").Output()
-		if err != nil {
-			t.Fatalf("port %s: %v", name, err)
-		}
-		addr := strings.TrimSpace(strings.Split(string(portOut), "\n")[0])
-		port := addr[strings.LastIndex(addr, ":")+1:]
-		hosts = append(hosts, sshHost{Name: name, Container: container, Port: port})
-	}
-	return hosts
-}
-
-// writeInventory writes an INI inventory targeting the SSH containers and returns its path.
-func writeInventory(t *testing.T, hosts []sshHost, keyPath string) string {
-	t.Helper()
-	var b strings.Builder
-	b.WriteString("[fleet]\n")
-	for _, h := range hosts {
-		fmt.Fprintf(&b, "%s ansible_host=127.0.0.1 ansible_port=%s\n", h.Name, h.Port)
-	}
-	b.WriteString("\n[fleet:vars]\n")
-	b.WriteString("ansible_user=root\n")
-	fmt.Fprintf(&b, "ansible_ssh_private_key_file=%s\n", keyPath)
-	b.WriteString("ansible_python_interpreter=/usr/bin/python3\n")
-	// Multiplexing is off because Docker recycles host ports across tests, and a stale SSH
-	// control socket keyed to a reused port would silently target a dead container.
-	b.WriteString("ansible_ssh_common_args=-o StrictHostKeyChecking=no" +
-		" -o UserKnownHostsFile=/dev/null -o ControlMaster=no -o ControlPath=none\n")
-
-	path := filepath.Join(t.TempDir(), "fleet.ini")
-	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
-		t.Fatalf("write inventory: %v", err)
-	}
-	return path
-}
-
-// writePlaybook writes the playbook text to a temp file and returns its path.
-func writePlaybook(t *testing.T, text string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "play.yml")
-	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
-		t.Fatalf("write playbook: %v", err)
-	}
-	return path
-}
 
 // startServer wires the full serve stack, dispatcher, live hub, SQLite store, and HTTP API, and
 // returns its base URL.
@@ -192,38 +53,6 @@ func startServer(t *testing.T) string {
 	return srv.URL
 }
 
-// postJSON posts a body and decodes the JSON reply into out.
-func postJSON(t *testing.T, url, body string, out any) {
-	t.Helper()
-	res, err := httpClient.Post(url, "application/json", strings.NewReader(body))
-	if err != nil {
-		t.Fatalf("POST %s: %v", url, err)
-	}
-	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode >= 300 {
-		t.Fatalf("POST %s: status %d", url, res.StatusCode)
-	}
-	if err := json.NewDecoder(res.Body).Decode(out); err != nil {
-		t.Fatalf("decode %s: %v", url, err)
-	}
-}
-
-// getJSON fetches a URL and decodes the JSON reply into out.
-func getJSON(t *testing.T, url string, out any) {
-	t.Helper()
-	res, err := httpClient.Get(url)
-	if err != nil {
-		t.Fatalf("GET %s: %v", url, err)
-	}
-	defer func() { _ = res.Body.Close() }()
-	if err := json.NewDecoder(res.Body).Decode(out); err != nil {
-		t.Fatalf("decode %s: %v", url, err)
-	}
-}
-
-// httpClient is shared so keep alive connections are reused across polls.
-var httpClient = &http.Client{Timeout: 30 * time.Second}
-
 // waitShardsTerminal polls a parent's shards until the expected count exists and every shard is
 // terminal, absorbing the moment between a parent finishing and the last shard save landing.
 func waitShardsTerminal(t *testing.T, base, parentID string, want int) []run.Run {
@@ -233,7 +62,7 @@ func waitShardsTerminal(t *testing.T, base, parentID string, want int) []run.Run
 		var shards struct {
 			Shards []run.Run `json:"shards"`
 		}
-		getJSON(t, base+"/v1/runs/"+parentID+"/shards", &shards)
+		integrationtest.GetJSON(t, base+"/v1/runs/"+parentID+"/shards", &shards)
 		settled := len(shards.Shards) == want
 		for _, s := range shards.Shards {
 			if !s.Status.Terminal() {
@@ -250,33 +79,16 @@ func waitShardsTerminal(t *testing.T, base, parentID string, want int) []run.Run
 	}
 }
 
-// waitTerminal polls a run until it reaches a terminal state.
-func waitTerminal(t *testing.T, base, id string) *run.Run {
-	t.Helper()
-	deadline := time.Now().Add(3 * time.Minute)
-	for {
-		var r run.Run
-		getJSON(t, base+"/v1/runs/"+id, &r)
-		if r.Status.Terminal() {
-			return &r
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("run %s stuck in %s", id, r.Status)
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-}
-
 // TestRealSSHFleet drives the whole stack against real SSH hosts: a plain run touches every host,
 // then a split shards the same fleet, runs in parallel, and merges results, and fleet health
 // reflects both.
 func TestRealSSHFleet(t *testing.T) {
-	requireStack(t)
-	buildImage(t)
-	key, pub := keypair(t)
-	hosts := startHosts(t, 3, pub)
-	inventory := writeInventory(t, hosts, key)
-	playbook := writePlaybook(t, `
+	integrationtest.RequireStack(t)
+	integrationtest.BuildImage(t)
+	key, pub := integrationtest.Keypair(t)
+	hosts := integrationtest.StartHosts(t, 3, pub)
+	inventory := integrationtest.WriteInventory(t, hosts, key)
+	playbook := integrationtest.WritePlaybook(t, `
 ---
 - name: Touch every node
   hosts: all
@@ -299,9 +111,9 @@ func TestRealSSHFleet(t *testing.T) {
 
 	// A plain run reaches all three hosts over real SSH.
 	var created run.Run
-	postJSON(t, base+"/v1/runs",
+	integrationtest.PostJSON(t, base+"/v1/runs",
 		fmt.Sprintf(`{"playbook":%q,"inventory":%q}`, playbook, inventory), &created)
-	single := waitTerminal(t, base, created.ID)
+	single := integrationtest.WaitTerminal(t, base, created.ID)
 	if single.Status != run.StatusSucceeded {
 		t.Fatalf("single run status = %q, want succeeded", single.Status)
 	}
@@ -312,7 +124,7 @@ func TestRealSSHFleet(t *testing.T) {
 			Host string `json:"host"`
 		} `json:"events"`
 	}
-	getJSON(t, base+"/v1/runs/"+created.ID+"/events", &events)
+	integrationtest.GetJSON(t, base+"/v1/runs/"+created.ID+"/events", &events)
 	touched := map[string]bool{}
 	for _, e := range events.Events {
 		if e.Type == "runner_ok" {
@@ -327,9 +139,9 @@ func TestRealSSHFleet(t *testing.T) {
 
 	// A split shards the same fleet and merges back to one succeeded parent.
 	var parent run.Run
-	postJSON(t, base+"/v1/runs",
+	integrationtest.PostJSON(t, base+"/v1/runs",
 		fmt.Sprintf(`{"playbook":%q,"inventory":%q,"shards":2}`, playbook, inventory), &parent)
-	split := waitTerminal(t, base, parent.ID)
+	split := integrationtest.WaitTerminal(t, base, parent.ID)
 	if split.Status != run.StatusSucceeded {
 		t.Fatalf("split status = %q, want succeeded", split.Status)
 	}
@@ -352,7 +164,7 @@ func TestRealSSHFleet(t *testing.T) {
 		var fleet struct {
 			Hosts []run.HostHealth `json:"hosts"`
 		}
-		getJSON(t, base+"/v1/fleet?window=5", &fleet)
+		integrationtest.GetJSON(t, base+"/v1/fleet?window=5", &fleet)
 		settled := len(fleet.Hosts) == len(hosts)
 		for _, h := range fleet.Hosts {
 			if h.Failures != 0 {
@@ -375,12 +187,12 @@ func TestRealSSHFleet(t *testing.T) {
 // TestRealSSHFailureIsolation proves a real failure lands on the right host and a shard retry
 // re-runs only the broken slice.
 func TestRealSSHFailureIsolation(t *testing.T) {
-	requireStack(t)
-	buildImage(t)
-	key, pub := keypair(t)
-	hosts := startHosts(t, 3, pub)
-	inventory := writeInventory(t, hosts, key)
-	playbook := writePlaybook(t, `
+	integrationtest.RequireStack(t)
+	integrationtest.BuildImage(t)
+	key, pub := integrationtest.Keypair(t)
+	hosts := integrationtest.StartHosts(t, 3, pub)
+	inventory := integrationtest.WriteInventory(t, hosts, key)
+	playbook := integrationtest.WritePlaybook(t, `
 ---
 - name: Break one node
   hosts: all
@@ -403,9 +215,9 @@ func TestRealSSHFailureIsolation(t *testing.T) {
 	}
 
 	var parent run.Run
-	postJSON(t, base+"/v1/runs",
+	integrationtest.PostJSON(t, base+"/v1/runs",
 		fmt.Sprintf(`{"playbook":%q,"inventory":%q,"shards":3}`, playbook, inventory), &parent)
-	split := waitTerminal(t, base, parent.ID)
+	split := integrationtest.WaitTerminal(t, base, parent.ID)
 	if split.Status != run.StatusFailed {
 		t.Fatalf("split status = %q, want failed", split.Status)
 	}
@@ -438,11 +250,11 @@ func TestRealSSHFailureIsolation(t *testing.T) {
 		t.Logf("pre-retry shard %s limit=%s status=%s error=%q", s.ID, s.Limit, s.Status, s.Error)
 	}
 	var retry run.Run
-	postJSON(t, base+"/v1/runs/"+parent.ID+"/retry", "", &retry)
+	integrationtest.PostJSON(t, base+"/v1/runs/"+parent.ID+"/retry", "", &retry)
 	if retry.RetryOf == nil || *retry.RetryOf != parent.ID {
 		t.Fatalf("retry parent missing retry_of link: %+v", retry)
 	}
-	final := waitTerminal(t, base, retry.ID)
+	final := integrationtest.WaitTerminal(t, base, retry.ID)
 	if final.Status != run.StatusSucceeded {
 		t.Fatalf("retry status = %q, want succeeded", final.Status)
 	}
@@ -475,7 +287,7 @@ func requireHostBindMounts(t *testing.T) {
 	out, err := exec.Command("docker", "run", "--rm", "-v", dir+":"+dir+":ro",
 		"alpine:3.22", "cat", filepath.Join(dir, "probe")).CombinedOutput()
 	if err != nil || !strings.Contains(string(out), "visible") {
-		standDownOrFail(t, "this docker cannot bind mount a host path, so container execution "+
+		integrationtest.StandDownOrFail(t, "this docker cannot bind mount a host path, so container execution "+
 			"cannot be exercised here; run it where the daemon shares this filesystem: %v\n%s",
 			err, out)
 	}
@@ -485,10 +297,10 @@ func requireHostBindMounts(t *testing.T) {
 // ansible-core reported by the play is the image's, not the host's, proving execution isolation.
 func TestContainerExecutionEnvironment(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
-		standDownOrFail(t, "docker is not on PATH")
+		integrationtest.StandDownOrFail(t, "docker is not on PATH")
 	}
 	if err := exec.Command("docker", "info").Run(); err != nil {
-		standDownOrFail(t, "the docker daemon is not running: %v", err)
+		integrationtest.StandDownOrFail(t, "the docker daemon is not running: %v", err)
 	}
 	requireHostBindMounts(t)
 	pull, cancelPull := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -496,7 +308,7 @@ func TestContainerExecutionEnvironment(t *testing.T) {
 	// A pull that fails is the sharpest of these. Container execution is an advertised feature and
 	// a registry having a bad minute made the one test covering it disappear, green.
 	if out, err := exec.CommandContext(pull, "docker", "pull", eeImage).CombinedOutput(); err != nil {
-		standDownOrFail(t, "cannot pull %s: %v\n%s", eeImage, err, out)
+		integrationtest.StandDownOrFail(t, "cannot pull %s: %v\n%s", eeImage, err, out)
 	}
 
 	dir := t.TempDir()

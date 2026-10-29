@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/integrationtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/runfiles"
@@ -49,10 +50,10 @@ func (b *syncBuffer) String() string {
 func requireDocker(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("docker"); err != nil {
-		standDownOrFail(t, "docker is not on PATH")
+		integrationtest.StandDownOrFail(t, "docker is not on PATH")
 	}
 	if err := exec.Command("docker", "info").Run(); err != nil {
-		standDownOrFail(t, "the docker daemon is not running: %v", err)
+		integrationtest.StandDownOrFail(t, "the docker daemon is not running: %v", err)
 	}
 	requireHostBindMounts(t)
 	pull, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -62,7 +63,7 @@ func requireDocker(t *testing.T) {
 	}
 	out, err := exec.CommandContext(pull, "docker", "pull", runFilesImage).CombinedOutput()
 	if err != nil {
-		standDownOrFail(t, "cannot pull %s: %v\n%s", runFilesImage, err, out)
+		integrationtest.StandDownOrFail(t, "cannot pull %s: %v\n%s", runFilesImage, err, out)
 	}
 }
 

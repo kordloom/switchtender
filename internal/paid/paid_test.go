@@ -114,7 +114,7 @@ func TestRequiresMatchesLicenseAllow(t *testing.T) {
 // registered, and panics on a second registration.
 func TestSlotReturnsStubUntilRegistered(t *testing.T) {
 	t.Parallel()
-	s := newSlot[Worker]("test worker", stubWorker{})
+	s := NewSlot[Worker]("test worker", stubWorker{})
 	if s.Registered() {
 		t.Fatal("fresh slot reports registered")
 	}

@@ -655,9 +655,16 @@ func TestNoPathLetsAnAgentSatisfyAnApproval(t *testing.T) {
 
 	t.Run("callbacks, relay proposals, and PR review reach no decision", func(t *testing.T) {
 		t.Parallel()
-		relay := routeHandlers(t, root, filepath.Join(root, "internal", "relay"))
-		if len(relay) < 5 {
-			t.Fatalf("only %d relay routes parsed; the registration shape changed", len(relay))
+		// The relay's routes are paid code, present only in a checkout with the private module. A
+		// public clone serves no relay route, so there is nothing of it to read; the paid pipeline
+		// runs this test with the module present and holds the routes to the same rule.
+		relay := map[string]string{}
+		relayDir := filepath.Join(root, "internal", "paid", "impl", "relay")
+		if _, err := os.Stat(relayDir); err == nil {
+			relay = routeHandlers(t, root, relayDir)
+			if len(relay) < 5 {
+				t.Fatalf("only %d relay routes parsed; the registration shape changed", len(relay))
+			}
 		}
 		for _, problem := range callbackSurfaceProblems(scanApprovalCalls(t, root),
 			routeHandlers(t, root, "."), relay) {
@@ -670,7 +677,8 @@ func TestNoPathLetsAnAgentSatisfyAnApproval(t *testing.T) {
 // host's provisioning callback, on its own address and the AWX-compatible one, a relay worker, a
 // pull request review, and a webhook trigger.
 var callbackSurfaces = []string{"internal/server/callback_handlers.go",
-	"internal/server/awx_callback_handlers.go", "internal/relay/", "internal/review/",
+	"internal/server/awx_callback_handlers.go", "internal/relay/", "internal/paid/impl/relay/",
+	"internal/review/",
 	"internal/server/review_hook.go", "internal/server/trigger_handlers.go"}
 
 // callbackRoutes are the callback routes the invariant has to see to be checking anything.

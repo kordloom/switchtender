@@ -218,6 +218,15 @@ func WithReconciler(r paid.Reconciler) Option {
 	return func(srv *Server) { srv.reconciler = r }
 }
 
+// WithRelayEngine sets what builds the mesh relay worker endpoints. A server built without it uses
+// whatever the paid module registered, which on Community is the stub that refuses naming Team.
+func WithRelayEngine(e relay.Engine) Option {
+	if e == nil {
+		panic("server: WithRelayEngine: Engine required")
+	}
+	return func(srv *Server) { srv.relayEngine = e }
+}
+
 // WithChangeRegister sets what produces the period change register. A server built without it uses
 // whatever the paid module registered, which on Community is the stub that refuses naming Team.
 func WithChangeRegister(r paid.ChangeRegister) Option {
@@ -296,7 +305,7 @@ func WithShutdown(ctx context.Context) Option {
 // A queue routes work to the segment that can reach it, so the queues a token may claim are that
 // token's blast radius. One shared token made the least trusted worker in the estate a path to the
 // most trusted queue. Set this and a token that serves the DMZ cannot lease a production run.
-func WithWorkerPools(pools *relay.Pools) Option {
+func WithWorkerPools(pools relay.Pools) Option {
 	return func(srv *Server) { srv.workerPools = pools }
 }
 
@@ -474,6 +483,8 @@ type Server struct {
 	policies policy.Store
 	// reconciler builds one-click reconcile proposals.
 	reconciler paid.Reconciler
+	// relayEngine builds the mesh relay worker endpoints.
+	relayEngine relay.Engine
 	// register produces the period change register.
 	register paid.ChangeRegister
 	// audits backs the audit trail when configured.
@@ -544,7 +555,7 @@ type Server struct {
 	workerToken string
 	// workerPools confines each worker token to the queues it may lease from, nil when the install
 	// uses the single-token form.
-	workerPools *relay.Pools
+	workerPools relay.Pools
 	// shutdown is canceled when the process begins draining, ending live streams. Nil when unset,
 	// which leaves a stream running until its run ends or its client goes away.
 	shutdown context.Context
@@ -583,7 +594,7 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 	}
 	srv := &Server{store: store, submitter: submitter, log: log, hooks: newHookFlights(),
 		guard: user.DefaultGuard(), reconciler: paid.CurrentReconciler(),
-		register: paid.CurrentChangeRegister()}
+		register: paid.CurrentChangeRegister(), relayEngine: relay.CurrentEngine()}
 	for _, opt := range opts {
 		opt(srv)
 	}
@@ -981,31 +992,7 @@ func (s *Server) Handler() http.Handler {
 		handler = readOnlyGate(handler)
 	}
 	if s.relayStore != nil && (s.workerToken != "" || s.workerPools != nil) {
-		pools := s.workerPools
-		if pools == nil {
-			pools = relay.SinglePool(s.workerToken)
-		}
-		var opts []relay.HandlerOption
-		if s.announcer != nil {
-			opts = append(opts, relay.WithAnnouncer(s.announcer))
-		}
-		if s.secretOpener != nil {
-			opts = append(opts, relay.WithSecretOpener(s.secretOpener))
-		}
-		if s.planSealer != nil {
-			opts = append(opts, relay.WithPlanSealer(s.planSealer))
-		}
-		if v := dispatch.NewBindingVerifier(s.relayStore, s.audits, s.bindingKey); v != nil {
-			opts = append(opts, relay.WithBinder(v))
-		}
-		if s.relayAdmit != nil {
-			opts = append(opts, relay.WithAdmission(s.relayAdmit))
-		}
-		if s.attention != nil && s.attention.Presence != nil {
-			opts = append(opts, relay.WithPresence(s.attention.Presence))
-		}
-		handler = relayGate(relay.NewHandler(s.relayStore, pools, s.log, s.policies, s.audits,
-			opts...), handler)
+		handler = relayGate(s.relayHandler(), handler)
 	}
 	return securityHeaders(requestTextGuard(s.log, bodyLimit(handler)))
 }
@@ -1112,6 +1099,40 @@ func (s *Server) resolveObjectOrg(ctx context.Context, objectID string) (orgID s
 	default:
 		return "", false, nil
 	}
+}
+
+// relayHandler builds the mesh relay worker endpoints through the relay engine. A Community build
+// has no relay code, so its engine refuses naming Team and every relay path answers 403 with that
+// line. serve refuses at startup before it gets here; this is the same refusal for a server built
+// any other way.
+func (s *Server) relayHandler() http.Handler {
+	pools := s.workerPools
+	var err error
+	if pools == nil {
+		pools, err = s.relayEngine.SinglePool(s.workerToken)
+	}
+	var handler http.Handler
+	if err == nil {
+		cfg := relay.HandlerConfig{Store: s.relayStore, Pools: pools, Log: s.log, Policies: s.policies,
+			Audits: s.audits, Announcer: s.announcer, SecretOpener: s.secretOpener,
+			PlanSealer: s.planSealer, Binder: dispatch.NewBindingVerifier(s.relayStore, s.audits, s.bindingKey),
+			Admit: s.relayAdmit}
+		if s.attention != nil && s.attention.Presence != nil {
+			cfg.Presence = s.attention.Presence
+		}
+		handler, err = s.relayEngine.Handler(cfg)
+	}
+	if err == nil {
+		return handler
+	}
+	status, msg := http.StatusForbidden, err.Error()
+	if !errors.Is(err, paid.ErrRequiresTier) {
+		s.log.Error("server: relay worker endpoints: " + err.Error())
+		status, msg = http.StatusInternalServerError, "the relay worker endpoints could not start"
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		respondError(w, s.log, status, msg)
+	})
 }
 
 // relayGate routes the mesh relay worker endpoints to their own handler, which authenticates with

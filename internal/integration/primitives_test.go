@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/integrationtest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -17,13 +18,13 @@ import (
 // then asks what the estate looked like. It is the only check that the whole chain holds: gather,
 // bucket, store, bound, and reconstruct.
 func TestEstateAtAgainstARealFleet(t *testing.T) {
-	requireStack(t)
-	buildImage(t)
-	key, pub := keypair(t)
-	hosts := startHosts(t, 3, pub)
-	inventory := writeInventory(t, hosts, key)
+	integrationtest.RequireStack(t)
+	integrationtest.BuildImage(t)
+	key, pub := integrationtest.Keypair(t)
+	hosts := integrationtest.StartHosts(t, 3, pub)
+	inventory := integrationtest.WriteInventory(t, hosts, key)
 	// gather_facts on, which is the whole point: this is what populates the state history.
-	playbook := writePlaybook(t, `
+	playbook := integrationtest.WritePlaybook(t, `
 ---
 - name: Gather the fleet
   hosts: all
@@ -38,9 +39,9 @@ func TestEstateAtAgainstARealFleet(t *testing.T) {
 	before := time.Now().Add(-time.Hour)
 
 	var created run.Run
-	postJSON(t, base+"/v1/runs",
+	integrationtest.PostJSON(t, base+"/v1/runs",
 		fmt.Sprintf(`{"playbook":%q,"inventory":%q}`, playbook, inventory), &created)
-	if got := waitTerminal(t, base, created.ID); got.Status != run.StatusSucceeded {
+	if got := integrationtest.WaitTerminal(t, base, created.ID); got.Status != run.StatusSucceeded {
 		t.Fatalf("gather run status = %q, want succeeded", got.Status)
 	}
 
@@ -54,7 +55,7 @@ func TestEstateAtAgainstARealFleet(t *testing.T) {
 
 	// Now: every host the run touched is in the estate, carrying facts the machine reported.
 	var now estate
-	getJSON(t, base+"/v1/estate", &now)
+	integrationtest.GetJSON(t, base+"/v1/estate", &now)
 	if len(now.Hosts) != len(hosts) {
 		t.Fatalf("estate holds %d hosts after gathering %d, want all of them: %+v",
 			len(now.Hosts), len(hosts), now.Hosts)
@@ -77,7 +78,7 @@ func TestEstateAtAgainstARealFleet(t *testing.T) {
 	// the readings taken since. Inventing those would describe an estate holding machines nobody
 	// had looked at, which is the failure that makes a point-in-time answer worthless.
 	var past estate
-	getJSON(t, base+"/v1/estate?at="+before.UTC().Format(time.RFC3339), &past)
+	integrationtest.GetJSON(t, base+"/v1/estate?at="+before.UTC().Format(time.RFC3339), &past)
 	if len(past.Hosts) != 0 {
 		t.Errorf("estate an hour before the gather holds %d hosts, want none. A reading is being "+
 			"projected backwards to a time it was not taken: %+v", len(past.Hosts), past.Hosts)
@@ -104,7 +105,7 @@ func TestEstateAtAgainstARealFleet(t *testing.T) {
 		Unchanged int `json:"unchanged"`
 		Total     int `json:"total"`
 	}
-	getJSON(t, base+"/v1/estate/diff?from="+before.UTC().Format(time.RFC3339), &diff)
+	integrationtest.GetJSON(t, base+"/v1/estate/diff?from="+before.UTC().Format(time.RFC3339), &diff)
 	if diff.Total != len(hosts) {
 		t.Fatalf("diff reports %d hosts differing, want the %d that were gathered", diff.Total,
 			len(hosts))
@@ -128,7 +129,7 @@ func TestEstateAtAgainstARealFleet(t *testing.T) {
 		} `json:"hosts"`
 		Unchanged int `json:"unchanged"`
 	}
-	getJSON(t, base+"/v1/estate/diff?from="+time.Now().UTC().Format(time.RFC3339), &quiet)
+	integrationtest.GetJSON(t, base+"/v1/estate/diff?from="+time.Now().UTC().Format(time.RFC3339), &quiet)
 	if len(quiet.Hosts) != len(hosts) {
 		t.Fatalf("a window with no gather in it reports %d hosts, want all %d carried forward",
 			len(quiet.Hosts), len(hosts))
@@ -151,14 +152,14 @@ func TestEstateAtAgainstARealFleet(t *testing.T) {
 // The outcome that matters is mixed: a failure followed by a fix is what a real change looks like,
 // and run by run it reads as one red row and one green row with nothing joining them.
 func TestAChangeAndItsReversibilityAgainstARealFleet(t *testing.T) {
-	requireStack(t)
-	buildImage(t)
-	key, pub := keypair(t)
-	hosts := startHosts(t, 2, pub)
-	inventory := writeInventory(t, hosts, key)
+	integrationtest.RequireStack(t)
+	integrationtest.BuildImage(t)
+	key, pub := integrationtest.Keypair(t)
+	hosts := integrationtest.StartHosts(t, 2, pub)
+	inventory := integrationtest.WriteInventory(t, hosts, key)
 	base := startServer(t)
 
-	ok := writePlaybook(t, `
+	ok := integrationtest.WritePlaybook(t, `
 ---
 - name: Succeed
   hosts: all
@@ -171,7 +172,7 @@ func TestAChangeAndItsReversibilityAgainstARealFleet(t *testing.T) {
       ansible.builtin.command: /bin/true
       changed_when: false
 `)
-	bad := writePlaybook(t, `
+	bad := integrationtest.WritePlaybook(t, `
 ---
 - name: Fail
   hosts: all
@@ -190,9 +191,9 @@ func TestAChangeAndItsReversibilityAgainstARealFleet(t *testing.T) {
 	// The failure first, then the fix, which is the order a real change happens in.
 	for _, pb := range []string{bad, ok} {
 		var created run.Run
-		postJSON(t, base+"/v1/runs", fmt.Sprintf(
+		integrationtest.PostJSON(t, base+"/v1/runs", fmt.Sprintf(
 			`{"playbook":%q,"inventory":%q,"labels":{"change":%q}}`, pb, inventory, change), &created)
-		waitTerminal(t, base, created.ID)
+		integrationtest.WaitTerminal(t, base, created.ID)
 	}
 
 	var got struct {
@@ -203,7 +204,7 @@ func TestAChangeAndItsReversibilityAgainstARealFleet(t *testing.T) {
 		Runs     []*run.Run `json:"runs"`
 		Total    int        `json:"total"`
 	}
-	getJSON(t, base+"/v1/changes/"+change, &got)
+	integrationtest.GetJSON(t, base+"/v1/changes/"+change, &got)
 	if got.Total != 2 {
 		t.Fatalf("change holds %d runs, want the 2 that carried its label", got.Total)
 	}
@@ -218,7 +219,7 @@ func TestAChangeAndItsReversibilityAgainstARealFleet(t *testing.T) {
 
 	// Reversibility is graded on a real run, read back through the API the approver uses.
 	var one run.Run
-	getJSON(t, base+"/v1/runs/"+got.Runs[0].ID, &one)
+	integrationtest.GetJSON(t, base+"/v1/runs/"+got.Runs[0].ID, &one)
 	if one.Reversibility == nil {
 		t.Fatal("a run read back carries no reversibility grade, so an approver sees only risk")
 	}
@@ -244,15 +245,15 @@ func TestAChangeAndItsReversibilityAgainstARealFleet(t *testing.T) {
 // run a second time changes nothing, because the file is already gone, and a run that provably
 // changed nothing has nothing to undo.
 func TestReversibilityReadsTheRealPlaybook(t *testing.T) {
-	requireStack(t)
-	buildImage(t)
-	key, pub := keypair(t)
-	hosts := startHosts(t, 2, pub)
-	inventory := writeInventory(t, hosts, key)
+	integrationtest.RequireStack(t)
+	integrationtest.BuildImage(t)
+	key, pub := integrationtest.Keypair(t)
+	hosts := integrationtest.StartHosts(t, 2, pub)
+	inventory := integrationtest.WriteInventory(t, hosts, key)
 	base := startServer(t)
 
 	// Create a file, then a second playbook that removes it. Removal is the permanent one.
-	seed := writePlaybook(t, `
+	seed := integrationtest.WritePlaybook(t, `
 ---
 - name: Seed
   hosts: all
@@ -266,7 +267,7 @@ func TestReversibilityReadsTheRealPlaybook(t *testing.T) {
         content: "irreplaceable\n"
         dest: /tmp/switchtender-archive
 `)
-	wipe := writePlaybook(t, `
+	wipe := integrationtest.WritePlaybook(t, `
 ---
 - name: Wipe
   hosts: all
@@ -279,20 +280,20 @@ func TestReversibilityReadsTheRealPlaybook(t *testing.T) {
 `)
 
 	var seeded run.Run
-	postJSON(t, base+"/v1/runs",
+	integrationtest.PostJSON(t, base+"/v1/runs",
 		fmt.Sprintf(`{"playbook":%q,"inventory":%q}`, seed, inventory), &seeded)
-	if got := waitTerminal(t, base, seeded.ID); got.Status != run.StatusSucceeded {
+	if got := integrationtest.WaitTerminal(t, base, seeded.ID); got.Status != run.StatusSucceeded {
 		t.Fatalf("seed run status = %q, want succeeded", got.Status)
 	}
 
 	// First wipe: the archive exists, so the run removes it and something changed.
 	var first run.Run
-	postJSON(t, base+"/v1/runs",
+	integrationtest.PostJSON(t, base+"/v1/runs",
 		fmt.Sprintf(`{"playbook":%q,"inventory":%q}`, wipe, inventory), &first)
-	waitTerminal(t, base, first.ID)
+	integrationtest.WaitTerminal(t, base, first.ID)
 
 	var read run.Run
-	getJSON(t, base+"/v1/runs/"+first.ID, &read)
+	integrationtest.GetJSON(t, base+"/v1/runs/"+first.ID, &read)
 	if read.Reversibility == nil {
 		t.Fatal("no reversibility grade on a finished run")
 	}
@@ -305,12 +306,12 @@ func TestReversibilityReadsTheRealPlaybook(t *testing.T) {
 	// Second wipe: the archive is already gone, so Ansible changes nothing. Nothing happened, so
 	// nothing needs undoing, and that is knowable only from the outcome.
 	var second run.Run
-	postJSON(t, base+"/v1/runs",
+	integrationtest.PostJSON(t, base+"/v1/runs",
 		fmt.Sprintf(`{"playbook":%q,"inventory":%q}`, wipe, inventory), &second)
-	waitTerminal(t, base, second.ID)
+	integrationtest.WaitTerminal(t, base, second.ID)
 
 	var again run.Run
-	getJSON(t, base+"/v1/runs/"+second.ID, &again)
+	integrationtest.GetJSON(t, base+"/v1/runs/"+second.ID, &again)
 	if again.Reversibility == nil {
 		t.Fatal("no reversibility grade on the second run")
 	}
@@ -329,15 +330,15 @@ func TestReversibilityReadsTheRealPlaybook(t *testing.T) {
 // dropped out of the change it was fixing, and the change reported failed rather than mixed: the
 // one shape it exists to show, missing from the one sequence that produces it.
 func TestARelaunchStaysInsideItsChange(t *testing.T) {
-	requireStack(t)
-	buildImage(t)
-	key, pub := keypair(t)
-	hosts := startHosts(t, 2, pub)
-	inventory := writeInventory(t, hosts, key)
+	integrationtest.RequireStack(t)
+	integrationtest.BuildImage(t)
+	key, pub := integrationtest.Keypair(t)
+	hosts := integrationtest.StartHosts(t, 2, pub)
+	inventory := integrationtest.WriteInventory(t, hosts, key)
 	base := startServer(t)
 
 	// Fails on the first host only, so a relaunch of the failed hosts is a real, partial fix.
-	playbook := writePlaybook(t, `
+	playbook := integrationtest.WritePlaybook(t, `
 ---
 - name: Partial
   hosts: all
@@ -352,24 +353,24 @@ func TestARelaunchStaysInsideItsChange(t *testing.T) {
 `)
 	const change = "OPS-900-partial-rollout"
 	var first run.Run
-	postJSON(t, base+"/v1/runs", fmt.Sprintf(
+	integrationtest.PostJSON(t, base+"/v1/runs", fmt.Sprintf(
 		`{"playbook":%q,"inventory":%q,"labels":{"change":%q},"extra_vars":{"fail_host":%q}}`,
 		playbook, inventory, change, hosts[0].Name), &first)
-	if got := waitTerminal(t, base, first.ID); got.Status == run.StatusSucceeded {
+	if got := integrationtest.WaitTerminal(t, base, first.ID); got.Status == run.StatusSucceeded {
 		t.Fatalf("the seeding run succeeded, so there is nothing to relaunch")
 	}
 
 	// Relaunch only the hosts it left failed, which is the fix.
 	var fix run.Run
-	postJSON(t, base+"/v1/runs/"+first.ID+"/relaunch-failed", `{}`, &fix)
-	waitTerminal(t, base, fix.ID)
+	integrationtest.PostJSON(t, base+"/v1/runs/"+first.ID+"/relaunch-failed", `{}`, &fix)
+	integrationtest.WaitTerminal(t, base, fix.ID)
 
 	var got struct {
 		Outcome string     `json:"outcome"`
 		Total   int        `json:"total"`
 		Runs    []*run.Run `json:"runs"`
 	}
-	getJSON(t, base+"/v1/changes/"+change, &got)
+	integrationtest.GetJSON(t, base+"/v1/changes/"+change, &got)
 	if got.Total != 2 {
 		t.Fatalf("the change holds %d runs, want 2. The relaunch dropped the change label, so the "+
 			"fix is not part of the change it fixes", got.Total)

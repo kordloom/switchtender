@@ -1979,17 +1979,22 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// Worker pools are loaded before the server is built, so a malformed file refuses to start
-	// rather than quietly falling back to one token that may lease from every queue.
-	var workerPools *relay.Pools
-	if serveWorkerPools != "" {
-		workerPools, err = relay.LoadPools(serveWorkerPools)
-		if err != nil {
-			return err
-		}
+	// Worker pools are resolved before the server is built, so a malformed file refuses to start
+	// rather than quietly falling back to one token that may lease from every queue. The relay is
+	// Team code a Community build does not carry, so there the engine refuses naming Team rather
+	// than leaving a configured worker token with nothing to serve it.
+	var workerPools relay.Pools
+	switch {
+	case serveWorkerPools != "":
+		workerPools, err = relay.CurrentEngine().LoadPools(serveWorkerPools)
+	case workerToken() != "":
+		workerPools, err = relay.CurrentEngine().SinglePool(workerToken())
+	}
+	if err != nil {
+		return err
 	}
 	switch {
-	case workerPools != nil:
+	case serveWorkerPools != "":
 		log.Info("mesh relay worker endpoints enabled, each token confined to its own queues",
 			zap.String("pools", serveWorkerPools))
 		// A pool that opted in to sealed secret delivery is named with the key its runs are sealed

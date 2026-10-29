@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/integrationtest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -18,7 +19,7 @@ func waitStatus(t *testing.T, base, id string, want run.Status) {
 	deadline := time.Now().Add(90 * time.Second)
 	for {
 		var r run.Run
-		getJSON(t, base+"/v1/runs/"+id, &r)
+		integrationtest.GetJSON(t, base+"/v1/runs/"+id, &r)
 		if r.Status == want {
 			return
 		}
@@ -35,12 +36,12 @@ func waitStatus(t *testing.T, base, id string, want run.Status) {
 // TestRealSSHPipelineDAGSkip proves the pipeline claim: when a step fails, a step that depends on it
 // is skipped and never runs, and the pipeline finishes failed.
 func TestRealSSHPipelineDAGSkip(t *testing.T) {
-	requireStack(t)
-	buildImage(t)
-	key, pub := keypair(t)
-	hosts := startHosts(t, 1, pub)
-	inventory := writeInventory(t, hosts, key)
-	boom := writePlaybook(t, `
+	integrationtest.RequireStack(t)
+	integrationtest.BuildImage(t)
+	key, pub := integrationtest.Keypair(t)
+	hosts := integrationtest.StartHosts(t, 1, pub)
+	inventory := integrationtest.WriteInventory(t, hosts, key)
+	boom := integrationtest.WritePlaybook(t, `
 ---
 - name: Fail on purpose
   hosts: all
@@ -53,7 +54,7 @@ func TestRealSSHPipelineDAGSkip(t *testing.T) {
       ansible.builtin.fail:
         msg: intentional failure
 `)
-	after := writePlaybook(t, `
+	after := integrationtest.WritePlaybook(t, `
 ---
 - name: Should never run
   hosts: all
@@ -67,13 +68,13 @@ func TestRealSSHPipelineDAGSkip(t *testing.T) {
 	base := startServer(t)
 
 	var parent run.Run
-	postJSON(t, base+"/v1/pipelines", fmt.Sprintf(
+	integrationtest.PostJSON(t, base+"/v1/pipelines", fmt.Sprintf(
 		`{"inventory":%q,"steps":[`+
 			`{"name":"boom","playbook":%q,"inventory":%q},`+
 			`{"name":"after","playbook":%q,"inventory":%q,"depends_on":["boom"]}]}`,
 		inventory, boom, inventory, after, inventory), &parent)
 
-	done := waitTerminal(t, base, parent.ID)
+	done := integrationtest.WaitTerminal(t, base, parent.ID)
 	if done.Status != run.StatusFailed {
 		t.Fatalf("pipeline status = %q, want failed", done.Status)
 	}
@@ -81,7 +82,7 @@ func TestRealSSHPipelineDAGSkip(t *testing.T) {
 	var steps struct {
 		Steps []run.Run `json:"steps"`
 	}
-	getJSON(t, base+"/v1/runs/"+parent.ID+"/steps", &steps)
+	integrationtest.GetJSON(t, base+"/v1/runs/"+parent.ID+"/steps", &steps)
 	// The failed step ran; the dependent step was skipped and created no run.
 	if len(steps.Steps) != 1 {
 		t.Fatalf("step runs = %d, want 1 (the dependent step must be skipped): %+v", len(steps.Steps), steps.Steps)
@@ -94,12 +95,12 @@ func TestRealSSHPipelineDAGSkip(t *testing.T) {
 // TestRealSSHCancel proves the cancellation claim: a long run is stopped by a cancel request and
 // finishes canceled well before its own timeout, because the process tree is killed.
 func TestRealSSHCancel(t *testing.T) {
-	requireStack(t)
-	buildImage(t)
-	key, pub := keypair(t)
-	hosts := startHosts(t, 1, pub)
-	inventory := writeInventory(t, hosts, key)
-	playbook := writePlaybook(t, `
+	integrationtest.RequireStack(t)
+	integrationtest.BuildImage(t)
+	key, pub := integrationtest.Keypair(t)
+	hosts := integrationtest.StartHosts(t, 1, pub)
+	inventory := integrationtest.WriteInventory(t, hosts, key)
+	playbook := integrationtest.WritePlaybook(t, `
 ---
 - name: Sleep a long time
   hosts: all
@@ -114,15 +115,15 @@ func TestRealSSHCancel(t *testing.T) {
 	base := startServer(t)
 
 	var created run.Run
-	postJSON(t, base+"/v1/runs",
+	integrationtest.PostJSON(t, base+"/v1/runs",
 		fmt.Sprintf(`{"playbook":%q,"inventory":%q}`, playbook, inventory), &created)
 
 	// Wait until the run is executing the sleep, then cancel it.
 	waitStatus(t, base, created.ID, run.StatusRunning)
 	var ack map[string]string
-	postJSON(t, base+"/v1/runs/"+created.ID+"/cancel", "", &ack)
+	integrationtest.PostJSON(t, base+"/v1/runs/"+created.ID+"/cancel", "", &ack)
 
-	done := waitTerminal(t, base, created.ID)
+	done := integrationtest.WaitTerminal(t, base, created.ID)
 	if done.Status != run.StatusCanceled {
 		t.Fatalf("run status = %q, want canceled", done.Status)
 	}
@@ -131,12 +132,12 @@ func TestRealSSHCancel(t *testing.T) {
 // TestRealSSHDrift proves the drift claim: a dry run reports the tasks that would change on a host,
 // which surface on the drift endpoint.
 func TestRealSSHDrift(t *testing.T) {
-	requireStack(t)
-	buildImage(t)
-	key, pub := keypair(t)
-	hosts := startHosts(t, 1, pub)
-	inventory := writeInventory(t, hosts, key)
-	playbook := writePlaybook(t, `
+	integrationtest.RequireStack(t)
+	integrationtest.BuildImage(t)
+	key, pub := integrationtest.Keypair(t)
+	hosts := integrationtest.StartHosts(t, 1, pub)
+	inventory := integrationtest.WriteInventory(t, hosts, key)
+	playbook := integrationtest.WritePlaybook(t, `
 ---
 - name: Would change the host
   hosts: all
@@ -153,9 +154,9 @@ func TestRealSSHDrift(t *testing.T) {
 	base := startServer(t)
 
 	var created run.Run
-	postJSON(t, base+"/v1/runs",
+	integrationtest.PostJSON(t, base+"/v1/runs",
 		fmt.Sprintf(`{"playbook":%q,"inventory":%q,"dry_run":true}`, playbook, inventory), &created)
-	done := waitTerminal(t, base, created.ID)
+	done := integrationtest.WaitTerminal(t, base, created.ID)
 	if !done.Status.Terminal() {
 		t.Fatalf("dry run status = %q, want terminal", done.Status)
 	}
@@ -166,7 +167,7 @@ func TestRealSSHDrift(t *testing.T) {
 			DriftedTasks int    `json:"drifted_tasks"`
 		} `json:"hosts"`
 	}
-	getJSON(t, base+"/v1/drift", &drift)
+	integrationtest.GetJSON(t, base+"/v1/drift", &drift)
 	drifted := 0
 	for _, h := range drift.Hosts {
 		if strings.HasPrefix(hosts[0].Name, h.Host) || h.Host == hosts[0].Name {

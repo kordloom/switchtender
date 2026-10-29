@@ -28,9 +28,9 @@ import (
 	"github.com/kordloom/switchtender/internal/user"
 )
 
-// slot holds one capability's implementation, or its stub until one is registered. A second
+// Slot holds one capability's implementation, or its stub until one is registered. A second
 // registration panics, since two paid modules in one binary is a build mistake, not a choice.
-type slot[T any] struct {
+type Slot[T any] struct {
 	// mu guards value and set.
 	mu sync.RWMutex
 	// value is what Get returns: the stub until Set replaces it.
@@ -41,13 +41,13 @@ type slot[T any] struct {
 	name string
 }
 
-// newSlot returns a slot that answers with stub until something registers.
-func newSlot[T any](name string, stub T) *slot[T] {
-	return &slot[T]{value: stub, name: name}
+// NewSlot returns a slot that answers with stub until something registers.
+func NewSlot[T any](name string, stub T) *Slot[T] {
+	return &Slot[T]{value: stub, name: name}
 }
 
 // Set registers v, panicking when the slot was already registered.
-func (s *slot[T]) Set(v T) {
+func (s *Slot[T]) Set(v T) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.set {
@@ -58,14 +58,14 @@ func (s *slot[T]) Set(v T) {
 }
 
 // Get returns the registered implementation, or the stub when there is none.
-func (s *slot[T]) Get() T {
+func (s *Slot[T]) Get() T {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.value
 }
 
 // Registered reports whether a paid implementation has been registered.
-func (s *slot[T]) Registered() bool {
+func (s *Slot[T]) Registered() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.set
@@ -412,12 +412,12 @@ type Reconciler interface {
 // The registry: one slot per capability, each answering with its stub until the paid module's
 // init registers the implementation.
 var (
-	directorySlot      = newSlot[Directory]("directory", stubDirectory{})
-	regoCompilerSlot   = newSlot[RegoCompiler]("rego compiler", stubRegoCompiler{})
-	ruleEvaluatorSlot  = newSlot[RuleEvaluator]("rule evaluator", stubRuleEvaluator{})
-	changeRegisterSlot = newSlot[ChangeRegister]("change register", stubChangeRegister{})
-	workerSlot         = newSlot[Worker]("worker", stubWorker{})
-	reconcilerSlot     = newSlot[Reconciler]("reconciler", stubReconciler{})
+	directorySlot      = NewSlot[Directory]("directory", stubDirectory{})
+	regoCompilerSlot   = NewSlot[RegoCompiler]("rego compiler", stubRegoCompiler{})
+	ruleEvaluatorSlot  = NewSlot[RuleEvaluator]("rule evaluator", stubRuleEvaluator{})
+	changeRegisterSlot = NewSlot[ChangeRegister]("change register", stubChangeRegister{})
+	workerSlot         = NewSlot[Worker]("worker", stubWorker{})
+	reconcilerSlot     = NewSlot[Reconciler]("reconciler", stubReconciler{})
 )
 
 // RegisterDirectory installs the paid directory sign-in. It panics on a second call.

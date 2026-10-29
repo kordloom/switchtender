@@ -1,171 +1,177 @@
-// Package relay is the foundation of SwitchTender's phase-1 mesh: a worker in an isolated network
-// segment dials the control node over one outbound connection and executes leased runs, so it needs
-// no path to the shared database and no inbound firewall rule.
+// Package relay is the seam for SwitchTender's mesh relay, the protocol that lets a worker in an
+// isolated network segment dial the control node over one outbound connection and execute leased
+// runs with no path to the shared database.
 //
-// The design reuses the whole existing dispatcher unchanged. A worker builds a Client, which
-// implements run.Store by forwarding the execution-path calls (claim, heartbeat, read, status,
-// output, events, summaries) to a Transport, and hands it to dispatch.New like any other store. The
-// Transport is the wire: today a Loopback that delegates in-process to a real run.Store, and next a
-// gRPC client that carries the same calls to a relay service on the control node. Because a worker's
-// dispatcher only exercises the execution path on the store it runs against, the Client returns
-// ErrUnsupported for the query and analytics reads, which the control node and its API serve, not a
-// worker. The remaining phase-1 work is a single gRPC Transport implementation and its server side.
+// Both ends of the protocol are Team code in the paid module: the worker's wire client and the
+// control node's worker endpoints. This package holds only the contracts the control node
+// satisfies, the Engine interface the paid module implements, and the registry slot it registers
+// into. A Community build has no relay code, so its Engine refuses naming Team.
 package relay
 
 import (
 	"context"
-	"errors"
-	"time"
+	"net/http"
 
-	"github.com/kordloom/switchtender/internal/event"
+	"go.uber.org/zap"
+
+	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/binding"
+	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/handoff"
+	"github.com/kordloom/switchtender/internal/license"
+	"github.com/kordloom/switchtender/internal/paid"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
-// ErrUnsupported is returned by a relay Client for the run.Store methods a worker never calls: the
-// query and analytics reads served by the control node and its API rather than the execution path.
-var ErrUnsupported = errors.New("relay: method not served to workers")
-
-// Transport carries a worker's execution-path store calls to the control node. It is the subset of
-// run.Store a worker exercises while executing a leased run: claiming work, renewing the lease,
-// reading the claimed run, and recording status, output, events, and summaries. The Loopback delegates
-// it in-process; a gRPC transport carries it across the network in the rest of the mesh build.
-type Transport interface {
-	// Claim leases the oldest pending run the owner's queues serve.
-	Claim(ctx context.Context, owner string, queues []string) (*run.Run, error)
-	// Heartbeat renews the owner's lease on a run.
-	Heartbeat(ctx context.Context, id, owner string) error
-	// Start is the fenced move from pending to running that begins execution: it succeeds only
-	// while the run is still pending, so a worker that stalled past its lease and woke to a
-	// requeued run learns it lost instead of starting a second tool. The blind save this replaced
-	// let exactly that double execution happen on relay workers.
-	Start(ctx context.Context, id, owner string, startedAt time.Time) (bool, error)
-	// Get returns the run with the given id, so a worker reads the claimed run and its cancel flag.
-	Get(ctx context.Context, id string) (*run.Run, error)
-	// Policies returns the approval policies in force on the control node.
-	//
-	// A worker across a relay has no database, and the plan-content gate runs wherever the run
-	// executes. Without this the gate did not exist on a relay worker at all, so which process won
-	// the claim decided whether a destroy threshold was enforced or ignored.
-	Policies(ctx context.Context) ([]*policy.Policy, error)
-	// Save writes the run's status transitions back to the control node.
-	Save(ctx context.Context, r *run.Run) error
-	// AppendLog streams captured output to the control node.
-	AppendLog(ctx context.Context, id string, p []byte) error
-	// SettleLog delivers whatever output the transport still holds for a run, once the run can write
-	// no more, and reports the bytes of its output the control node did not keep. A transport that
-	// answers an append before it lands is the only one with anything to report, and the dispatcher
-	// reads the answer before it decides the run's outcome, so a run is never recorded succeeded over
-	// a log the control node never received.
-	SettleLog(ctx context.Context, id string) int64
-	// AppendEvents streams structured events to the control node.
-	AppendEvents(ctx context.Context, id string, events []event.Event) error
-	// ProposeApply asks the control node to create the apply the named plan run gated, reporting what
-	// the plan found, how many resources it would destroy and whether its rendering could be read at
-	// all, and handing over the plan file the apply carries out. A worker cannot create runs itself,
-	// so this is the only path by which a plan-content gate completes on a worker.
-	ProposeApply(ctx context.Context, planID string, destroys int, read bool, plan []byte) (*run.Run,
-		error)
-	// KeepDriftPlanFile hands the control node the plan file the named drift check saved, which the
-	// control node seals and keeps so a reconcile proposed from the check carries out exactly that
-	// plan. An empty plan keeps nothing and drops the plan an earlier check of the same target kept.
-	KeepDriftPlanFile(ctx context.Context, checkID string, plan []byte) error
-	// SaveHostSummary records a run's per-host outcomes.
-	SaveHostSummary(ctx context.Context, runID string, summaries []run.HostSummary) error
-	// SaveHostFacts records the system facts a run gathered per host.
-	//
-	// A worker folds them out of the run's own event stream, and the control node is the only place
-	// they can be kept. Without this call the facts a relay-executed run gathered were dropped, so
-	// the host inventory the product shows knew nothing about any host a worker ran against.
-	SaveHostFacts(ctx context.Context, runID string, facts []run.HostFacts) error
-	// SaveTaskSummary records a run's per-task durations.
-	SaveTaskSummary(ctx context.Context, runID string, summaries []run.TaskSummary) error
+// Announcer tells the notification channels about a run: that it finished, or that it is held for a
+// person. The dispatcher satisfies it.
+//
+// A worker holds no notification channels, and one in a segment that cannot reach a chat service
+// could not use them anyway, so the control node announces the runs workers execute at the moment
+// it records the change.
+type Announcer interface {
+	// Announce tells the channels about r.
+	Announce(r *run.Run)
 }
 
-// Loopback adapts a run.Store into a Transport by delegating in-process, so a relay Client can run
-// against a local store. The gRPC transport replaces it without touching the Client or the dispatcher.
-func Loopback(store run.Store) Transport {
-	return loopback{store: store}
+// AnnouncerFunc adapts a function to an Announcer.
+type AnnouncerFunc func(r *run.Run)
+
+// Announce calls f.
+func (f AnnouncerFunc) Announce(r *run.Run) { f(r) }
+
+// SecretOpener opens one claimed run's secrets on the control node, for the relay to seal to the
+// worker pool that claimed it. The dispatcher satisfies it, so the set opened is exactly the set an
+// executor with database access would open for the same run.
+type SecretOpener interface {
+	// NeedsSecrets reports whether r carries any secret its executor would open.
+	NeedsSecrets(ctx context.Context, r *run.Run) bool
+	// OpenSecrets opens them. It returns the payload and a release for anything the opening minted,
+	// nil when nothing was, which the relay runs when the claim ends.
+	OpenSecrets(ctx context.Context, r *run.Run) (*handoff.Payload, func(), error)
 }
 
-// loopback is the in-process Transport backed by a run.Store.
-type loopback struct {
-	// store is the delegate that serves every call locally.
-	store run.Store
+// PlanSealer seals the plan file a worker's plan saved, with the control node's key, so the apply
+// proposed from it carries the plan sealed at rest. The dispatcher satisfies it.
+type PlanSealer interface {
+	// SealPlanFile seals plan for storage on the apply that carries it out.
+	SealPlanFile(plan []byte) (string, error)
 }
 
-// Policies reports that a loopback transport has no policies of its own. It exists so a worker can
-// run against a local store without a relay, where the dispatcher is given the real policy store
-// directly rather than reading one across the wire.
-func (l loopback) Policies(context.Context) ([]*policy.Policy, error) {
-	return nil, ErrUnsupported
+// PresenceRecorder records which workers are polling for work. The attention store satisfies it.
+type PresenceRecorder interface {
+	// NoteWorker records that owner is polling for work, serving queues with slots runs at once.
+	NoteWorker(ctx context.Context, owner string, queues []string, slots int) error
+	// TouchWorker records that owner is still reporting, leaving what it serves alone.
+	TouchWorker(ctx context.Context, owner string) error
 }
 
-// ProposeApply reports that a loopback transport does not relay a proposal. It wraps a local store,
-// which creates runs directly, so the caller submits rather than asking anyone.
-func (l loopback) ProposeApply(context.Context, string, int, bool, []byte) (*run.Run, error) {
-	return nil, ErrUnsupported
+// MaxPlanFileBytes is the largest plan file a relay worker can hand the control node, 19 MiB. The
+// propose request carries the plan file base64 encoded, and the control node accepts at most 26 MiB
+// on that route, which leaves room for this much plan file and the request around it.
+const MaxPlanFileBytes = 19 << 20
+
+// Pools is the worker pool configuration the control node serves: a validated pool file, or the
+// single unconfined pool a lone worker token makes. Only the Engine that built it can serve it.
+type Pools interface {
+	// DeliveryKeyIDs returns the delivery key id each pool registered, by pool name.
+	DeliveryKeyIDs() map[string]string
 }
 
-// KeepDriftPlanFile reports that a loopback transport does not relay a drift check's plan. It wraps
-// a local store, whose executor seals and keeps the plan itself.
-func (l loopback) KeepDriftPlanFile(context.Context, string, []byte) error {
-	return ErrUnsupported
+// HandlerConfig is what the control node's worker endpoints are built from.
+type HandlerConfig struct {
+	// Store is the run store the endpoints serve. It must implement run.SummaryAppender.
+	Store run.Store
+	// Pools authenticate workers and confine each token to its queues.
+	Pools Pools
+	// Log receives the endpoints' logs; nil is a no-op.
+	Log *zap.Logger
+	// Policies are the approval policies a worker reads, nil when none are configured.
+	Policies policy.Store
+	// Audits records what workers do, nil when nothing is audited.
+	Audits audit.Store
+	// Announcer tells the channels about the runs workers finish, nil when none.
+	Announcer Announcer
+	// SecretOpener opens a claimed run's secrets for sealed delivery, nil to refuse every delivery.
+	SecretOpener SecretOpener
+	// PlanSealer seals a worker's plan file onto the apply it proposes, nil to accept none.
+	PlanSealer PlanSealer
+	// Binder holds each leased run to the control node's seal, nil when no binding key is held.
+	Binder *binding.Verifier
+	// Admit refuses a proposed apply the control node has no room to record, nil to check nothing.
+	Admit func() error
+	// Presence records the workers that reach the control node, nil to record none.
+	Presence PresenceRecorder
 }
 
-// Claim delegates to the backing store.
-func (l loopback) Claim(ctx context.Context, owner string, queues []string) (*run.Run, error) {
-	return l.store.Claim(ctx, owner, queues)
+// DialConfig is what a relay worker dials its control node with.
+type DialConfig struct {
+	// Server is the control node's base URL.
+	Server string
+	// Token is the worker token the control node's pools know.
+	Token string `json:"-"`
+	// Client carries the requests.
+	Client *http.Client
+	// Keys open the secrets the control node seals to this worker's pool, nil or empty for none.
+	Keys *handoff.KeyRing
 }
 
-// Heartbeat delegates to the backing store.
-func (l loopback) Heartbeat(ctx context.Context, id, owner string) error {
-	return l.store.Heartbeat(ctx, id, owner)
+// Worker is what a relay worker executes against, all over one connection to the control node.
+type Worker struct {
+	// Store is the run store the worker's dispatcher claims from and reports to.
+	Store run.Store
+	// Policies are the approval policies the control node serves.
+	Policies policy.Store
+	// Delivery opens the secrets sealed to this worker.
+	Delivery dispatch.SecretDelivery
 }
 
-// Start delegates the fenced pending-to-running move to the backing store.
-func (l loopback) Start(ctx context.Context, id, owner string, startedAt time.Time) (bool, error) {
-	return l.store.TransitionStatusAndClaim(ctx, id, run.StatusPending, run.StatusRunning,
-		owner, startedAt)
+// Engine is the mesh relay, both ends. The paid module registers the implementation; the Community
+// stub refuses every method naming Team.
+type Engine interface {
+	// LoadPools reads and validates the worker pool file at path.
+	LoadPools(path string) (Pools, error)
+	// SinglePool returns the one unconfined pool a lone worker token makes.
+	SinglePool(token string) (Pools, error)
+	// Handler returns the control node's worker endpoints.
+	Handler(cfg HandlerConfig) (http.Handler, error)
+	// Dial connects a relay worker to its control node.
+	Dial(cfg DialConfig) (*Worker, error)
 }
 
-// Get delegates to the backing store.
-func (l loopback) Get(ctx context.Context, id string) (*run.Run, error) {
-	return l.store.Get(ctx, id)
+// stubEngine is the Community relay: there is no relay code in the build, so it refuses naming
+// Team.
+type stubEngine struct{}
+
+// LoadPools refuses.
+func (stubEngine) LoadPools(string) (Pools, error) {
+	return nil, paid.Requires(license.FeatureWorkers)
 }
 
-// Save delegates to the backing store.
-func (l loopback) Save(ctx context.Context, r *run.Run) error {
-	return l.store.Save(ctx, r)
+// SinglePool refuses.
+func (stubEngine) SinglePool(string) (Pools, error) {
+	return nil, paid.Requires(license.FeatureWorkers)
 }
 
-// AppendLog delegates to the backing store.
-func (l loopback) AppendLog(ctx context.Context, id string, p []byte) error {
-	return l.store.AppendLog(ctx, id, p)
+// Handler refuses.
+func (stubEngine) Handler(HandlerConfig) (http.Handler, error) {
+	return nil, paid.Requires(license.FeatureWorkers)
 }
 
-// SettleLog reports nothing lost: a loopback append answers with the store's own result, so the
-// dispatcher already counted whatever the store refused.
-func (l loopback) SettleLog(context.Context, string) int64 {
-	return 0
+// Dial refuses.
+func (stubEngine) Dial(DialConfig) (*Worker, error) {
+	return nil, paid.Requires(license.FeatureWorkers)
 }
 
-// AppendEvents delegates to the backing store.
-func (l loopback) AppendEvents(ctx context.Context, id string, events []event.Event) error {
-	return l.store.AppendEvents(ctx, id, events)
-}
+// engineSlot holds the relay engine, the Community stub until the paid module registers one.
+var engineSlot = paid.NewSlot[Engine]("relay engine", stubEngine{})
 
-// SaveHostSummary delegates to the backing store.
-func (l loopback) SaveHostSummary(ctx context.Context, runID string, summaries []run.HostSummary) error {
-	return l.store.SaveHostSummary(ctx, runID, summaries)
-}
+// RegisterEngine registers the paid relay engine. A second registration panics.
+func RegisterEngine(e Engine) { engineSlot.Set(e) }
 
-// SaveHostFacts delegates to the backing store.
-func (l loopback) SaveHostFacts(ctx context.Context, runID string, facts []run.HostFacts) error {
-	return l.store.SaveHostFacts(ctx, runID, facts)
-}
+// CurrentEngine returns the relay engine, the Community stub when none is registered.
+func CurrentEngine() Engine { return engineSlot.Get() }
 
-// SaveTaskSummary delegates to the backing store.
-func (l loopback) SaveTaskSummary(ctx context.Context, runID string, summaries []run.TaskSummary) error {
-	return l.store.SaveTaskSummary(ctx, runID, summaries)
-}
+// Registered reports whether a paid relay engine is registered.
+func Registered() bool { return engineSlot.Registered() }

@@ -28,7 +28,6 @@ import (
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/live"
-	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -1382,76 +1381,6 @@ func TestRelaunchFailedRun(t *testing.T) {
 			}
 			if !strings.Contains(rec.Body.String(), test.WantBodyContains) {
 				t.Errorf("body %q does not contain %q", rec.Body.String(), test.WantBodyContains)
-			}
-		})
-	}
-}
-
-// TestTheRelayMountAdmitsThroughTheServer pins the wiring between the server and the relay it mounts
-// for the free space floor. The relay refuses a worker's proposed apply only if the server hands it
-// the admission, and a server that took the option and dropped it would let a worker write a run
-// under a full disk with every relay test still passing, since those build the relay handler
-// themselves.
-func TestTheRelayMountAdmitsThroughTheServer(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		Admit            func() error
-		WantStatus       int
-		WantBodyContains string
-		WantRuns         int
-	}{{ // Test 0: An admission that refuses answers 503 with its reason and stores no apply.
-		Admit: func() error {
-			return fmt.Errorf("%w: only 12 MiB free at /data, under the 256 MiB floor",
-				dispatch.ErrLowSpace)
-		},
-		WantStatus: http.StatusServiceUnavailable, WantBodyContains: "under the 256 MiB floor",
-		WantRuns: 1,
-	}, { // Test 1: An admission that admits proposes the apply as before.
-		Admit:      func() error { return nil },
-		WantStatus: http.StatusCreated, WantBodyContains: "run_plan", WantRuns: 2,
-	}}
-	for testNum, test := range tests {
-		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
-			t.Parallel()
-			ctx := context.Background()
-			store := run.NewMemStore()
-			if err := store.Save(ctx, &run.Run{
-				ID: "run_plan", Tool: run.ToolTerraform, Command: "infra/prod",
-				Status: run.StatusRunning, CreatedAt: time.Now(), ClaimedBy: "worker-a",
-				ClaimSecret: "capability-for-run_plan",
-			}); err != nil {
-				t.Fatalf("seed Save() error = %v", err)
-			}
-			rules := policy.NewMemStore()
-			gate := policy.NewPolicy("terraform destroys need a person")
-			gate.Tool, gate.MaxDestroy = run.ToolTerraform, 0
-			if err := rules.Save(ctx, gate); err != nil {
-				t.Fatalf("Save policy: %v", err)
-			}
-			sealer := planSealerFunc(func(plan []byte) (string, error) {
-				return "sealed:" + string(plan), nil
-			})
-			handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithRelay(store, "worker-token"),
-				WithPolicies(rules), WithPlanSealer(sealer), WithRelayAdmission(test.Admit)).Handler()
-
-			req := httptest.NewRequest(http.MethodPost, "/relay/v1/runs/run_plan/propose-apply",
-				strings.NewReader(`{"destroys":3,"read":true,"plan_file":"cGxhbg=="}`))
-			req.Header.Set("Authorization", "Bearer worker-token")
-			req.Header.Set("X-Switchtender-Lease", "capability-for-run_plan")
-			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, req)
-			if diff := cmp.Diff(test.WantStatus, rec.Code); diff != "" {
-				t.Errorf("status mismatch (-want +got):\n%s", diff)
-			}
-			if !strings.Contains(rec.Body.String(), test.WantBodyContains) {
-				t.Errorf("body %q does not contain %q", rec.Body.String(), test.WantBodyContains)
-			}
-			runs, err := store.List(ctx)
-			if err != nil {
-				t.Fatalf("List() error = %v", err)
-			}
-			if diff := cmp.Diff(test.WantRuns, len(runs)); diff != "" {
-				t.Errorf("runs stored mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
