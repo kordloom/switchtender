@@ -14,7 +14,7 @@
 > install` manages, and the container image carries Ansible, Python, Terraform, and
 > OpenTofu. Source-available under BSL 1.1: the controller, every
 > tool, and the full evidence chain are free to self-host with no seat, host, or run limits. Paid
-> tiers add what an organization needs around it: SSO, more approval policies and the full policy
+> tiers add what an organization needs around it: SSO, deny rules and risk floors, the full policy
 > engine, dedicated workers and named queues and the relay that runs them inside networks the control node cannot reach, drift reconcile, and audit-ready change registers. Each
 > release converts to Apache 2.0 two years after it ships.
 
@@ -28,7 +28,7 @@ beside the database. Try `switchtender demo` for a seeded read-only tour.
 - Live demo, read-only and seeded with real runs, nothing to install: https://demo.switchtender.com
 
 - [Homepage](https://switchtender.com/): what it is and the live matrix
-- [Pricing](https://switchtender.com/pricing): Community free forever with one plain rule, a require-approval policy or one exemption, Pro $500/year to 500 hosts for SSO, five approval policies, deny rules, and risk and reversibility floors, Team from $7,500/year flat per org by fleet band with a KordLoom-hosted witness add-on at $3,000/year, Enterprise from $50,000/year for evidence custody and evidence work outside your install with the hosted witness included, scoped on the order form
+- [Pricing](https://switchtender.com/pricing): Community free forever with plain rules of your own, as many as you need, Pro $500/year to 500 hosts for SSO, deny rules, and risk and reversibility floors, Team from $7,500/year flat per org by fleet band with a KordLoom-hosted witness add-on at $3,000/year, Enterprise from $50,000/year for evidence custody and evidence work outside your install with the hosted witness included, scoped on the order form
 - [Get started](https://switchtender.com/get-started): install and first run
 - [AI agents](https://switchtender.com/agents): give an agent one operator-bound token, hold its runs for a person by default with no policy written, dry runs included, take two approvals for its Terraform or OpenTofu apply, and prove what it did
 - [Quickstart](https://switchtender.com/docs/quickstart): first job in minutes

@@ -327,9 +327,8 @@ Point `--policy-file` at a YAML file and that file becomes the source of truth:
         tool: opentofu
         max_destroy: 5
 
-That file holds two policies, so it needs Pro, which holds five. Team removes the cap. Community
-holds one, and a file carrying more is refused at startup naming the tier, rather than quietly
-enforcing a subset. Drop the second entry to run this example on Community.
+That file holds two policies, which Community holds. A file carrying a rule the install's tier does
+not cover is refused at startup naming the tier, rather than quietly enforcing a subset.
 
 A change to what needs approval is then a diff. It goes through whatever review the repository
 holding it requires, it is attributable to a commit, and an auditor reads the policy that was in

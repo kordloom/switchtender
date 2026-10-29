@@ -377,7 +377,8 @@ The docs live in [docs/](docs/) and also render inside the app at `/ui/docs`.
 | [Migration](docs/migration.md) | Moving off AWX, Semaphore, Rundeck, Jenkins, Chef, Puppet, or cron in detail |
 | [Comparison](docs/comparison.md) | How SwitchTender compares to AWX, AAP, Semaphore, Ascender, and Rundeck |
 
-Deploy with the `docker-compose.yml` at the root, which brings up a server on SQLite, or PostgreSQL and a server, plus a worker on a Team
+Deploy with the `docker-compose.yml` at the root, which brings up a server on SQLite, or PostgreSQL
+and a server, plus a worker on a Team
 license, or with the Helm chart under [deploy/helm](deploy/helm).
 
 ## Design
@@ -427,18 +428,22 @@ from v1.101.0 on is built and signed from this repository.
 
 Business Source License 1.1. Read the source, run it, and use it in production. Community is free
 and complete for leaving AWX: all seven engines, the importers, RBAC with organizations and teams,
-the agent gate, which holds an agent token's runs for a person with no rule written, one plain rule
-of your own, either a require-approval policy or one exemption, approvals bound to the exact content
-released, and the whole evidence engine with signed receipts and offline verification. Pro adds
-directory sign-in (OIDC, SAML, LDAP, JWT), deny rules, risk and reversibility floors, and five
-approval policies at $500 a year for up to 500 hosts. Team, from $7,500 a year by fleet band, adds
-the full policy engine, dedicated workers and named queues, and the relay that runs them inside
-networks the control node cannot reach, the change register, and one-click drift reconcile.
-PostgreSQL, including active-active HA on it, is Community. Enterprise, from $50,000 a year, adds the services that come from outside your
-install: custody of your evidence, evidence work on your audit calendar, and the hosted witness,
-which Team can also buy as an add-on. Every paid feature ships in the paid build, a separate download unlocked by a signed license file: no license server, no phone-home, flat per org. The paid code is kept in a private repository, mounted at internal/paid/impl as a git submodule that public clones do not fetch. A Community build refuses each paid feature by naming the tier it needs, and the paid engine is not there to patch a key out of. The one reserved right is offering SwitchTender to third
-parties as a hosted or managed service that provides its primary functionality. Each version
-converts to Apache-2.0 two years after its release.
+the agent gate, which holds an agent token's runs for a person with no rule written, plain rules of
+your own, require-approval policies and exemptions, approvals bound to the exact content released,
+and the whole evidence engine with signed receipts and offline verification. Pro adds directory
+sign-in (OIDC, SAML, LDAP, JWT), deny rules, and risk and reversibility floors at $500 a year for up
+to 500 hosts. Team, from $7,500 a year by fleet band, adds the full policy engine, dedicated workers
+and named queues, and the relay that runs them inside networks the control node cannot reach, the
+change register, and one-click drift reconcile. PostgreSQL, including active-active HA on it, is
+Community. Enterprise, from $50,000 a year, adds the services that come from outside your install:
+custody of your evidence, evidence work on your audit calendar, and the hosted witness, which Team
+can also buy as an add-on. Every paid feature ships in the paid build, a separate download unlocked
+by a signed license file: no license server, no phone-home, flat per org. The paid code is kept in a
+private repository, mounted at internal/paid/impl as a git submodule that public clones do not
+fetch. A Community build refuses each paid feature by naming the tier it needs, and the paid engine
+is not there to patch a key out of. The one reserved right is offering SwitchTender to third parties
+as a hosted or managed service that provides its primary functionality. Each version converts to
+Apache-2.0 two years after its release.
 
 See `LICENSE` for the exact terms and [`LICENSING.md`](LICENSING.md) for what self-hosting grants,
 how a commercial license works, and how to ask about support.

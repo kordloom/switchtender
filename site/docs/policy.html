@@ -157,9 +157,9 @@ every run records as in force covers it and describes it as &quot;lets an agent'
 default hold, for agents bound to account &quot;release-bot-owner&quot;&quot;. A run it lets through records the
 note <code>requested by an agent bound to account &quot;release-bot-owner&quot;, exempt from the default hold by policy &quot;release-agent-smoke-tests&quot;</code> in its outcome, so the receipt and the dossier name the account
 and the exemption. Write one through the API or the policy file, the same as any rule.</p>
-<p>The built-in hold is not a stored policy, so it counts against no license's policy limit and cannot
-be deleted. An exemption is a Community rule, one that names an <code>actor</code> and an <code>account</code> included,
-and it counts as one policy, so a Community install's one policy can be the exemption.</p>
+<p>The built-in hold is not a stored policy, so it cannot be deleted. An exemption is a Community rule,
+one that names an <code>actor</code> and an <code>account</code> included, and a Community install holds it beside as
+many plain rules as it needs.</p>
 <p>What an exemption risks is everything it matches, which then runs with no person looking. Keep it
 narrow.</p>
 <ul>
@@ -794,7 +794,7 @@ fails the same way, so the worker's copy of a policy decides exactly as the cont
 scoping and separation of duties. Deny rules and risk and reversibility floors are Pro. A Community
 or Pro install whose policy file lists a Rego policy refuses to load it and names the policy and
 the tier, the same refusal it gives a distinct-approver rule. A lapsed Team license keeps serving
-the policies it was serving. Each Rego policy counts as one policy toward a tier's policy count.</p>
+the policies it was serving.</p>
 <p>Rego policies are read only from the policy file. The API does not create them, and a backup
 carrying one is refused at restore.</p>
 <h3 id="dry-runs-that-are-not-change-free">Dry runs that are not change free</h3>

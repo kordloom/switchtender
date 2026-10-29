@@ -104,8 +104,8 @@ with a message naming the feature rather than failing in some subtler way:</p>
 </tr>
 <tr>
 <td><code>POST</code> and <code>PUT /v1/policies</code></td>
-<td>Pro or Team, past the free set</td>
-<td>Deny rules and risk and reversibility floors are Pro. Actor and account scoping and distinct-approver separation of duties are Team. One require-approval policy or one exemption is Community, Pro holds five, Team is uncapped. The built-in hold on agent runs is not a stored policy and counts toward no limit.</td>
+<td>Pro or Team, for a paid rule</td>
+<td>Deny rules and risk and reversibility floors are Pro. Actor and account scoping and distinct-approver separation of duties are Team. Require-approval policies and exemptions are Community, as many as you need. The built-in hold on agent runs is not a stored policy.</td>
 </tr>
 <tr>
 <td>A named <code>queue</code> on <code>POST /v1/runs</code>, <code>POST /v1/pipelines</code>, and <code>POST</code> or <code>PUT</code> on <code>/v1/templates</code> and <code>/v1/inventories</code></td>

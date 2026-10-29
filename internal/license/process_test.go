@@ -65,49 +65,6 @@ func TestProcessLicenseCarriesTheGate(t *testing.T) {
 	}
 }
 
-// TestProcessPolicyCapFollowsTheInstalledLicense checks the policy cap against the process license
-// rather than an explicit one, because the cap is enforced on a live server through this path.
-func TestProcessPolicyCapFollowsTheInstalledLicense(t *testing.T) {
-	before := Current()
-	t.Cleanup(func() { Set(before) })
-
-	tests := []struct {
-		Install *License
-		Name    string
-		Total   int
-		WantOK  bool
-	}{{ // Test 0: Community holds one policy.
-		Name: "community holds one", Install: nil, Total: 1, WantOK: true,
-	}, { // Test 1: Community refuses a second.
-		Name: "community refuses two", Install: nil, Total: 2, WantOK: false,
-	}, { // Test 2: Pro holds five.
-		Name:    "pro holds five",
-		Install: &License{Claims: Claims{Org: "acme", Tier: TierPro, Expires: future()}},
-		Total:   5, WantOK: true,
-	}, { // Test 3: Pro refuses a sixth and names Team as the way out.
-		Name:    "pro refuses six",
-		Install: &License{Claims: Claims{Org: "acme", Tier: TierPro, Expires: future()}},
-		Total:   6, WantOK: false,
-	}, { // Test 4: Team is uncapped.
-		Name:    "team is uncapped",
-		Install: &License{Claims: Claims{Org: "acme", Tier: TierTeam, Expires: future()}},
-		Total:   500, WantOK: true,
-	}, { // Test 5: A lapsed Team license is capped like Community.
-		Name:    "a lapsed team license is capped",
-		Install: &License{Claims: Claims{Org: "acme", Tier: TierTeam, Expires: past()}},
-		Total:   2, WantOK: false,
-	}}
-	for testNum, test := range tests {
-		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
-			Set(test.Install)
-			err := AllowPolicies(test.Total)
-			if gotOK := err == nil; gotOK != test.WantOK {
-				t.Fatalf("AllowPolicies(%d) error = %v, want allowed = %v", test.Total, err, test.WantOK)
-			}
-		})
-	}
-}
-
 // TestPathForPlacesTheLicenseBesideItsData checks where an install looks for its license. Getting
 // this wrong strands a paying customer on Community after a restore that carried the database but
 // looked for the license somewhere else.

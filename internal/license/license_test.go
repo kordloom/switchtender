@@ -240,47 +240,6 @@ func TestTierCoverage(t *testing.T) {
 	}
 }
 
-// TestAllowPoliciesPerTier pins the policy count ladder: one on Community, five on Pro, uncapped
-// from Team up, and a lapsed license capping like Community.
-func TestAllowPoliciesPerTier(t *testing.T) {
-	t.Parallel()
-	now := time.Date(2026, 9, 6, 0, 0, 0, 0, time.UTC)
-	lic := func(tier, expires string) *License {
-		return &License{Claims: Claims{Tier: tier, Org: "Acme", Expires: expires}}
-	}
-	live, lapsed := "2027-09-01T00:00:00Z", "2026-01-01T00:00:00Z"
-	tests := []struct {
-		License *License
-		Total   int
-		WantErr string
-	}{
-		{License: nil, Total: 1}, // Test 0: Community holds one.
-		{License: nil, Total: 2, WantErr: "Community tier holds one"},                   // Test 1.
-		{License: lic(TierPro, live), Total: 5},                                         // Test 2: Pro holds five.
-		{License: lic(TierPro, live), Total: 6, WantErr: "Team removes the cap"},        // Test 3.
-		{License: lic(TierTeam, live), Total: 60},                                       // Test 4: Team is uncapped.
-		{License: lic(TierEnterprise, live), Total: 600},                                // Test 5.
-		{License: lic("", live), Total: 60},                                             // Test 6: pre-Pro licenses are Team.
-		{License: lic(TierPro, lapsed), Total: 2, WantErr: "Community tier holds one"},  // Test 7: lapsed caps free.
-		{License: lic(TierTeam, lapsed), Total: 2, WantErr: "Community tier holds one"}, // Test 8.
-	}
-	for testNum, test := range tests {
-		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
-			t.Parallel()
-			err := allowPoliciesAt(test.License, test.Total, now)
-			if test.WantErr == "" {
-				if err != nil {
-					t.Fatalf("allowPoliciesAt() error = %v, want nil", err)
-				}
-				return
-			}
-			if err == nil || !strings.Contains(err.Error(), test.WantErr) {
-				t.Errorf("allowPoliciesAt() error = %v, want containing %q", err, test.WantErr)
-			}
-		})
-	}
-}
-
 // TestLegacyEmptyTierRoundTrips proves a license signed without a tier still verifies and grants
 // Team, through the real signing path rather than a hand-built struct.
 func TestLegacyEmptyTierRoundTrips(t *testing.T) {
@@ -299,9 +258,6 @@ func TestLegacyEmptyTierRoundTrips(t *testing.T) {
 	now := time.Date(2026, 9, 6, 0, 0, 0, 0, time.UTC)
 	if err := allowAt(l, FeaturePolicyFull, now); err != nil {
 		t.Errorf("legacy license lost Team coverage: %v", err)
-	}
-	if err := allowPoliciesAt(l, 60, now); err != nil {
-		t.Errorf("legacy license gained a policy cap: %v", err)
 	}
 }
 

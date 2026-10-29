@@ -7,7 +7,7 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 )
 
-// Engine evaluates the rules a Pro or Team license adds to the one plain hold: deny, the risk and
+// Engine evaluates the rules a Pro or Team license adds to the plain hold: deny, the risk and
 // reversibility floors, distinct-approver separation of duties, and how those compose across a rule
 // set. The paid module registers it. A Community build has no rule evaluation code, so its engine
 // holds every run an advanced rule's free criteria cover, names the tier on the hold, and never

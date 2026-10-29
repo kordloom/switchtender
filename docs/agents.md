@@ -162,8 +162,8 @@ review, fails the build when a new path appears without a test proving an agent 
    server started with a policy file it is not licensed for refuses at startup and says so, rather
    than running with the rules quietly dropped. The gate itself is free on every tier: every run an
    agent submits waits for a person with no rule written, and that is the whole containment story
-   on this page. A Community install also holds one plain rule, either a require-approval policy
-   for everyone's runs or one exemption. What Pro buys is holding on risk and reversibility, and a
+   on this page. A Community install also holds plain rules, require-approval policies and
+   exemptions, as many as you need. What Pro buys is holding on risk and reversibility, and a
    rule that can refuse outright rather than wait. What Team buys is scoping holds by actor and
    account, and a second person who must not be the requester.
 

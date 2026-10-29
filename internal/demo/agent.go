@@ -15,7 +15,6 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
-	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/server"
@@ -77,8 +76,7 @@ func (c clockedAudit) Append(ctx context.Context, e *audit.Entry) error {
 
 // seedAgent shows the agent gate doing its work, all of it real. The agent asks to restart the app
 // on one web host and to apply the network root, and both wait for a person by default, the apply
-// before anything plans. Its routine smoke test runs under an exemption, when the install's license
-// holds one more rule. It asks for a workflow that would apply Terraform, and the dispatcher refuses
+// before anything plans. Its routine smoke test runs under an exemption. It asks for a workflow that would apply Terraform, and the dispatcher refuses
 // it at submission. It tries to approve its own held run, and the gate refuses it at the door. Both
 // refusals are on the chain, recorded the way every refused request is.
 func seedAgent(ctx context.Context, d Deps, playbook, inv, tfDir string, log *zap.Logger) {
@@ -193,8 +191,8 @@ func cliIssuer() string {
 }
 
 // seedAgentExemption stores the exemption the agent's smoke test runs under, when the license holds
-// it. It is checked the way the API checks a rule an admin writes: the Team and Pro rules it uses,
-// and the number of rules the tier holds. An install whose license refuses it keeps the smoke test
+// it. It is checked the way the API checks a rule an admin writes, against the Team and Pro rules it
+// uses. An install whose license refuses it keeps the smoke test
 // waiting like the agent's other runs, which is what that install would do, and says why.
 func seedAgentExemption(ctx context.Context, d Deps, log *zap.Logger) bool {
 	p := policy.NewPolicy(agentExemptionName)
@@ -205,18 +203,8 @@ func seedAgentExemption(ctx context.Context, d Deps, log *zap.Logger) bool {
 		log.Warn("demo: seed the agent's exemption: " + err.Error())
 		return false
 	}
-	existing, err := d.Policies.List(ctx)
-	if err != nil {
-		log.Warn("demo: seed the agent's exemption: " + err.Error())
-		return false
-	}
 	if err := policy.AllowRules(p); err != nil {
 		log.Warn("demo: the agent's exemption is not seeded: " + err.Error())
-		return false
-	}
-	if err := license.AllowPolicies(len(existing) + 1); err != nil {
-		log.Warn("demo: the agent's exemption is not seeded, so its smoke test waits like its "+
-			"other runs: "+err.Error(), zap.Int("rules", len(existing)))
 		return false
 	}
 	if err := d.Policies.Save(ctx, p); err != nil {

@@ -20,9 +20,10 @@ server, no online activation, no phone-home:
 - The whole evidence engine: the tamper-evident hash chain, RFC 3161 anchoring, signed per-run
   receipts, run dossiers, and offline verification with the open verifier. The proofs are free
   forever, on every tier.
-- The built-in hold on the runs an agent token asks for, and one plain rule of your own: either a
-  require-approval policy or one exemption. Each approval is bound to the exact content digest and
-  pinned commit the approver saw, and an agent behind the MCP gate can never release its own work.
+- The built-in hold on the runs an agent token asks for, and plain rules of your own, as many as you
+  need: require-approval policies and exemptions. Each approval is bound to the exact content digest
+  and pinned commit the approver saw, and an agent behind the MCP gate can never release its own
+  work.
 - Sealed credentials, decrypted only at execution, through nine external managers: HashiCorp
   Vault (static and dynamic), AWS Secrets Manager, AWS STS, Google Secret Manager, Azure Key
   Vault, CyberArk Conjur, CyberArk CCP, and 1Password Connect, plus any store through a command.
@@ -34,30 +35,47 @@ server, no online activation, no phone-home:
 Internal production use by a company, on its own hosts, for its own infrastructure, is fully covered
 at no cost.
 
-The commercial model is open core. The Community build is this repository. Paid features live in a private module, and the paid build that carries them is a separate download, unlocked by a small signed file verified offline against a key compiled into the binary.
+The commercial model is open core. The Community build is this repository. Paid features live in a
+private module, and the paid build that carries them is a separate download, unlocked by a small
+signed file verified offline against a key compiled into the binary.
 
-The paid code is kept in a private repository, mounted at internal/paid/impl as a git submodule that public clones do not fetch. A Community build refuses each paid feature by naming the tier it needs. The paid engine is not there to patch a key out of. Rules scoped to an actor, an agent, or an account use the same matching code every build carries, because free exemptions are decided on it. A Community build cannot author such a rule, and a rule of that kind restored from a Team backup holds every run its other criteria cover, so it never narrows to the paid scope. Separation of duties is enforced on every build for any run that carries it, because a restored backup must keep its gates. Team is what lets you write the rule.
+The paid code is kept in a private repository, mounted at internal/paid/impl as a git submodule that
+public clones do not fetch. A Community build refuses each paid feature by naming the tier it needs.
+The paid engine is not there to patch a key out of. Rules scoped to an actor, an agent, or an
+account use the same matching code every build carries, because free exemptions are decided on it. A
+Community build cannot author such a rule, and a rule of that kind restored from a Team backup holds
+every run its other criteria cover, so it never narrows to the paid scope. Separation of duties is
+enforced on every build for any run that carries it, because a restored backup must keep its gates.
+Team is what lets you write the rule.
 
-Reconcile's wall is the private proposal code and the route's refusal naming Team. Plan keeping stays public because a pull request plan, a Community feature, is kept by the same code and read by the comment apply, so there is no plan-keeping line that can be private without taking a free feature away. The database-mode worker, switchtender worker --db, is refused on Community, but that refusal is not a wall: a second switchtender serve on the same PostgreSQL database gives the same capacity, and that is free. The paid part is the relay, worker --server, which runs a worker inside a network the control node cannot reach.
+Reconcile's wall is the private proposal code and the route's refusal naming Team. Plan keeping
+stays public because a pull request plan, a Community feature, is kept by the same code and read by
+the comment apply, so there is no plan-keeping line that can be private without taking a free
+feature away. The database-mode worker, switchtender worker --db, is refused on Community, but that
+refusal is not a wall: a second switchtender serve on the same PostgreSQL database gives the same
+capacity, and that is free. The paid part is the relay, worker --server, which runs a worker inside
+a network the control node cannot reach.
 
 Pro, at $500 a year flat per organization to 500 hosts, adds directory sign-in (OIDC, SAML,
-LDAP, and JWT, with just-in-time provisioning, and group-to-role mapping on all but OIDC), five
-approval policies instead of one, and deny rules and risk and reversibility floors.
+LDAP, and JWT, with just-in-time provisioning, and group-to-role mapping on all but OIDC), and deny
+rules and risk and reversibility floors.
 
-Team, from $7,500 a year by fleet band, adds the full policy engine (unlimited policies, Rego
-policies, distinct-approver separation of duties, and rules scoped to an actor or agent), the
-period change register, dedicated workers and named queues, and the relay that runs them inside
-networks the control node cannot reach, and one-click drift reconcile. PostgreSQL, including
-active-active high availability on it, is Community. No license server, no
-activation, no phone-home, no seat counting, and fleet bands are self-reported and never audited. A
-lapsed license takes nothing: opening or creating a PostgreSQL database is never gated, in any state,
-and every Community feature keeps working. Restoring a backup carries your approval policies back
-whatever tier the install runs, because an install that came back without the gates it had is a
-worse outcome than one holding a rule it is no longer licensed to create. Enterprise, from $50,000 a
-year, adds the services that come from outside your install: custody of your evidence, evidence
-work on your audit calendar, and the hosted witness, which Team can also buy as an add-on.
+Team, from $7,500 a year by fleet band, adds the full policy engine (Rego policies,
+distinct-approver separation of duties, and rules scoped to an actor or agent), the period change
+register, dedicated workers and named queues, and the relay that runs them inside networks the
+control node cannot reach, and one-click drift reconcile. PostgreSQL, including active-active high
+availability on it, is Community. No license server, no activation, no phone-home, no seat counting,
+and fleet bands are self-reported and never audited. A lapsed license takes nothing: opening or
+creating a PostgreSQL database is never gated, in any state, and every Community feature keeps
+working. Restoring a backup carries your approval policies back whatever tier the install runs,
+because an install that came back without the gates it had is a worse outcome than one holding a
+rule it is no longer licensed to create. Enterprise, from $50,000 a year, adds the services that
+come from outside your install: custody of your evidence, evidence work on your audit calendar, and
+the hosted witness, which Team can also buy as an add-on.
 
-One-click drift reconcile, from detection to a held, approvable fix. Terraform and OpenTofu reconcile the exact plan the check kept. Ansible reruns the playbook on the drifted host, bound to the check that found it, a rerun you can also launch by hand on Community.
+One-click drift reconcile, from detection to a held, approvable fix. Terraform and OpenTofu
+reconcile the exact plan the check kept. Ansible reruns the playbook on the drifted host, bound to
+the check that found it, a rerun you can also launch by hand on Community.
 
 Seven commitments, held for every user from day one. What is free today stays free, and the
 Community tier never shrinks. A lapsed license takes nothing: data, evidence, receipts, and every

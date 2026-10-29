@@ -40,8 +40,8 @@ var licenseStatusCmd = &cobra.Command{
 		}
 		if lic == nil {
 			fmt.Println("Community. Everything here is free to run, forever.")
-			fmt.Println("Pro unlocks directory sign-in, five approval policies, deny rules, and")
-			fmt.Println("the risk and reversibility floors. Team adds the full policy engine,")
+			fmt.Println("Pro unlocks directory sign-in, deny rules, and the risk and")
+			fmt.Println("reversibility floors. Team adds the full policy engine,")
 			fmt.Println("distributed workers, and the period change register:")
 			fmt.Println("https://switchtender.com/pricing")
 			return nil

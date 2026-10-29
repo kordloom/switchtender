@@ -1653,12 +1653,6 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			}
 			lapse = aerr
 		}
-		if aerr := license.AllowPolicies(len(count)); aerr != nil {
-			if !errors.Is(aerr, license.ErrLapsed) {
-				return aerr
-			}
-			lapse = aerr
-		}
 		if lapse != nil {
 			log.Warn("serve: the license term has lapsed and the policy file stays in force, "+
 				"because a lapse takes nothing that was already holding runs. Renewing is what "+

@@ -198,7 +198,7 @@ func (p *Policy) matchesActor(r *run.Run) bool {
 	}
 }
 
-// ProRules reports whether a policy uses a rule a Pro license adds to the one plain hold: a deny
+// ProRules reports whether a policy uses a rule a Pro license adds to the plain hold: a deny
 // effect, a risk floor, or a reversibility floor. Each of them strengthens what one rule does to
 // the runs it matches without saying who the rule is about, which is the line between Pro and Team.
 //
@@ -237,8 +237,8 @@ func (p *Policy) TeamRules() bool {
 		p.Account != ""
 }
 
-// Advanced reports whether a policy uses any paid criterion, Pro or Team. One plain
-// require-approval policy, or one exemption, is the Community gate.
+// Advanced reports whether a policy uses any paid criterion, Pro or Team. Plain require-approval
+// policies and exemptions are the Community gate, as many as an install needs.
 //
 // ProRules and TeamRules are the one definition every enforcement point shares. Three copies of
 // this question once lived in the create handler, the update handler, and here, and they drifted

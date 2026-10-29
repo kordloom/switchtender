@@ -115,9 +115,9 @@ note `requested by an agent bound to account "release-bot-owner", exempt from th
 policy "release-agent-smoke-tests"` in its outcome, so the receipt and the dossier name the account
 and the exemption. Write one through the API or the policy file, the same as any rule.
 
-The built-in hold is not a stored policy, so it counts against no license's policy limit and cannot
-be deleted. An exemption is a Community rule, one that names an `actor` and an `account` included,
-and it counts as one policy, so a Community install's one policy can be the exemption.
+The built-in hold is not a stored policy, so it cannot be deleted. An exemption is a Community rule,
+one that names an `actor` and an `account` included, and a Community install holds it beside as
+many plain rules as it needs.
 
 What an exemption risks is everything it matches, which then runs with no person looking. Keep it
 narrow.
@@ -575,7 +575,7 @@ A Rego policy is part of the full policy engine, which Team covers, the same tie
 scoping and separation of duties. Deny rules and risk and reversibility floors are Pro. A Community
 or Pro install whose policy file lists a Rego policy refuses to load it and names the policy and
 the tier, the same refusal it gives a distinct-approver rule. A lapsed Team license keeps serving
-the policies it was serving. Each Rego policy counts as one policy toward a tier's policy count.
+the policies it was serving.
 
 Rego policies are read only from the policy file. The API does not create them, and a backup
 carrying one is refused at restore.

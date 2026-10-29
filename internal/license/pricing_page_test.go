@@ -36,9 +36,6 @@ func TestTheGateMapIsWhatThePricingPageSells(t *testing.T) {
 	if addonTier != TierTeam {
 		t.Errorf("add-ons are sold from %s, and the pricing page sells them on Team", addonTier)
 	}
-	if proPolicyCap != 5 {
-		t.Errorf("Pro holds %d policies, and the pricing page sells five", proPolicyCap)
-	}
 	raw, err := os.ReadFile(filepath.Join("..", "..", "site", "pricing.html"))
 	if err != nil {
 		t.Fatalf("read pricing page: %v", err)
@@ -47,8 +44,8 @@ func TestTheGateMapIsWhatThePricingPageSells(t *testing.T) {
 	tests := []struct {
 		Tier       string
 		WantPhrase string
-	}{{ // Test 0: Pro's policy cap.
-		Tier: "Pro", WantPhrase: "<b>Five approval policies</b> instead of one",
+	}{{ // Test 0: Community holds plain rules uncapped, since no tier counts them.
+		Tier: "Community", WantPhrase: "<b>Plain rules, as many as you need</b>",
 	}, { // Test 1: Pro's directory sign-in, FeatureSSO.
 		Tier: "Pro", WantPhrase: "<b>Directory sign-in</b>",
 	}, { // Test 2: FeaturePolicyFull.

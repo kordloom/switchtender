@@ -141,72 +141,67 @@ func TestPolicyHandlerRefusals(t *testing.T) {
 		Name: "create deny with max destroy", Method: http.MethodPost, Path: "/v1/policies",
 		Body: `{"name":"hold","effect":"deny","max_destroy":3}`, Store: policy.NewMemStore(),
 		WantStatus: http.StatusBadRequest,
-	}, { // Test 9: The license count is read from the store, so a store that cannot be listed is a
-		// server error before anything is written.
-		Name: "create list fails", Method: http.MethodPost, Path: "/v1/policies",
-		Body: `{"name":"hold"}`, Store: &stubPolicies{listErr: errStore},
-		WantStatus: http.StatusInternalServerError,
-	}, { // Test 10: An unreachable store on save is a server error.
+	}, { // Test 9: An unreachable store on save is a server error.
 		Name: "create save fails", Method: http.MethodPost, Path: "/v1/policies",
 		Body: `{"name":"hold"}`, Store: &stubPolicies{saveErr: errStore},
 		WantStatus: http.StatusInternalServerError,
-	}, { // Test 11: A policy source that refuses writes answers a conflict, not a server error, so
+	}, { // Test 10: A policy source that refuses writes answers a conflict, not a server error, so
 		// an operator reads "configured this way" rather than "something broke".
 		Name: "create read-only source", Method: http.MethodPost, Path: "/v1/policies",
 		Body: `{"name":"hold"}`, Store: &stubPolicies{saveErr: policy.ErrReadOnly},
 		WantStatus: http.StatusConflict,
-	}, { // Test 12: Updating without policies configured says so.
+	}, { // Test 11: Updating without policies configured says so.
 		Name: "update disabled", Method: http.MethodPut, Path: "/v1/policies/pol_1",
 		Body: `{"name":"hold"}`, Disabled: true, WantStatus: http.StatusNotFound,
-	}, { // Test 13: A malformed update body is a bad request.
+	}, { // Test 12: A malformed update body is a bad request.
 		Name: "update malformed body", Method: http.MethodPut, Path: "/v1/policies/pol_1",
 		Body: `{{`, Store: policy.NewMemStore(), WantStatus: http.StatusBadRequest,
-	}, { // Test 14: An update with no name is refused.
+	}, { // Test 13: An update with no name is refused.
 		Name: "update empty name", Method: http.MethodPut, Path: "/v1/policies/pol_1",
 		Body: `{"name":""}`, Store: policy.NewMemStore(), WantStatus: http.StatusBadRequest,
-	}, { // Test 15: An update naming an unsupported tool is refused.
+	}, { // Test 14: An update naming an unsupported tool is refused.
 		Name: "update bad tool", Method: http.MethodPut, Path: "/v1/policies/pol_1",
 		Body: `{"name":"hold","tool":"chef"}`, Store: policy.NewMemStore(),
 		WantStatus: http.StatusBadRequest,
-	}, { // Test 16: Updating a policy that does not exist is a not found.
+	}, { // Test 15: Updating a policy that does not exist is a not found.
 		Name: "update missing", Method: http.MethodPut, Path: "/v1/policies/pol_missing",
 		Body: `{"name":"hold"}`, Store: policy.NewMemStore(), WantStatus: http.StatusNotFound,
-	}, { // Test 17: A read failure that is not a missing policy is a server error.
+	}, { // Test 16: A read failure that is not a missing policy is a server error.
 		Name: "update read fails", Method: http.MethodPut, Path: "/v1/policies/pol_1",
 		Body: `{"name":"hold"}`, Store: &stubPolicies{getErr: errStore},
 		WantStatus: http.StatusInternalServerError,
-	}, { // Test 18: An unreachable store on the update write is a server error.
+	}, { // Test 17: An unreachable store on the update write is a server error.
 		Name: "update save fails", Method: http.MethodPut, Path: "/v1/policies/pol_1",
 		Body:       `{"name":"hold"}`,
 		Store:      &stubPolicies{present: &policy.Policy{ID: "pol_1"}, saveErr: errStore},
 		WantStatus: http.StatusInternalServerError,
-	}, { // Test 19: A read-only source refuses the update as a conflict.
+	}, { // Test 18: A read-only source refuses the update as a conflict.
 		Name: "update read-only source", Method: http.MethodPut, Path: "/v1/policies/pol_1",
 		Body:       `{"name":"hold"}`,
 		Store:      &stubPolicies{present: &policy.Policy{ID: "pol_1"}, saveErr: policy.ErrReadOnly},
 		WantStatus: http.StatusConflict,
-	}, { // Test 20: An update that would store an invalid effect is refused.
+	}, { // Test 19: An update that would store an invalid effect is refused.
 		Name: "update bad effect", Method: http.MethodPut, Path: "/v1/policies/pol_1",
 		Body:       `{"name":"hold","effect":"maybe"}`,
 		Store:      &stubPolicies{present: &policy.Policy{ID: "pol_1"}},
 		WantStatus: http.StatusBadRequest,
-	}, { // Test 21: Listing without policies configured says so.
+	}, { // Test 20: Listing without policies configured says so.
 		Name: "list disabled", Method: http.MethodGet, Path: "/v1/policies",
 		Disabled: true, WantStatus: http.StatusNotFound,
-	}, { // Test 22: An unreachable store on list is a server error.
+	}, { // Test 21: An unreachable store on list is a server error.
 		Name: "list fails", Method: http.MethodGet, Path: "/v1/policies",
 		Store: &stubPolicies{listErr: errStore}, WantStatus: http.StatusInternalServerError,
-	}, { // Test 23: Deleting without policies configured says so.
+	}, { // Test 22: Deleting without policies configured says so.
 		Name: "delete disabled", Method: http.MethodDelete, Path: "/v1/policies/pol_1",
 		Disabled: true, WantStatus: http.StatusNotFound,
-	}, { // Test 24: Deleting a policy that does not exist is a not found.
+	}, { // Test 23: Deleting a policy that does not exist is a not found.
 		Name: "delete missing", Method: http.MethodDelete, Path: "/v1/policies/pol_missing",
 		Store: policy.NewMemStore(), WantStatus: http.StatusNotFound,
-	}, { // Test 25: An unreachable store on delete is a server error, so a gate that is still in
+	}, { // Test 24: An unreachable store on delete is a server error, so a gate that is still in
 		// force is never reported as removed.
 		Name: "delete fails", Method: http.MethodDelete, Path: "/v1/policies/pol_1",
 		Store: &stubPolicies{deleteErr: errStore}, WantStatus: http.StatusInternalServerError,
-	}, { // Test 26: A read-only source refuses the delete as a conflict.
+	}, { // Test 25: A read-only source refuses the delete as a conflict.
 		Name: "delete read-only source", Method: http.MethodDelete, Path: "/v1/policies/pol_1",
 		Store: &stubPolicies{deleteErr: policy.ErrReadOnly}, WantStatus: http.StatusConflict,
 	}}

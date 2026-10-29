@@ -7,7 +7,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -113,22 +112,12 @@ func createPolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusBadRequest, "tool is not a supported execution tool")
 			return
 		}
-		// One plain require-approval policy is Community. Five, with deny rules and the risk and
-		// reversibility floors, are Pro. Separation of duties, actor and account scoping, and a
-		// sixth policy are Team. The check sits before the write so a refusal changes nothing, and
-		// a lapse refuses here like any other gap, since what a lapse keeps is enforcement, not
-		// authoring.
-		existing, lerr := store.List(r.Context())
-		if lerr != nil {
-			log.Error("server: list policies: " + lerr.Error())
-			respondError(w, log, http.StatusInternalServerError, "could not read the policies")
-			return
-		}
+		// Plain require-approval policies and exemptions are Community, as many as the install
+		// needs. Deny rules and the risk and reversibility floors are Pro. Separation of duties and
+		// actor and account scoping are Team. The check sits before the write so a refusal changes
+		// nothing, and a lapse refuses here like any other gap, since what a lapse keeps is
+		// enforcement, not authoring.
 		if aerr := policy.AllowRules(requestRules(req)); aerr != nil {
-			respondError(w, log, http.StatusForbidden, aerr.Error())
-			return
-		}
-		if aerr := license.AllowPolicies(len(existing) + 1); aerr != nil {
 			respondError(w, log, http.StatusForbidden, aerr.Error())
 			return
 		}

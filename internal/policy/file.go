@@ -424,9 +424,6 @@ func (s *FileStore) allowed(set []*Policy) error {
 		}
 		return fmt.Errorf("the policy file needs a license it does not have: %w", rerr)
 	}
-	if err := license.AllowPolicies(len(set)); err != nil && !errors.Is(err, license.ErrLapsed) {
-		return fmt.Errorf("the policy file needs a license it does not have: %w", err)
-	}
 	return nil
 }
 

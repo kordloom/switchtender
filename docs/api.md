@@ -34,7 +34,7 @@ with a message naming the feature rather than failing in some subtler way:
 |----------|------|------|
 | `GET /v1/audit/register` | Team | The period change register, covering the last 90 days unless `from` and `to` name another period, each a date or an RFC 3339 timestamp, and the same rows as JSON with `format=json`. Per-run dossiers, receipts, bundles, and `GET /v1/audit/verify` are free. |
 | `POST /v1/drift/reconcile` | Team | One-click reconcile. Drift detection is free. |
-| `POST` and `PUT /v1/policies` | Pro or Team, past the free set | Deny rules and risk and reversibility floors are Pro. Actor and account scoping and distinct-approver separation of duties are Team. One require-approval policy or one exemption is Community, Pro holds five, Team is uncapped. The built-in hold on agent runs is not a stored policy and counts toward no limit. |
+| `POST` and `PUT /v1/policies` | Pro or Team, for a paid rule | Deny rules and risk and reversibility floors are Pro. Actor and account scoping and distinct-approver separation of duties are Team. Require-approval policies and exemptions are Community, as many as you need. The built-in hold on agent runs is not a stored policy. |
 | A named `queue` on `POST /v1/runs`, `POST /v1/pipelines`, and `POST` or `PUT` on `/v1/templates` and `/v1/inventories` | Team | Only a worker serves a named queue, and every worker is Team. The default queue is the server's own pool and is always allowed. A run that inherits a queue from its template or inventory is refused the same way. |
 
 Two more are enforced somewhere other than the request:

@@ -240,7 +240,7 @@ func TestProReadsTheSameEverywhere(t *testing.T) {
 	}{{ // Test 0: The license text.
 		File: "LICENSING.md", Pattern: `Pro, at \$(?P<price>[\d,]+) a year flat per organization to (?P<hosts>[\d,]+) hosts`,
 	}, { // Test 1: The README.
-		File: "README.md", Pattern: `approval policies at \$(?P<price>[\d,]+) a year`,
+		File: "README.md", Pattern: `reversibility floors at \$(?P<price>[\d,]+) a year`,
 	}, { // Test 2: The comparison doc's sign-in row.
 		File: "docs/comparison.md", Pattern: `SwitchTender prices its Pro tier at \$(?P<price>[\d,]+) a year`,
 	}, { // Test 3: The comparison doc's tier row.

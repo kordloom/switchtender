@@ -4,10 +4,10 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Pricing | SwitchTender</title>
-	<meta name="description" content="Automation is free. Audit season is not. Running every tool and proving what ran cost nothing, on any number of hosts. You pay for directory sign-in, more than one approval rule, dedicated workers, and the period change register assembled from your real run history.">
+	<meta name="description" content="Automation is free. Audit season is not. Running every tool and proving what ran cost nothing, on any number of hosts. You pay for directory sign-in, rules that refuse a change or grade it by risk, dedicated workers, and the period change register assembled from your real run history.">
 	<link rel="canonical" href="https://switchtender.com/pricing">
 	<meta property="og:title" content="Pricing | SwitchTender">
-	<meta property="og:description" content="Automation is free. Audit season is not. Running every tool and proving what ran cost nothing, on any number of hosts. You pay for directory sign-in, more than one approval rule, dedicated workers, and the period change register assembled from your real run history.">
+	<meta property="og:description" content="Automation is free. Audit season is not. Running every tool and proving what ran cost nothing, on any number of hosts. You pay for directory sign-in, rules that refuse a change or grade it by risk, dedicated workers, and the period change register assembled from your real run history.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://switchtender.com/pricing">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
@@ -222,7 +222,7 @@
 				Every run leaves evidence anyone can verify offline: a tamper-evident chain, a signed
 				receipt, and an open verifier that never contacts us. That part is free forever, with
 				no host cap, no seat cap, and no expiry. You pay when an organization has to answer
-				for the work: directory sign-in, more than one approval policy, distributed
+				for the work: directory sign-in, rules that refuse a change or grade it by risk, distributed
 				workers, and the period change register assembled from your real run history. Four
 				tiers, and a signed license the paid build checks offline, so nothing ever
 				phones home.
@@ -248,7 +248,7 @@
 							<li>Live host-by-task matrix, balanced splits, fleet memory, and drift detection</li>
 							<li>Drag-and-drop workflow editor, pipelines, schedules, webhooks, notifications</li>
 							<li>Local users with roles, organizations, and teams</li>
-							<li><b>One plain rule</b>, either a require-approval policy or one exemption, with every approval digest-bound: a held run is approved as the exact content the approver saw</li>
+							<li><b>Plain rules, as many as you need</b>, each a require-approval policy or an exemption, with every approval digest-bound: a held run is approved as the exact content the approver saw</li>
 							<li>The full evidence engine: hash chain, RFC 3161 anchoring, signed per-run receipts, the run dossier, and offline verification with the open verifier</li>
 							<li>Sealed credentials with secrets masking in logs</li>
 							<li>The <b>agent gate</b>, free on every tier: an AI agent gets one operator-bound token, its runs wait for a person's approval with no policy written, unless <a href="/docs/policy#agent-runs-are-held-by-default" style="color: var(--accent);">a rule with <code>effect: exempt</code></a> covers them, and it can never approve one</li>
@@ -267,10 +267,9 @@
 						<a class="ghost" href="mailto:licensing@switchtender.com?subject=Buy%20SwitchTender%20Pro">Buy Pro</a>
 					</div>
 					<div class="tier-body">
-						<div class="tier-payoff">Community gives you the built-in hold on agent runs and one rule of your own, and one rule is one sentence about your whole estate. Pro is for when production needs a rule of its own, and people should sign in from the directory you already run. <b>A lapsed license takes nothing</b>: sign-in falls back to local accounts, and your data, evidence, and every Community feature keep working.</div>
+						<div class="tier-payoff">Community gives you the built-in hold on agent runs and plain rules of your own. Pro is for when a rule has to refuse a change outright or hold it by how risky or hard to undo it is, and people should sign in from the directory you already run. <b>A lapsed license takes nothing</b>: sign-in falls back to local accounts, and your data, evidence, and every Community feature keep working.</div>
 						<p class="tier-inherit">Everything in Community, plus:</p>
 						<ul class="tier-list">
-							<li><b>Five approval policies</b> instead of one, so production, Terraform, and a risky command can each have a rule of their own where one rule has to choose</li>
 							<li><b>Deny rules and risk and reversibility floors</b>: refuse a change outright, or hold it when its risk or how hard it is to undo crosses a floor you set</li>
 							<li><b>Directory sign-in</b>: OIDC, SAML, LDAP, and JWT, so accounts come from the directory you already run</li>
 							<li><b>Email support</b>: an engineer's first response within two business days. Clocks are <a href="/terms#support" style="color: var(--accent);">defined in the terms</a></li>
@@ -296,7 +295,7 @@
 							<li><b>Separation of duties</b>, which is what makes the register hold up: a rule can require an approver who is not the requester, and a refused self-approval leaves no decision behind. The check compares accounts, not credential names, so asking with a token and approving in a browser is still the same person. The requirement is copied onto each run the rule holds, so a later edit to the rule cannot weaken a pending decision</li>
 							<li><b>Per-agent rules</b>: scope a rule to every AI agent, to one named agent, or to the account an agent acts for. The record answers which AI agents touched prod, and who approved them: the chain marks an agent's change as an agent's, and every decision names who made it</li>
 							<li><b>Distributed workers</b> and queues, for fleets one machine cannot reach, including a DMZ or a customer network the controller cannot dial into. A worker's runs enter through the same gate as every other run, so the whole estate can run through one gate</li>
-							<li><b>The full policy engine</b>: unlimited policies, separation of duties and per-agent rules as above, and Rego (Open Policy Agent) policies when a rule needs code</li>
+							<li><b>The full policy engine</b>: separation of duties and per-agent rules as above, and Rego (Open Policy Agent) policies when a rule needs code</li>
 							<li><b>One-click drift reconcile</b>, from detection to a held, approvable fix. Terraform and OpenTofu reconcile the exact plan the check kept. Ansible reruns the playbook on the drifted host, bound to the check that found it, a rerun you can also launch by hand on Community</li>
 							<li><b>Support with a clock on it</b>: Severity 1 and Severity 2 reports get an engineer's first response within one business day, Severity 1 is worked first, and a missed Severity 1 clock adds a month to your license. Severities and clocks are <a href="/terms#support" style="color: var(--accent);">defined in the terms</a>, not implied</li>
 						</ul>
@@ -429,9 +428,7 @@
 			<div class="faq reveal">
 				<details>
 					<summary>Which tier do I need?</summary>
-					<p>Community, until one policy stops being enough. When production needs a rule of its
-					own, a rule should refuse a change outright or hold it on its risk or how hard it is to
-					undo, or people should sign in from the directory you already run, that is Pro. The week
+					<p>Community, until a rule has to refuse a change outright or hold it by risk, or people should sign in from your directory. That is Pro. The week
 					you need agent-scoped policy or an approver who is not the requester, workers reaching fleets a single machine cannot, or a change register an auditor will
 					actually read, that is Team. Enterprise is for when someone outside your own install has
 					to hold the evidence: custody of it for the term, evidence work on your audit calendar, and the hosted witness included. Most

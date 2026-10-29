@@ -243,12 +243,12 @@ func TestSeedWaitingWorkflowPausesAtItsStep(t *testing.T) {
 	}
 }
 
-// TestTheAgentsExemptionFollowsTheLicense holds the exemption to the license check an admin's rule
-// meets through the API. Under a license that holds it, the exemption is stored and the smoke test
-// runs under it. Without one, the install is Community, which holds one rule and already holds the
-// two the demo's governance shows, so the exemption is not stored and the smoke test waits like
-// the agent's other runs. Not parallel: the license is process state.
-func TestTheAgentsExemptionFollowsTheLicense(t *testing.T) {
+// TestTheAgentsExemptionHoldsOnEveryTier holds the exemption to the license check an admin's rule
+// meets through the API. It names its agent and account and uses no paid rule, and no tier caps how
+// many plain rules an install holds, so it is stored and the smoke test runs under it on Community
+// as on Pro and Team, beside the two rules the demo's governance shows. Not parallel: the license
+// is process state.
+func TestTheAgentsExemptionHoldsOnEveryTier(t *testing.T) {
 	t.Cleanup(func() { license.Set(nil) })
 	tests := []struct {
 		// License is the license in force, nil for Community.
@@ -257,12 +257,11 @@ func TestTheAgentsExemptionFollowsTheLicense(t *testing.T) {
 		WantExemption bool
 		// WantSmoke is where the agent's smoke test stands.
 		WantSmoke run.Status
-	}{{ // Test 0: A license that holds the rule.
+	}{{ // Test 0: Team holds it.
 		License: teamLicense, WantExemption: true, WantSmoke: run.StatusSucceeded,
-	}, { // Test 1: Community refuses it, the control.
-		License: nil, WantExemption: false, WantSmoke: run.StatusPendingApproval,
-	}, { // Test 2: Pro holds it. An exemption naming its agent and account is no Team rule, and
-		// five rules hold the demo's two and this one.
+	}, { // Test 1: Community holds it beside the demo's two rules.
+		License: nil, WantExemption: true, WantSmoke: run.StatusSucceeded,
+	}, { // Test 2: Pro holds it. An exemption naming its agent and account is no Team rule.
 		License: &license.License{Claims: license.Claims{
 			V: 1, ID: "lic_demo_pro", Org: "test", Tier: license.TierPro,
 			Issued: "2026-01-01T00:00:00Z", Expires: "2099-01-01T00:00:00Z",

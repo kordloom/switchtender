@@ -132,7 +132,7 @@ unaffected. Under v1.102.0 such a run went ahead unless a policy held it.</p>
 <li>Write a rule with <code>effect: exempt</code> for the routine agent work that should keep running unattended,
 and leave everything else held. An exemption that names an agent's <code>actor</code> must also name the
 <code>account</code> its token is bound to, and one that names the <code>actor</code> alone is refused. A Community
-install's one rule can be that exemption. <a href="/docs/policy#agent-runs-are-held-by-default">Agent runs are held by
+install holds that exemption beside as many plain rules as it needs. <a href="/docs/policy#agent-runs-are-held-by-default">Agent runs are held by
 default</a> covers what an exemption matches and what it
 risks.</li>
 <li>Plan for two approvals on each Terraform or OpenTofu apply an agent asks for, or cover the routine

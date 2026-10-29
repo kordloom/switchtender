@@ -418,56 +418,6 @@ func allowAt(l *License, f Feature, now time.Time) error {
 	return nil
 }
 
-// proPolicyCap is how many approval policies a Pro license holds at once.
-const proPolicyCap = 5
-
-// AllowPolicies reports whether the install may hold total approval policies: one on Community,
-// five on Pro, and any number on Team and above. Like Allow, the clock is checked on every call,
-// so a license lapsing while the server runs caps the install like Community without a restart.
-func AllowPolicies(total int) error {
-	return allowPoliciesAt(current.Load(), total, time.Now())
-}
-
-// allowPoliciesAt is AllowPolicies against an explicit license and clock, which makes it testable.
-func allowPoliciesAt(l *License, total int, now time.Time) error {
-	lapsed := l != nil && l.Expired(now)
-	if l != nil && !lapsed {
-		tier := normalizeTier(l.Claims.Tier)
-		if tierRank(tier) >= tierRank(TierTeam) {
-			return nil
-		}
-		if tier == TierPro {
-			if total <= proPolicyCap {
-				return nil
-			}
-			return fmt.Errorf("a Pro license holds %d approval policies and this would make %d; "+
-				"Team removes the cap. https://switchtender.com/pricing", proPolicyCap, total)
-		}
-	}
-	if total <= 1 {
-		return nil
-	}
-	// A lapse is named as a lapse. A caller that must keep an install running needs to tell a term
-	// that ran out from a tier that never covered this, because only one of the two is something
-	// the customer had working yesterday.
-	// Named a lapse only when this license's tier, while live, would have held this many. A lapsed
-	// Pro asked to hold fifty policies never had that, so it gets the plain refusal: ErrLapsed
-	// means the term ran out on something the install actually had.
-	//
-	// The tier is asked directly rather than by calling back in with a time inside the term. A
-	// license whose Expires does not parse reads as expired at every instant, including that one,
-	// so the recursive form never reached a base case and a malformed license file took the process
-	// down with a stack overflow instead of refusing.
-	if lapsed && tierHoldsPolicies(l, total) {
-		return fmt.Errorf("%w: this install's license for %s lapsed on %s, and the Community tier "+
-			"holds one approval policy rather than %d. https://switchtender.com/pricing",
-			ErrLapsed, l.Claims.Org, l.Claims.Expires, total)
-	}
-	return fmt.Errorf("the Community tier holds one approval policy and this would make %d; "+
-		"Pro holds %d and Team removes the cap. https://switchtender.com/pricing",
-		total, proPolicyCap)
-}
-
 // gateName is the name a gate error prints for a feature, lowercased to sit after "required for".
 // No name starts with a proper noun, so lowercasing the first letter never misspells one. A feature
 // with no name prints its identifier.
@@ -514,22 +464,4 @@ func PathFor(db string) string {
 		dir = db[:i]
 	}
 	return dir + "/switchtender-license.json"
-}
-
-// tierHoldsPolicies reports whether this license's tier holds total approval policies, ignoring the
-// clock entirely. It answers "would this license have allowed this while it was live", which is what
-// decides whether a refusal counts as a lapse, without consulting the term that has already run out.
-func tierHoldsPolicies(l *License, total int) bool {
-	if l == nil {
-		return total <= 1
-	}
-	tier := normalizeTier(l.Claims.Tier)
-	switch {
-	case tierRank(tier) >= tierRank(TierTeam):
-		return true
-	case tier == TierPro:
-		return total <= proPolicyCap
-	default:
-		return total <= 1
-	}
 }

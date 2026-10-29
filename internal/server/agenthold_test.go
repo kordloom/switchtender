@@ -346,10 +346,9 @@ func TestAgentHoldExemption(t *testing.T) {
 	}
 }
 
-// TestAgentHoldExemptionIsCommunity proves the built-in rule costs no policy slot and that a
-// Community install can write the exemption, which then takes its one slot. The controls are an
-// actor-scoped hold rule, which stays Team, and the second policy, which the cap still refuses.
-// Deliberately not parallel: the license is process state.
+// TestAgentHoldExemptionIsCommunity proves a Community install can write the exemption beside its
+// other plain rules, since no tier counts them. The control is an actor-scoped hold rule, which
+// stays Team. Deliberately not parallel: the license is process state.
 func TestAgentHoldExemptionIsCommunity(t *testing.T) {
 	asCommunity(t, func() {
 		tests := []struct {
@@ -376,9 +375,9 @@ func TestAgentHoldExemptionIsCommunity(t *testing.T) {
 			Body: `{"name":"smoke","effect":"exempt","actor":"release-agent",` +
 				`"account":"dev-lead","tool":"bash"}`,
 			WantCode: http.StatusCreated,
-		}, { // Test 6: It took the one slot, so the cap refuses a second policy.
+		}, { // Test 6: A plain hold saves beside it, since no tier counts plain rules.
 			Body:     `{"name":"hold everything"}`,
-			WantCode: http.StatusForbidden,
+			WantCode: http.StatusCreated,
 		}}
 		s := newAgentHoldServer(t, agentHoldBackends()[0].Open(t), true)
 		for testNum, test := range tests {

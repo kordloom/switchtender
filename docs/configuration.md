@@ -20,9 +20,8 @@ believes it has a control it does not have.
 | Capability | Tier | Turned on by |
 |------------|------|--------------|
 | Directory sign-in (OIDC, SAML, LDAP, JWT) | Pro | Any `--oidc-*`, `--saml-*`, `--ldap-*`, or `--jwt-*` flag. `serve` refuses to start with one set and no license. |
-| Deny rules and risk and reversibility floors | Pro | Creating a policy that uses one. A single require-approval policy or one exemption stays Community. |
+| Deny rules and risk and reversibility floors | Pro | Creating a policy that uses one. Require-approval policies and exemptions stay Community, as many as you need. |
 | The full policy engine: actor and account scoping, distinct-approver separation of duties, and Rego policies | Team | Creating a policy that uses one. |
-| More approval policies at once | Pro holds five, Team is uncapped | Creating policies. Community holds one. |
 | The period change register | Team | `audit report`, and `GET /v1/audit/register`. |
 | Dedicated workers and named queues, and the relay that runs them inside networks the control node cannot reach | Team | Every `switchtender worker`, whether it shares the database or reaches the server over the mesh relay with `--server`. PostgreSQL, including active-active HA on it, is Community. |
 | One-click drift reconcile | Team | `POST /v1/drift/reconcile`. Drift detection itself is free. |

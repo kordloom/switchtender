@@ -46,20 +46,23 @@ func TestGatesRefuseInOneLineOnCommunity(t *testing.T) {
 			t.Errorf("reconcile refusal does not teach the fix: %s", rec.Body.String())
 		}
 
-		// Test 1: one plain require-approval policy is Community and must stay allowed.
-		rec = httptest.NewRecorder()
-		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/policies",
-			strings.NewReader(`{"name":"hold prod"}`)))
-		if rec.Code != http.StatusCreated {
-			t.Fatalf("the one Community policy = %d, want 201: %s", rec.Code, rec.Body.String())
+		// Test 1: plain require-approval policies are Community, as many as the install needs, so a
+		// second and a third save like the first.
+		for _, name := range []string{"hold prod", "hold stage", "hold edge"} {
+			rec = httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/policies",
+				strings.NewReader(`{"name":"`+name+`"}`)))
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("Community policy %q = %d, want 201: %s", name, rec.Code, rec.Body.String())
+			}
 		}
 
-		// Test 2: the second policy is where Team begins.
+		// Test 2: a deny policy is Pro, refused however few policies the install holds.
 		rec = httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/policies",
-			strings.NewReader(`{"name":"hold stage"}`)))
+			strings.NewReader(`{"name":"hold stage","effect":"deny"}`)))
 		if rec.Code != http.StatusForbidden {
-			t.Fatalf("second policy = %d, want 403: %s", rec.Code, rec.Body.String())
+			t.Fatalf("deny policy = %d, want 403: %s", rec.Code, rec.Body.String())
 		}
 
 		// Test 3: a deny policy is the full engine even as the first policy.
@@ -71,8 +74,8 @@ func TestGatesRefuseInOneLineOnCommunity(t *testing.T) {
 		}
 	})
 
-	// Test 4: with the Team license back, the same second policy saves, so the gate is the only
-	// thing that refused it.
+	// Test 4: with the Team license back, the same deny policy saves, so the gate is the only thing
+	// that refused it.
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/policies",
 		strings.NewReader(`{"name":"hold stage","effect":"deny"}`)))
@@ -162,8 +165,8 @@ func TestChangeRegisterIsTeamOverHTTP(t *testing.T) {
 	}
 }
 
-// TestProGatesHoldTheLine covers what a Pro install sees: five policies fit, the sixth refuses
-// toward Team, and a Team rule stays refused even with a live Pro license installed.
+// TestProGatesHoldTheLine covers what a Pro install sees: plain policies past any old count fit,
+// and a Team rule stays refused even with a live Pro license installed.
 func TestProGatesHoldTheLine(t *testing.T) {
 	store := policy.NewMemStore()
 	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithPolicies(store)).Handler()
@@ -173,8 +176,8 @@ func TestProGatesHoldTheLine(t *testing.T) {
 		Tier: license.TierPro, Org: "Acme", Expires: "2099-01-01T00:00:00Z"}})
 	defer license.Set(prior)
 
-	// Test 0: five plain policies are inside the Pro cap.
-	for i := range 5 {
+	// Test 0: plain policies are not counted on any tier, so a sixth saves like the first.
+	for i := range 6 {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/policies",
 			strings.NewReader(fmt.Sprintf(`{"name":"hold %d"}`, i))))
@@ -183,19 +186,8 @@ func TestProGatesHoldTheLine(t *testing.T) {
 		}
 	}
 
-	// Test 1: the sixth refuses in one line pointing at Team.
+	// Test 1: separation of duties is Team, which Pro does not include.
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/policies",
-		strings.NewReader(`{"name":"hold six"}`)))
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("sixth Pro policy = %d, want 403: %s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "Team removes the cap") {
-		t.Errorf("sixth-policy refusal does not teach the fix: %s", rec.Body.String())
-	}
-
-	// Test 2: separation of duties is Team, which Pro does not include.
-	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/policies",
 		strings.NewReader(`{"name":"two people","require_distinct_approver":true}`)))
 	if rec.Code != http.StatusForbidden {
@@ -222,7 +214,7 @@ func TestAFilePinnedPolicySetAnswersReadOnlyBeforeTheLicense(t *testing.T) {
 	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithPolicies(store)).Handler()
 	tests := []struct {
 		Method, Path, Body string
-	}{{ // Test 0: A second plain policy, which Community would refuse as over its cap.
+	}{{ // Test 0: A second plain policy, which Community would otherwise accept.
 		Method: http.MethodPost, Path: "/v1/policies", Body: `{"name":"hold stage"}`,
 	}, { // Test 1: A deny policy, which Community would refuse as Pro.
 		Method: http.MethodPost, Path: "/v1/policies", Body: `{"name":"deny","effect":"deny"}`,

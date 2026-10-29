@@ -14,7 +14,7 @@ list is free forever; paid tiers only ever add.
 - Live host-by-task matrix, balanced splits, fleet memory, and drift detection
 - Drag-and-drop workflow editor, pipelines, schedules, webhooks, notifications
 - Local users with roles, organizations, and teams
-- One approval policy, digest-bound: a held run is approved as the exact content the approver saw
+- Plain rules of your own, as many as you need, each approval digest-bound: a held run is approved as the exact content the approver saw
 - The full evidence engine: hash chain, RFC 3161 anchoring, signed per-run receipts, the run dossier, and offline verification with the open verifier
 - Sealed credentials with secrets masking in logs
 - The MCP agent gate: an AI agent gets one operator-bound token and can only propose runs through the same approvals a person faces

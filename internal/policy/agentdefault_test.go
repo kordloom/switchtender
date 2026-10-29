@@ -426,8 +426,8 @@ func TestPlanGatedFollowsTheAgentHold(t *testing.T) {
 	}
 }
 
-// TestAFileExemptionLoadsOnCommunity holds the policy file to letting a Community install write its
-// one exemption, while the cap still counts it. It drops the package's Team license around itself,
+// TestAFileExemptionLoadsOnCommunity holds the policy file to letting a Community install write an
+// exemption beside its other plain rules. It drops the package's Team license around itself,
 // so it cannot run in parallel with the tests that read the license.
 func TestAFileExemptionLoadsOnCommunity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "policies.yml")
@@ -450,9 +450,9 @@ func TestAFileExemptionLoadsOnCommunity(t *testing.T) {
 		Body: "policies:\n" + strings.Replace(exempt, "effect: exempt", "effect: require_approval",
 			1),
 		WantRefused: true,
-	}, { // Test 2: The exemption counts toward the one policy Community holds.
+	}, { // Test 2: A plain hold loads beside the exemption, since no tier counts plain rules.
 		Body:        "policies:\n" + exempt + "  - name: hold-everything\n",
-		WantRefused: true,
+		WantEffects: []string{EffectExempt, ""},
 	}}
 	for testNum, test := range tests {
 		if err := os.WriteFile(path, []byte(test.Body), 0o600); err != nil {

@@ -185,7 +185,7 @@
    "name": "Can I run a Terraform plan, hold it for approval, then run Ansible?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Yes, and that sequence is the reason pipelines exist here rather than a workaround for them. A pipeline is an ordered set of steps or a dependency graph with parallel branches, built on a drag-and-drop canvas or posted as JSON. Steps can mix tools freely, so a Terraform plan, an approval, and an Ansible play are three steps of one run. A failure skips exactly the steps that depended on it, and set_stats output flows to dependent steps as extra vars. The approval is not a convention someone can skip. A policy decides which runs are held, the hold is enforced in the core, and the approval is bound to the exact plan that was reviewed, so a run cannot be approved as one thing and executed as another. A Community install holds one plain rule, either a require-approval policy or one exemption, and Pro holds five and adds outright denials and risk and reversibility floors. Team removes the cap and adds the rest of the policy engine: actor-scoped rules, distinct-approver separation of duties, and Rego policies."
+    "text": "Yes, and that sequence is the reason pipelines exist here rather than a workaround for them. A pipeline is an ordered set of steps or a dependency graph with parallel branches, built on a drag-and-drop canvas or posted as JSON. Steps can mix tools freely, so a Terraform plan, an approval, and an Ansible play are three steps of one run. A failure skips exactly the steps that depended on it, and set_stats output flows to dependent steps as extra vars. The approval is not a convention someone can skip. A policy decides which runs are held, the hold is enforced in the core, and the approval is bound to the exact plan that was reviewed, so a run cannot be approved as one thing and executed as another. A Community install holds as many plain rules as you need, each a require-approval policy or an exemption. Pro adds outright denials and risk and reversibility floors. Team adds the rest of the policy engine: actor-scoped rules, distinct-approver separation of duties, and Rego policies."
    }
   },
   {
@@ -209,7 +209,7 @@
    "name": "What is the license?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Business Source License 1.1: free to self-host, modify, and run in production for your own organization. The one restriction is offering it to third parties as a hosted or managed service that provides its primary functionality, and each release converts to Apache 2.0 two years after it ships. The Community tier is free and complete on its own, with the built-in hold on agent runs and one plain rule of your own. Pro adds directory sign-in, five approval policies instead of one, and deny rules and risk and reversibility floors. Team adds the full policy engine, the period change register, dedicated workers and named queues, and the relay that runs them inside networks the control node cannot reach, and one-click drift reconcile. Both unlock in the paid build with a signed license file the binary verifies offline, flat per organization by fleet band, and a lapsed license takes nothing: paid features stop while your data, evidence, and every Community feature keep working. There is no license server and nothing ever phones home."
+    "text": "Business Source License 1.1: free to self-host, modify, and run in production for your own organization. The one restriction is offering it to third parties as a hosted or managed service that provides its primary functionality, and each release converts to Apache 2.0 two years after it ships. The Community tier is free and complete on its own, with the built-in hold on agent runs and plain rules of your own. Pro adds directory sign-in, deny rules, and risk and reversibility floors. Team adds the full policy engine, the period change register, dedicated workers and named queues, and the relay that runs them inside networks the control node cannot reach, and one-click drift reconcile. Both unlock in the paid build with a signed license file the binary verifies offline, flat per organization by fleet band, and a lapsed license takes nothing: paid features stop while your data, evidence, and every Community feature keep working. There is no license server and nothing ever phones home."
    }
   }
  ]
@@ -438,10 +438,9 @@ depended on it, and <code>set_stats</code> output flows to dependent steps as ex
 <p>The approval is not a convention someone can skip. A policy decides which runs are held, the hold
 is enforced in the core, and the approval is bound to the exact plan that was reviewed, so a run
 cannot be approved as one thing and executed as another.</p>
-<p>A Community install holds one plain rule, either a require-approval policy or one exemption, and
-Pro holds five and adds outright denials and risk and reversibility floors. Team removes the cap and
-adds the rest of the policy engine: actor-scoped rules, distinct-approver separation of duties, and
-Rego policies.</p>
+<p>A Community install holds as many plain rules as you need, each a require-approval policy or an
+exemption. Pro adds outright denials and risk and reversibility floors. Team adds the rest of the
+policy engine: actor-scoped rules, distinct-approver separation of duties, and Rego policies.</p>
 <h2 id="how-fine-grained-is-access-control">How fine-grained is access control?</h2>
 <p>Beyond the global admin, operator, and viewer roles, users group into teams and a team gets read,
 use, or manage on one specific project, template, inventory, or credential, each level implying
@@ -466,13 +465,13 @@ outliving the company is a documented path rather than a hope. The <a href="/doc
 <p>Business Source License 1.1: free to self-host, modify, and run in production for your own
 organization. The one restriction is offering it to third parties as a hosted or managed service
 that provides its primary functionality, and each release converts to Apache 2.0 two years after it
-ships. The Community
-tier is free and complete on its own, with the built-in hold on agent runs and one plain rule of
-your own. Pro adds directory sign-in, five approval policies instead of one, and deny rules and
-risk and reversibility floors. Team adds the full policy engine, the period change register,
-dedicated workers and named queues, and the relay that runs them inside networks the control node cannot reach, and one-click drift reconcile. Both unlock in the paid build with a signed license file the binary verifies
-offline, flat per organization by fleet band, and a lapsed license takes nothing: paid features stop
-while your data, evidence, and every Community feature keep working. There is no license server and
+ships. The Community tier is free and complete on its own, with the built-in hold on agent runs and
+plain rules of your own. Pro adds directory sign-in, deny rules, and risk and reversibility floors.
+Team adds the full policy engine, the period change register, dedicated workers and named queues,
+and the relay that runs them inside networks the control node cannot reach, and one-click drift
+reconcile. Both unlock in the paid build with a signed license file the binary verifies offline,
+flat per organization by fleet band, and a lapsed license takes nothing: paid features stop while
+your data, evidence, and every Community feature keep working. There is no license server and
 nothing ever phones home.</p>
 
 		</main>
