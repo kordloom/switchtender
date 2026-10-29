@@ -29,7 +29,7 @@ import (
 // record a decision about one, and the reason an agent identity cannot use it.
 type approvalPath struct {
 	// Surface is where the path is reached from: the API, a workflow step, the dispatcher, the
-	// system itself, the demo, or the store contract.
+	// system itself, the demo, the store contract, or a test helper package.
 	Surface string
 	// Why says what stops an agent there, naming the test that proves it where one exists.
 	Why string
@@ -83,6 +83,13 @@ var approvalPaths = map[string]approvalPath{
 		Why: "the append-at-once form of DecisionEntry, called by nothing that decides"},
 	"internal/outcome/approval.go:CommitStepDecisionWith:StepDecisionEntry": {Surface: "system",
 		Why: "the append-at-once form used for a step's request"},
+	"internal/outcometest/outcometest.go:ApproveSealed:CommitDecisionWith": {
+		Surface: "test helper", Why: "builds a sealed approval for receipt tests; no binary " +
+			"imports the package and it serves no route"},
+	"internal/outcometest/outcometest.go:ApproveSealed:ClaimDecision": {
+		Surface: "test helper", Why: "the same helper claiming the decision it just committed"},
+	"internal/outcometest/outcometest.go:ApproveSealed:SettleDecision": {
+		Surface: "test helper", Why: "the same helper settling the decision it just claimed"},
 	"internal/storetest/contract_approval.go:testSweepParksAStalledWorkflow:ClaimDecision": {
 		Surface: "store contract", Why: "exercises the store with no decider and no route"},
 	"internal/storetest/contract_decision_claim.go:testClaimDecisionOnce:ClaimDecision": {
