@@ -40,4 +40,8 @@ var (
 	// ErrUnknownPhase is returned when -only names a phase this run does not have. A misspelled
 	// name would otherwise select nothing, and a run of only the base phases reads as a pass.
 	ErrUnknownPhase = errors.New("-only names a phase this run does not have")
+	// ErrPreviousPaidMissing is returned when the previous release's gitlink names a paid module
+	// commit the local module does not hold, so upgrade-team has no previous paid build to start
+	// from.
+	ErrPreviousPaidMissing = errors.New("the previous paid release is not in the paid module")
 )

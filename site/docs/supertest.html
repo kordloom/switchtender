@@ -140,7 +140,10 @@ back, and the rolled-back install must execute new work, because an upgrade an o
 walk back is a one-way door sold as a swap. The Team PostgreSQL shape gets its own upgrade
 proof: schema initialized by the old binary, real work through the dedicated
 worker, then server and worker rolled together in place with the schema reused, the license
-carried, and the chain verifying across the boundary.</p>
+carried, and the chain verifying across the boundary. That proof starts from the previous paid
+release. A release from before the paid module existed is pulled as its public image, which still
+carried the paid code. A later one is built from its tag and the paid module commit its gitlink
+names, so a run that cannot reach that commit stops before any cluster is made.</p>
 <p><strong>A worker killed mid-run costs a retry, never the work, and never a lie.</strong> The dedicated worker
 is deleted while it holds an executing run. The run must be reclaimed to a terminal interrupted
 state with a stated reason, never silently re-run, because re-applying a half-applied change can

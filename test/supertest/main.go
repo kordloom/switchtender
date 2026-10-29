@@ -60,6 +60,10 @@ func run() int {
 			", with the paid build tag. The Team phases need it.")
 	prevImage := flag.String("prev-image", "",
 		"Previous release image the upgrade phase starts from. Empty resolves the newest v* tag.")
+	prevPaidImage := flag.String("prev-paid-image", "",
+		"Previous paid release image upgrade-team starts from. Empty resolves the previous tag: "+
+			"its public image when the tag predates the paid module, else a build of that tag "+
+			"with the paid module commit its gitlink names.")
 	shots := flag.String("shots", "", "Directory to write UI screenshots into. Empty skips them.")
 	report := flag.String("report", "", "File to append the markdown report to. Empty writes stdout only.")
 	keep := flag.Bool("keep", false, "Leave the cluster running afterward, for poking at a failure.")
@@ -108,6 +112,9 @@ func run() int {
 		return 1
 	}
 
+	// Resolved below, once the selected phases are known, so a run without upgrade-team never asks
+	// the paid module for an older commit.
+	var previousPaidRelease previousPaid
 	phases := []phase{
 		{"cluster", h.phaseCluster},
 		{"fleet", h.phaseFleet},
@@ -128,7 +135,7 @@ func run() int {
 		phases = append(phases, phase{"team", func() error { return h.phaseTeam(*license) }})
 		phases = append(phases, phase{"crash", h.phaseCrash})
 		phases = append(phases, phase{"upgrade-team", func() error {
-			return h.phaseUpgradeTeam(previous, *license)
+			return h.phaseUpgradeTeam(previousPaidRelease, *license)
 		}})
 		phases = append(phases, phase{"ha", func() error { return h.phaseHA(*license) }})
 		// Last, because it bootstraps an install of its own, and bootstrap replaces the two actors
@@ -143,6 +150,13 @@ func run() int {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
+	}
+	if slices.Contains(phaseNames(phases), "upgrade-team") {
+		previousPaidRelease, err = resolvePreviousPaid(*prevPaidImage, repo)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
 	}
 
 	for i, ph := range phases {

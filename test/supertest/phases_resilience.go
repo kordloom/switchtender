@@ -553,8 +553,25 @@ func (h *harness) phaseRollback(prevImage string) error {
 // a dedicated worker, upgraded in place. The Community upgrade proof left the paid tier's upgrade
 // as an inference, and an inference is not a proof: the schema is initialized by the old binary,
 // written by real work, and must be read whole by the new one.
-func (h *harness) phaseUpgradeTeam(prevImage, license string) error {
+//
+// It starts from the previous paid release, never the previous public image alone: since the paid
+// wall, the public image is the Community build, which refuses the dedicated worker this shape
+// runs.
+func (h *harness) phaseUpgradeTeam(prev previousPaid, license string) error {
 	const phase = "upgrade-team"
+	prevImage := prev.Image
+	if prev.Ref != "" {
+		if err := h.buildPreviousPaid(prev); err != nil {
+			return err
+		}
+	} else if _, err := h.run("docker", "image", "inspect", prevImage); err != nil {
+		if out, err := h.run("docker", "pull", prevImage); err != nil {
+			return fmt.Errorf("pull previous paid release %s: %w\n%s", prevImage, err, out)
+		}
+	}
+	if out, err := h.run("kind", "load", "docker-image", prevImage, "--name", h.cluster); err != nil {
+		return fmt.Errorf("load %s: %w\n%s", prevImage, err, out)
+	}
 	if _, err := h.kubectl("create", "namespace", "upteam"); err != nil {
 		return err
 	}
@@ -603,7 +620,8 @@ func (h *harness) phaseUpgradeTeam(prevImage, license string) error {
 		return fmt.Errorf("helm install team-shape %s: %w\n%s\n%s", prevImage, err, out,
 			h.installForensics("upteam"))
 	}
-	h.pass(phase, "the previous release initialized a licensed PostgreSQL install", prevImage)
+	h.pass(phase, "the previous paid release installed with a license and a dedicated worker",
+		prevImage)
 
 	service, err := h.serviceName("upteam")
 	if err != nil {
