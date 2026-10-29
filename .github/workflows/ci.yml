@@ -105,7 +105,8 @@ jobs:
           "$helm" template t deploy/helm/switchtender --set encryptionKey=k --set encryptionSalt=s > /tmp/community.yaml
           "$helm" template t deploy/helm/switchtender --set encryptionKey=k --set encryptionSalt=s \
             --set database.dsn=postgres://u:p@postgres/db --set auditKey=aa \
-            --set license=LIC --set worker.enabled=true > /tmp/team.yaml
+            --set license=LIC --set worker.enabled=true \
+            --set image.repository=registry.example/switchtender-paid > /tmp/team.yaml
           # The chart must name the published image, not a bare name Kubernetes reads as Docker Hub.
           grep -q 'image: "ghcr.io/kordloom/switchtender:' /tmp/community.yaml
           # Readiness must ask whether the store is reachable, not merely whether the process is up.
@@ -139,8 +140,9 @@ jobs:
           test "$(grep -c 'helm.sh/resource-policy: keep' /tmp/community.yaml)" = "2"
           grep -q 'checksum/secret:' /tmp/community.yaml
           # The shapes that cannot work refuse at render time, each with its sentence: two SQLite
-          # writers, a worker with no shared database, and a PostgreSQL install with no signing
-          # identity.
+          # writers, a worker with no shared database, a PostgreSQL install with no signing
+          # identity, a worker with no license, and a worker on the Community image, which has no
+          # worker in it.
           refuse() {
             if "$helm" template t deploy/helm/switchtender --set encryptionKey=k \
                 --set encryptionSalt=s "$@" >/dev/null 2>&1; then
@@ -150,7 +152,10 @@ jobs:
           refuse --set server.replicas=2
           refuse --set worker.enabled=true
           refuse --set database.dsn=postgres://u:p@postgres/db
-          refuse --set database.dsn=postgres://u:p@postgres/db --set auditKey=aa --set worker.enabled=true
+          refuse --set database.dsn=postgres://u:p@postgres/db --set auditKey=aa --set worker.enabled=true \
+            --set image.repository=registry.example/switchtender-paid
+          refuse --set database.dsn=postgres://u:p@postgres/db --set auditKey=aa --set worker.enabled=true \
+            --set license=LIC
           # An image older than the release that reads SWITCHTENDER_DB would run on SQLite against
           # PostgreSQL, so the chart refuses it, with or without the v prefix.
           refuse --set database.dsn=postgres://u:p@postgres/db --set auditKey=aa --set image.tag=1.100.0

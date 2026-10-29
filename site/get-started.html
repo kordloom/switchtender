@@ -167,7 +167,7 @@ switchtender token revoke &lt;initial-token-id&gt; --db switchtender.db</code></
 				</li>
 			</ol>
 			<div class="gs-callout reveal">
-				<p><strong>On Kubernetes?</strong> The Helm chart in the repository runs the same binary as an ordinary Deployment, with no operator: one server on SQLite with the whole install on a persistent volume, or active-active servers on PostgreSQL, with dedicated workers on a Team license, from the paid build. Write the keys to a file first and keep it, because every stored credential is sealed against them, and pass the same file to every upgrade:</p>
+				<p><strong>On Kubernetes?</strong> The Helm chart in the repository runs the same binary as an ordinary Deployment, with no operator: one server on SQLite with the whole install on a persistent volume, or active-active servers on PostgreSQL. Dedicated workers on a Team license run the paid image, which comes with the paid download for you to load into your own registry. Write the keys to a file first and keep it, because every stored credential is sealed against them, and pass the same file to every upgrade:</p>
 				<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>git clone https://github.com/kordloom/switchtender
 cd switchtender
 printf 'encryptionKey: "%s"\nencryptionSalt: "%s"\nauditKey: "%s"\n' \

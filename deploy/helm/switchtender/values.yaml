@@ -11,7 +11,8 @@ image:
   # repository is the published multi-arch image. A bare name here is not a shorthand for this
   # project: Kubernetes resolves "switchtender" to docker.io/library/switchtender, a Docker Hub
   # official-images name that belongs to nobody, so every pod went ImagePullBackOff while the real
-  # image sat published on ghcr.
+  # image sat published on ghcr. That image is the Community build. A Team install with dedicated
+  # workers sets this to the paid image, loaded from the paid download into its own registry.
   repository: ghcr.io/kordloom/switchtender
   # tag defaults to the chart appVersion when empty. With database.dsn set, a tag older than
   # 1.101.0 is refused: those releases do not read SWITCHTENDER_DB and would run on SQLite.
@@ -37,7 +38,10 @@ worker:
   # enabled deploys dedicated workers alongside the server. Off by default, because a worker is
   # distributed execution, which is Team: without a license the process refuses to start, so the
   # chart's own default produced a pod that crash-looped on a Community install. The server runs
-  # everything itself, which is what Community is for. Turn this on with a license set.
+  # everything itself, which is what Community is for. Turn this on with a license set and with
+  # image.repository and image.tag naming the paid image: the paid download carries it as an OCI
+  # archive per architecture, which you load into your own registry. The Community image on ghcr has
+  # no worker in it, and the chart refuses it here.
   enabled: false
   # replicas runs this many workers.
   replicas: 1

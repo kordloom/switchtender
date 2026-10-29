@@ -240,8 +240,11 @@ service user alone:
 
 Sign in with it, create named accounts and tokens, and delete it.
 
-Point `database.dsn` at PostgreSQL to run more than one server, and on a Team license set
-`worker.enabled=true` for dedicated workers. Pass the license with
+Point `database.dsn` at PostgreSQL to run more than one server. Dedicated workers are Team, and
+they need the paid image as well as the license: the image on ghcr is the Community build, which has
+no worker in it, and the chart refuses `worker.enabled=true` on it. The paid download carries the
+paid image as an OCI archive per architecture. Load it into your own registry, then set
+`image.repository` and `image.tag` to it beside `worker.enabled=true`. Pass the license with
 `--set-file license=switchtender-license.json`: `--set` parses commas and braces and changes it. The
 DSN reaches the pods from a Secret rather than as an argument, so the password is not in the pod
 spec.

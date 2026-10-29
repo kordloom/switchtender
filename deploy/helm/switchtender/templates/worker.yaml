@@ -3,7 +3,10 @@
 {{- fail "Dedicated workers coordinate through a shared PostgreSQL database. Set database.dsn, or leave worker.enabled false and let the server run everything itself." }}
 {{- end }}
 {{- if and (not .Values.license) (not .Values.existingSecret) }}
-{{- fail "Dedicated workers are distributed execution, which is Team: without a license the worker process refuses to start and the pod crash-loops. Set license, or point existingSecret at a Secret carrying license.jwt." }}
+{{- fail "Dedicated workers are distributed execution, which is Team: they need the paid image and a license, and without a license the worker process refuses to start and the pod crash-loops. Set license, or point existingSecret at a Secret carrying license.jwt." }}
+{{- end }}
+{{- if eq .Values.image.repository "ghcr.io/kordloom/switchtender" }}
+{{- fail "Dedicated workers need the paid image. ghcr.io/kordloom/switchtender is the Community build, which has no worker in it, so the pod would crash-loop with a license installed. Load the paid image from the paid download into your own registry and set image.repository and image.tag (or image.digest) to it." }}
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment
