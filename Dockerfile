@@ -11,13 +11,17 @@ ENV GOTOOLCHAIN=auto
 ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
+# The defaults build the Community binary from the root package. The paid pipeline, with the paid
+# module mounted and its go.mod in place, sets BUILD_TAGS=paid and MAIN to the module's entry point.
+ARG BUILD_TAGS=
+ARG MAIN=.
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -tags "$BUILD_TAGS" \
     -ldflags "-s -w -X github.com/kordloom/switchtender/cmd.Version=$VERSION -X github.com/kordloom/switchtender/cmd.BuildChannel=container" \
-    -o /switchtender .
+    -o /switchtender "$MAIN"
 
 # 3.20 left support on 2026-04-01, so the image stopped receiving security patches while it was
 # still being built and published. Track a supported branch and move it on before the next lapses.

@@ -119,15 +119,20 @@ func TestTheReportStatesWhichTiersActuallyRan(t *testing.T) {
 	tests := []struct {
 		WantContains string
 		SkipTeam     bool
+		Paid         bool
 	}{{ // Test 0: Both tiers exercised.
-		SkipTeam: false, WantContains: "both install tiers",
+		SkipTeam: false, Paid: true, WantContains: "both install tiers",
 	}, { // Test 1: The Team tier was skipped and the report has to say so.
 		SkipTeam: true, WantContains: "the Team tier was NOT exercised",
+	}, { // Test 2: The report names the paid build it tested.
+		SkipTeam: false, Paid: true, WantContains: "the paid build",
+	}, { // Test 3: The report names the Community build it tested.
+		SkipTeam: true, Paid: false, WantContains: "the Community build",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			h := &harness{skipTeam: test.SkipTeam}
+			h := &harness{skipTeam: test.SkipTeam, paid: test.Paid}
 			if got := h.renderReport(); !strings.Contains(got, test.WantContains) {
 				t.Errorf("report does not say %q:\n%s", test.WantContains, got)
 			}

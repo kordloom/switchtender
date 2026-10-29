@@ -13,7 +13,12 @@
 // module, state confined to one working directory and one named cluster that teardown removes.
 // Run it from the repository root:
 //
-//	go run ./test/supertest -license path/to/team-license.json
+//	go run ./test/supertest -paid -license path/to/team-license.json
+//	go run ./test/supertest -skip-team
+//
+// The Team phases need the paid build, which carries the code the Team tier sells, so they run
+// with -paid from a checkout that has the paid module mounted and its superset go.mod in place.
+// A public clone runs the Community tier with -skip-team.
 package main
 
 import (
@@ -47,6 +52,9 @@ func run() int {
 		"Team license file for the paid-tier phase. Also read from SUPERTEST_LICENSE_FILE.")
 	skipTeam := flag.Bool("skip-team", false,
 		"Run only the Community phases. Without a license this is the honest mode, and it says so.")
+	paid := flag.Bool("paid", false,
+		"Build the binary and the image from the paid module mounted at "+paidModule+
+			", with the paid build tag. The Team phases need it.")
 	prevImage := flag.String("prev-image", "",
 		"Previous release image the upgrade phase starts from. Empty resolves the newest v* tag.")
 	shots := flag.String("shots", "", "Directory to write UI screenshots into. Empty skips them.")
@@ -74,12 +82,17 @@ func run() int {
 		httpc:      &http.Client{Timeout: 60 * time.Second},
 		keep:       *keep,
 		skipTeam:   *skipTeam,
+		paid:       *paid,
 	}
 	defer h.teardown()
 
 	if !*skipTeam && *license == "" {
 		fmt.Fprintln(os.Stderr, "no Team license: pass -license or set SUPERTEST_LICENSE_FILE, "+
 			"or run with -skip-team to test the Community tier alone")
+		return 1
+	}
+	if err := checkBuild(repo, *paid, *skipTeam); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 
@@ -202,7 +215,12 @@ func (h *harness) renderReport() string {
 	if h.skipTeam {
 		tiers = "the Community tier only (-skip-team: the Team tier was NOT exercised)"
 	}
-	b.WriteString("A fresh Kind cluster, " + tiers + ", three real SSH machines, and no ")
+	build := "the Community build"
+	if h.paid {
+		build = "the paid build"
+	}
+	b.WriteString("A fresh Kind cluster, " + build + ", " + tiers +
+		", three real SSH machines, and no ")
 	b.WriteString("assertion that trusts the product's own word for what happened.\n\n")
 	b.WriteString("| | Phase | Claim | Evidence |\n|---|---|---|---|\n")
 	for _, c := range h.checks {

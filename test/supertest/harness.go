@@ -42,6 +42,9 @@ type harness struct {
 	// skipTeam records that the Team tier was not exercised, so the report says what ran rather
 	// than what usually runs.
 	skipTeam bool
+	// paid records that the binary and the image were built from the paid module, so the report
+	// names the build it tested.
+	paid bool
 	// api is the base URL of whichever install is currently port-forwarded.
 	api string
 	// forward is the running port-forward process, ended before the next one starts.

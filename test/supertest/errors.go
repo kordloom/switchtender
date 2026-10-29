@@ -28,3 +28,13 @@ var (
 	// came back, no receipt was written. The claim would otherwise hold over an empty set.
 	ErrNothingRead = errors.New("nothing was read, so the property was never asked")
 )
+
+// The failures below refuse a run before it starts, because the build it would test cannot pass the
+// phases it was asked for.
+var (
+	// ErrPaidModuleMissing is returned when -paid is asked of a checkout without the paid module.
+	ErrPaidModuleMissing = errors.New("the paid module is not mounted")
+	// ErrTeamNeedsPaid is returned when the Team phases are asked of the Community build. The
+	// Community build refuses every Team feature by naming the tier, so those phases could only fail.
+	ErrTeamNeedsPaid = errors.New("the Team phases need the paid build")
+)

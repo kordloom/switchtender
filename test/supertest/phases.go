@@ -48,12 +48,14 @@ var fleetHosts = []struct {
 func (h *harness) phaseCluster() error {
 	const phase = "cluster"
 
-	if out, err := h.run("go", "build", "-o", h.bin, "."); err != nil {
+	tags, main := buildTarget(h.paid)
+	if out, err := h.run("go", "build", "-tags", tags, "-o", h.bin, main); err != nil {
 		return fmt.Errorf("build local binary: %w\n%s", err, out)
 	}
 	h.pass(phase, "the working tree builds", "the same binary later verifies receipts offline")
 
-	if out, err := h.run("docker", "build", "-t", "switchtender:supertest", h.repo); err != nil {
+	if out, err := h.run("docker", "build", "-t", "switchtender:supertest",
+		"--build-arg", "BUILD_TAGS="+tags, "--build-arg", "MAIN="+main, h.repo); err != nil {
 		return fmt.Errorf("build product image: %w\n%s", err, out)
 	}
 	h.pass(phase, "the product image builds from the repository Dockerfile", "")
