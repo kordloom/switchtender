@@ -247,8 +247,9 @@ type RegoProgram interface {
 	Package() string
 	// Reads reports whether the modules reference the named top-level input field.
 	Reads(field string) bool
-	// Decide evaluates the bundle against r.
-	Decide(r *run.Run) RegoDecision
+	// Evaluate evaluates the bundle against r once, with the input r describes. The caller owns any
+	// second pass, such as judging a dry run again as the real run it partly is.
+	Evaluate(r *run.Run) RegoDecision
 }
 
 // RegoCompiler compiles Rego bundles. A Community build refuses naming Team.

@@ -7,21 +7,19 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-// TestDryRunThatForcesRealWorkIsHeldUnderYAMLAndRego is scenario twelve. AWX exports two check-mode
-// templates: one whose playbook marks a task check_mode: false, so its dry run still writes, and
-// one that changes nothing. A rule that exempts dry runs, written as a YAML exclude_dry_run rule or
-// as the equivalent Rego module, has to hold the first and let the second through. The record of
-// the held one has to say what the gate's scan read and found, the hold has to name the two clean
-// fixes, and the record has to say who released it.
-func TestDryRunThatForcesRealWorkIsHeldUnderYAMLAndRego(t *testing.T) {
+// TestDryRunThatForcesRealWorkIsHeld is scenario twelve. AWX exports two check-mode templates: one
+// whose playbook marks a task check_mode: false, so its dry run still writes, and one that changes
+// nothing. A rule that exempts dry runs, written as a YAML exclude_dry_run rule, has to hold the
+// first and let the second through. The record of the held one has to say what the gate's scan read
+// and found, the hold has to name the two clean fixes, and the record has to say who released it.
+// The same rule written in Rego is checked by the paid build.
+func TestDryRunThatForcesRealWorkIsHeld(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		// Name labels the policy language.
 		Name string
 		// Policy is the policy file.
 		Policy string
-		// Rego are its modules.
-		Rego map[string]string
 		// WantRule is a fragment of the recorded rule that held the forcing dry run.
 		WantRule string
 		// WantFix is the hold note's second fix, worded for the policy language.
@@ -35,23 +33,11 @@ func TestDryRunThatForcesRealWorkIsHeldUnderYAMLAndRego(t *testing.T) {
 `,
 		WantRule: "ansible-changes-wait: requires approval",
 		WantFix:  `drop exclude_dry_run from "ansible-changes-wait"`,
-	}, {
-		Name:   "rego",
-		Policy: "rego:\n  - name: ansible-changes-wait\n    files: [rego/changes.rego]\n",
-		Rego: map[string]string{"rego/changes.rego": `package switchtender
-
-hold contains "an Ansible change waits for a person" if {
-	input.run.tool == "ansible"
-	not input.run.dry_run
-}
-`},
-		WantRule: "ansible-changes-wait: decided by Rego package data.switchtender, bundle sha256:",
-		WantFix:  `stop exempting dry runs in the module of "ansible-changes-wait"`,
 	}}
 	for _, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {
 			t.Parallel()
-			in := newInstall(t, installOptions{Store: onSQLite, Policy: test.Policy, Rego: test.Rego})
+			in := newInstall(t, installOptions{Store: onSQLite, Policy: test.Policy})
 			s := in.startServer("a")
 
 			clean := in.launched(s, "operator", "preview clean", nil)

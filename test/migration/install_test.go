@@ -117,8 +117,6 @@ type installOptions struct {
 	Store storeKind
 	// Policy is the policy file's text, empty for an install with no policy file.
 	Policy string
-	// Rego are files written beside the policy file, by path relative to it.
-	Rego map[string]string
 	// ImportArgs are extra arguments the import runs with, such as AWX's job template list.
 	ImportArgs []string
 }
@@ -151,7 +149,7 @@ func newInstall(t *testing.T, opts installOptions) *install {
 	}
 	in.env = in.childEnv()
 	if opts.Policy != "" {
-		in.writePolicy(opts.Policy, opts.Rego)
+		in.writePolicy(opts.Policy)
 	}
 
 	repo := buildRepository(t, filepath.Join(root, "repo"))
@@ -303,22 +301,13 @@ func tokenFrom(t *testing.T, out string) string {
 	return ""
 }
 
-// writePolicy writes the policy file the servers read, and the Rego modules beside it. A running
-// server picks up the change without a restart.
-func (in *install) writePolicy(text string, rego map[string]string) {
+// writePolicy writes the policy file the servers read. A running server picks up the change without
+// a restart.
+func (in *install) writePolicy(text string) {
 	in.t.Helper()
 	dir := filepath.Join(in.root, "policy")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		in.t.Fatalf("create the policy directory: %v", err)
-	}
-	for rel, body := range rego {
-		path := filepath.Join(dir, rel)
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-			in.t.Fatalf("create %s: %v", filepath.Dir(path), err)
-		}
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-			in.t.Fatalf("write %s: %v", rel, err)
-		}
 	}
 	in.policyPath = filepath.Join(dir, "policies.yaml")
 	if err := os.WriteFile(in.policyPath, []byte(text), 0o600); err != nil {

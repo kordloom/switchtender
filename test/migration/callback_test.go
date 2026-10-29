@@ -16,19 +16,11 @@ const awxTemplateList = "testdata/awx-job-templates.json"
 // awxProvisionID is the AWX job template id the fixture's provision template had in AWX.
 const awxProvisionID = "7"
 
-// callbackPolicy holds every host-initiated run for a person, written in Rego so the gate a
-// callback passes through is the one a migrated OPA rule would be.
-const callbackPolicy = `rego:
+// callbackPolicy holds every Ansible run for a person. The only runs this scenario launches are
+// the callbacks, so it is the gate a callback passes through, and it is the rule every build loads.
+const callbackPolicy = `policies:
   - name: callbacks-wait
-    files: [rego/callbacks.rego]
-`
-
-// callbackRego is the module callbackPolicy loads.
-const callbackRego = `package switchtender
-
-hold contains "a host called back, and a person confirms what it provisions" if {
-	input.run.source == "callback"
-}
+    tool: ansible
 `
 
 // TestImportedProvisioningCallbackIsGatedAndNamesTheHost is scenario seven. AWX exports a template
@@ -61,7 +53,6 @@ func testImportedProvisioningCallback(t *testing.T, store storeKind) {
 		t.Fatalf("locate the AWX template list: %v", err)
 	}
 	in := newInstall(t, installOptions{Store: store, Policy: callbackPolicy,
-		Rego:       map[string]string{"rego/callbacks.rego": callbackRego},
 		ImportArgs: []string{"--awx-template-ids", list}})
 	s := in.startServer("a", "--trusted-proxy", "127.0.0.1/32")
 	replica := s
@@ -134,7 +125,7 @@ func testImportedProvisioningCallback(t *testing.T, store storeKind) {
 	rec := ev.Receipts[id]
 	requireRecord(t, rec, recordWant{
 		Launcher: actor, LauncherType: "host", Approver: "approver-laptop", Playbook: "mark.yml",
-		Hosts: []string{"web2"}, Rules: []string{"callbacks-wait: decided by Rego package"},
+		Hosts: []string{"web2"}, Rules: []string{"callbacks-wait: requires approval"},
 	})
 	if got := str(rec.outcome(t).Spec["limit"]); got != "web2" {
 		t.Errorf("the receipt binds limit %q, want web2", got)
@@ -145,7 +136,7 @@ func testImportedProvisioningCallback(t *testing.T, store storeKind) {
 	awxRec := ev.Receipts[awxID]
 	requireRecord(t, awxRec, recordWant{
 		Launcher: awxActor, LauncherType: "host", Approver: "approver-laptop", Playbook: "mark.yml",
-		Hosts: []string{"web1"}, Rules: []string{"callbacks-wait: decided by Rego package"},
+		Hosts: []string{"web1"}, Rules: []string{"callbacks-wait: requires approval"},
 	})
 	want := "/v1/templates/" + tpl + "/callback/fired/awx/" + awxProvisionID
 	if launch := awxRec.launch(t); launch.Path != want {

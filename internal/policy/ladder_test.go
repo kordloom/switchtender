@@ -23,6 +23,20 @@ func ladderLicense(tier string, expires time.Duration) *license.License {
 	}}
 }
 
+// uncompiledRego returns a Rego program as a build without the paid compiler holds one that arrived
+// from elsewhere: its bundle and digest intact, nothing to evaluate it with. The tier predicates read
+// whether a policy carries a bundle, never what the bundle says.
+func uncompiledRego() *RegoProgram {
+	modules := []RegoModule{{
+		File: "gate.rego", Source: "package switchtender\n\nhold contains \"held\" if true\n",
+	}}
+	return &RegoProgram{
+		pkg: "data.switchtender", syntax: RegoSyntaxV1, modules: modules,
+		digest:  RegoDigest("data.switchtender", RegoSyntaxV1, modules),
+		timeout: DefaultRegoTimeout, warn: RegoWarnHold,
+	}
+}
+
 // TestTheLadderSplitsOnOnePredicatePair holds every rule to one answer about its tier. Deny rules
 // and the risk and reversibility floors are Pro. Rego, separation of duties, and actor, actor kind,
 // and account scoping are Team. An exemption is neither, whatever it carries: it is the free way
@@ -30,7 +44,7 @@ func ladderLicense(tier string, expires time.Duration) *license.License {
 // refused as invalid rather than sold.
 func TestTheLadderSplitsOnOnePredicatePair(t *testing.T) {
 	t.Parallel()
-	rego := mustCompileRego(t, "hold contains \"held\" if true")
+	rego := uncompiledRego()
 	tests := []struct {
 		// Policy is the rule classified.
 		Policy Policy

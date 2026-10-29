@@ -69,7 +69,7 @@ func TestEveryMatchingCriterionBeyondTheBlanketGateIsLicensed(t *testing.T) {
 				t.Errorf("field %q is a pointer this guard does not know; classify it above", name)
 				continue
 			}
-			v.Set(reflect.ValueOf(mustCompileRego(t, "hold contains \"held\" if true")))
+			v.Set(reflect.ValueOf(uncompiledRego()))
 		default:
 			t.Errorf("field %q is neither a string nor a bool, so this guard cannot classify it; "+
 				"decide whether it is part of the blanket gate and add it above", name)

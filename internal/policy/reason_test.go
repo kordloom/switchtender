@@ -57,22 +57,6 @@ func TestReasonRequirementComposesAcrossRules(t *testing.T) {
 	}
 }
 
-// TestARegoPolicyAsksForAReasonWhenItHolds pins that a reason requirement set beside a Rego policy
-// applies to the runs that policy holds and to no other.
-func TestARegoPolicyAsksForAReasonWhenItHolds(t *testing.T) {
-	t.Parallel()
-	p := regoPolicy(t, "prod", `hold contains "production" if contains(input.run.command, "prod")`)
-	p.RequireReason = "always"
-	if got := ReasonRequirement([]*Policy{p}, &run.Run{Tool: run.ToolBash,
-		Command: "deploy prod"}); got != "always" {
-		t.Errorf("held run requirement = %q, want always", got)
-	}
-	if got := ReasonRequirement([]*Policy{p}, &run.Run{Tool: run.ToolBash,
-		Command: "deploy staging"}); got != "" {
-		t.Errorf("unheld run requirement = %q, want none", got)
-	}
-}
-
 // TestRequireReasonIsValidatedWhereItIsWritten pins that a misspelled requirement is refused rather
 // than quietly asking for nothing.
 func TestRequireReasonIsValidatedWhereItIsWritten(t *testing.T) {

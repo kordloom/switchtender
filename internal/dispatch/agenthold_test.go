@@ -540,12 +540,6 @@ func TestAnAgentsApplyTakesTwoApprovals(t *testing.T) {
 		Reversibility: run.Irreversible, MaxDestroy: policy.DisabledMaxDestroy}
 	exempt := &policy.Policy{ID: "pol_tf", Name: "tf agent", Tool: run.ToolTerraform,
 		Effect: policy.EffectExempt, MaxDestroy: policy.DisabledMaxDestroy}
-	regoGate := `plan_gate if input.run.tool == "terraform"
-
-hold contains msg if {
-	input.plan.destroys > 3
-	msg := "plan destroys more than 3"
-}`
 	tests := []struct {
 		// Rules builds the policy store, nil for an install with none.
 		Rules func(t *testing.T) policy.Store
@@ -568,17 +562,14 @@ hold contains msg if {
 		Rules:  func(t *testing.T) policy.Store { return dispatchtest.RulesHolding(t, floor) },
 		Config: dispatchtest.CleanConfig, Opts: dispatchtest.AgentOpts(), WantTwoSteps: true,
 		WantProposalHeldBy: "irreversible needs a person",
-	}, { // Test 3: With a Rego plan gate in force.
-		Rules:  func(t *testing.T) policy.Store { return regoStore(t, regoGate) },
-		Config: dispatchtest.CleanConfig, Opts: dispatchtest.AgentOpts(), WantTwoSteps: true,
-	}, { // Test 4: With a configuration that runs a program while it plans.
+	}, { // Test 3: With a configuration that runs a program while it plans.
 		Config: dispatchtest.ExternalConfig, Opts: dispatchtest.AgentOpts(), WantTwoSteps: true,
-	}, { // Test 5: A person's apply applies as it always did, the control.
+	}, { // Test 4: A person's apply applies as it always did, the control.
 		Config: dispatchtest.CleanConfig, Opts: dispatchtest.PersonOpts(),
-	}, { // Test 6: An exempt agent's apply applies as the exemption allows.
+	}, { // Test 5: An exempt agent's apply applies as the exemption allows.
 		Rules:  func(t *testing.T) policy.Store { return dispatchtest.RulesHolding(t, exempt) },
 		Config: dispatchtest.CleanConfig, Opts: dispatchtest.AgentOpts(),
-	}, { // Test 7: Under a destroy limit it plans first and its proposal goes ahead.
+	}, { // Test 6: Under a destroy limit it plans first and its proposal goes ahead.
 		Rules:  func(t *testing.T) policy.Store { return dispatchtest.RulesHolding(t, exempt, limit) },
 		Config: dispatchtest.CleanConfig, Opts: dispatchtest.AgentOpts(), WantProposal: true,
 	}}

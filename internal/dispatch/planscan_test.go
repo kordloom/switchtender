@@ -178,48 +178,6 @@ func TestARuleHoldingEveryPlanNamesNoFix(t *testing.T) {
 	}
 }
 
-// TestARegoExemptionHoldsAPlanThatRunsAProgram covers the same exemption written in Rego, the way
-// a porter writes an exclude_dry_run rule: exempt input.run.dry_run. The plan is judged as the real
-// run it may be, so the module holds it, and the note's second fix is worded for a module.
-func TestARegoExemptionHoldsAPlanThatRunsAProgram(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	rules := regoStore(t, `hold contains "infrastructure waits for a person" if {
-	input.run.tool == "terraform"
-	not input.run.dry_run
-}`)
-	tests := []struct {
-		Config   string
-		WantHeld bool
-	}{{ // Test 0: A clean plan passes.
-		Config: dispatchtest.CleanConfig,
-	}, { // Test 1: A plan that runs a program is held.
-		Config: dispatchtest.ExternalConfig, WantHeld: true,
-	}}
-	for testNum, test := range tests {
-		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
-			t.Parallel()
-			dir := t.TempDir()
-			dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": test.Config})
-			d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithPolicies(rules),
-				WithNoJanitor())
-			t.Cleanup(d.Close)
-			got, err := d.Submit(ctx, "", "", run.WithTool(run.ToolTerraform), run.WithCommand(dir),
-				run.WithDryRun(true))
-			if err != nil {
-				t.Fatalf("Submit() error = %v", err)
-			}
-			if held := got.Status == run.StatusPendingApproval; held != test.WantHeld {
-				t.Fatalf("held = %v, want %v", held, test.WantHeld)
-			}
-			if test.WantHeld && !strings.Contains(got.HoldNote, "stop exempting dry runs in the "+
-				`module of "rego gate"`) {
-				t.Errorf("hold note %q does not name the module's fix", got.HoldNote)
-			}
-		})
-	}
-}
-
 // TestAProjectPlanIsReadAtTheCommitItRuns covers a plan drawn from a project, which is how a
 // template, a schedule, a webhook, or an agent proposes one. The gate fetches the project and reads
 // the configuration at the commit about to run, so an external data source pushed a moment before

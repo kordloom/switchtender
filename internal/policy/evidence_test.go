@@ -12,6 +12,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/policytest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -284,13 +285,9 @@ func TestEveryPolicyFieldMovesTheDigestOrIsExemptByName(t *testing.T) {
 				v.Set(reflect.ValueOf(base.CreatedAt.Add(time.Hour)))
 			case reflect.TypeOf(&policy.RegoProgram{}):
 				// Attaching a Rego bundle changes what the rule decides, so it has to show.
-				prog, err := policy.CompileRego("", "", []policy.RegoModule{{
+				v.Set(reflect.ValueOf(policytest.StoredRego(t, policy.RegoModule{
 					File: "ratchet.rego", Source: "package switchtender\n\nhold contains \"x\" if true\n",
-				}})
-				if err != nil {
-					t.Fatalf("CompileRego() error = %v", err)
-				}
-				v.Set(reflect.ValueOf(prog))
+				})))
 			default:
 				t.Fatalf("Policy.%s has kind %s this walk cannot edit; teach it that kind",
 					field.Name, field.Type.Kind())

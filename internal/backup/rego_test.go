@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/policytest"
 )
 
 // TestCheckRefusesARegoPolicy asserts a restore refuses a backup carrying a Rego policy before
@@ -14,16 +15,14 @@ import (
 // holds one, and a database store has nowhere to put the modules: written through, the name would
 // land without the bundle, as a rule with no criteria that holds every run.
 //
-// The policy is decoded from JSON, the way a backup file is read, so the bundle is compiled on the
-// way in exactly as it would be from a crafted file.
+// The policy is decoded from JSON, the way a backup file is read, so the bundle is rebuilt on the
+// way in exactly as it would be from a crafted file, compiled where the build can and held
+// uncompiled where it cannot. The refusal is the same either way.
 func TestCheckRefusesARegoPolicy(t *testing.T) {
 	t.Parallel()
-	prog, err := policy.CompileRego("", "", []policy.RegoModule{{
+	prog := policytest.StoredRego(t, policy.RegoModule{
 		File: "gate.rego", Source: "package switchtender\n\nhold contains \"x\" if true\n",
-	}})
-	if err != nil {
-		t.Fatalf("CompileRego() error = %v", err)
-	}
+	})
 	raw, err := json.Marshal(&payload{Policies: []*policy.Policy{{
 		ID: "pol_r", Name: "rego gate", MaxDestroy: policy.DisabledMaxDestroy, Rego: prog,
 	}}})

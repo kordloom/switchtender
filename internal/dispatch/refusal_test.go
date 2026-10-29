@@ -31,14 +31,6 @@ type refusalEntry struct {
 // and the rule in force could be edited a minute later.
 func TestADenyPolicyRecordsItsRefusalInTheChain(t *testing.T) {
 	t.Parallel()
-	rego := regoStore(t, `deny contains "agents may not run bash" if {
-	input.actor.kind == "agent"
-	input.run.tool == "bash"
-}`)
-	listed, err := rego.List(context.Background())
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
-	}
 	yaml := policy.NewMemStore()
 	if err := yaml.Save(context.Background(), &policy.Policy{
 		ID: policy.NewID(), Name: "no agent bash/shells", ActorKind: policy.ActorKindAgent,
@@ -53,19 +45,13 @@ func TestADenyPolicyRecordsItsRefusalInTheChain(t *testing.T) {
 		Steps []run.PipelineStep
 		// WantEntries are the refusals the chain must hold.
 		WantEntries []refusalEntry
-	}{{ // Test 0: A Rego refusal names the policy and the full bundle digest.
-		Policies: rego,
-		WantEntries: []refusalEntry{{
-			Actor: "system:policy", ActorType: "system", OnBehalfOf: "bot",
-			Suffix: "/decision/refused/rego/sha256:" + listed[0].Rego.Digest() + "/policy/rego gate",
-		}},
-	}, { // Test 1: A YAML refusal names the rule, and carries no bundle.
+	}{{ // Test 0: A YAML refusal names the rule, and carries no bundle.
 		Policies: yaml,
 		WantEntries: []refusalEntry{{
 			Actor: "system:policy", ActorType: "system", OnBehalfOf: "bot",
 			Suffix: "/decision/refused/policy/no agent bash/shells",
 		}},
-	}, { // Test 2: A workflow refused for one of its steps records the refusal on the workflow.
+	}, { // Test 1: A workflow refused for one of its steps records the refusal on the workflow.
 		Policies: yaml,
 		Steps:    []run.PipelineStep{{Name: "shell", Tool: "bash", Command: "uptime"}},
 		WantEntries: []refusalEntry{{

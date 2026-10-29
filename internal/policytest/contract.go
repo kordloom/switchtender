@@ -318,13 +318,10 @@ func policyProbeString(field string) string {
 func testRegoRefused(t *testing.T, store policy.Store) {
 	t.Helper()
 	ctx := context.Background()
-	prog, err := policy.CompileRego("", "", []policy.RegoModule{{
+	prog := StoredRego(t, policy.RegoModule{
 		File:   "gate.rego",
 		Source: "package switchtender\n\nhold contains \"every run\" if true\n",
-	}})
-	if err != nil {
-		t.Fatalf("CompileRego() error = %v", err)
-	}
+	})
 	p := &policy.Policy{
 		ID: policy.NewID(), Name: "rego gate", MaxDestroy: policy.DisabledMaxDestroy, Rego: prog,
 		CreatedAt: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
