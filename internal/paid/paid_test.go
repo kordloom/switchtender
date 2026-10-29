@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/kordloom/switchtender/internal/license"
-	"github.com/kordloom/switchtender/internal/run"
 )
 
 // TestStubsRefuseNamingTheTier checks that every Community stub refuses with ErrRequiresTier and
@@ -39,37 +38,25 @@ func TestStubsRefuseNamingTheTier(t *testing.T) {
 			_, err := CurrentRegoCompiler().Compile(nil, RegoSettings{})
 			return err
 		},
-	}, { // Test 5: a deny rule is Pro.
-		Name: "deny rule", WantTier: "Pro", WantGate: "deny rules",
-		Call: func() error {
-			_, err := CurrentRuleEvaluator().Matches(&run.Run{}, RuleCriteria{Effect: "deny"})
-			return err
-		},
-	}, { // Test 6: actor scoping is Team.
-		Name: "actor scope", WantTier: "Team", WantGate: "the full policy engine",
-		Call: func() error {
-			_, err := CurrentRuleEvaluator().Matches(&run.Run{}, RuleCriteria{Actor: "bot"})
-			return err
-		},
-	}, { // Test 7: the register emitter is Team.
+	}, { // Test 5: the register emitter is Team.
 		Name: "emitter", WantTier: "Team", WantGate: "the period change register",
 		Call: func() error { _, err := CurrentChangeRegister().NewEmitter(EmitterConfig{}); return err },
-	}, { // Test 8: rendering the register is Team.
+	}, { // Test 6: rendering the register is Team.
 		Name: "render", WantTier: "Team", WantGate: "the period change register",
 		Call: func() error {
 			_, err := CurrentChangeRegister().Render(ctx, RegisterSource{}, RegisterPeriod{})
 			return err
 		},
-	}, { // Test 9: building the register is Team.
+	}, { // Test 7: building the register is Team.
 		Name: "build", WantTier: "Team", WantGate: "the period change register",
 		Call: func() error {
 			_, err := CurrentChangeRegister().Build(ctx, RegisterSource{}, RegisterPeriod{})
 			return err
 		},
-	}, { // Test 10: the worker is Team.
+	}, { // Test 8: the worker is Team.
 		Name: "worker", WantTier: "Team", WantGate: "running distributed workers",
 		Call: func() error { return CurrentWorker().Run(ctx, WorkerConfig{}) },
-	}, { // Test 11: reconcile is Team.
+	}, { // Test 9: reconcile is Team.
 		Name: "reconcile", WantTier: "Team", WantGate: "one-click drift reconcile",
 		Call: func() error { _, err := CurrentReconciler().Propose(ctx, ReconcileRequest{}); return err },
 	}}

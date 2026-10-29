@@ -12,6 +12,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/policytest"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -48,10 +49,9 @@ func TestProposeApplyForFacesTheSameRulesAsASubmit(t *testing.T) {
 		WantStatus run.Status
 		// Want is the error the proposal must return.
 		Want error
-	}{{ // Test 0: A deny rule refuses the apply outright, so no run is created at all.
-		Name: "a deny rule refuses it",
-		Policy: &policy.Policy{ID: policy.NewID(), Name: "no-prod-tf", Tool: run.ToolTerraform,
-			Effect: policy.EffectDeny, MaxDestroy: -1},
+	}{{ // Test 0: A refusing rule refuses the apply outright, so no run is created at all.
+		Name:     "a refusing rule refuses it",
+		Policy:   policytest.Refusing("no-prod-tf"),
 		Destroys: 0, Read: true, Want: ErrPolicyDenied,
 	}, { // Test 1: A blanket approval rule holds it for a person.
 		Name: "a blanket approval rule holds it",

@@ -185,41 +185,17 @@ func TestReversibilityWeighsWhatTheRunLeftBehind(t *testing.T) {
 	}
 }
 
-// TestAReversibilityFloorCoversEverythingHarderToUndo covers the floor's direction, and the typo
-// case that would otherwise disable a rule without saying so.
-func TestAReversibilityFloorCoversEverythingHarderToUndo(t *testing.T) {
+// TestEveryGradedReversibilityClassIsValid covers the vocabulary a policy floor is checked against,
+// so a class this product grades is never refused and a misspelled one always is.
+func TestEveryGradedReversibilityClassIsValid(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		Class string
-		Floor string
-		Want  bool
-	}{
-		{Class: Irreversible, Floor: ReversibleCostly, Want: true},     // Test 0: floors look upward.
-		{Class: ReversibleCostly, Floor: ReversibleCostly, Want: true}, // Test 1: inclusive.
-		{Class: Reversible, Floor: ReversibleCostly, Want: false},      // Test 2: a dry run is left alone.
-		{Class: Irreversible, Floor: Irreversible, Want: true},         // Test 3: the narrowest rule.
-		{Class: ReversibleCostly, Floor: Irreversible, Want: false},    // Test 4.
-		// Test 5: a misspelled floor matches nothing rather than everything. Validate refuses it at
-		// load so a policy file cannot reach here, and if one ever does it fails closed on scope.
-		{Class: Irreversible, Floor: "irreversable", Want: false},
-		// Test 6: the widest floor covers every run, the fully reversible included.
-		{Class: Reversible, Floor: Reversible, Want: true},
-		// Test 7: and every class harder to undo than it.
-		{Class: ReversibleCostly, Floor: Reversible, Want: true},
-	}
-	for testNum, test := range tests {
-		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
-			t.Parallel()
-			if got := MeetsReversibilityFloor(test.Class, test.Floor); got != test.Want {
-				t.Errorf("MeetsReversibilityFloor(%q, %q) = %v, want %v",
-					test.Class, test.Floor, got, test.Want)
-			}
-		})
-	}
 	for _, class := range []string{Reversible, ReversibleCostly, Irreversible} {
 		if !ValidReversibility(class) {
 			t.Errorf("ValidReversibility(%q) = false, so a policy naming it would be refused", class)
 		}
+	}
+	if ValidReversibility("irreversable") {
+		t.Error(`ValidReversibility("irreversable") = true, so a typo would load as a floor`)
 	}
 }
 

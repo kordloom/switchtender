@@ -29,9 +29,11 @@ import (
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/plantest"
 	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/policytest"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -1222,7 +1224,10 @@ func TestSeedHeldDestroyHoldsTheApplyItsPlanProposed(t *testing.T) {
 	if apply == nil {
 		t.Fatal("the plan proposed no apply, so the demo shows no change the gate is holding")
 	}
-	const wantHeld = "terraform destroys need a second approver (plan destroys 3, limit 0)"
+	// The seeded rule demands a second approver, a Team rule, which a Community build holds on and
+	// enforces without evaluating, and the hold names the tier.
+	wantHeld := policytest.CommunityHold("terraform destroys need a second approver",
+		license.FeaturePolicyFull) + " (plan destroys 3, limit 0)"
 	if apply.Status != run.StatusPendingApproval || apply.HeldByPolicy != wantHeld {
 		t.Errorf("apply = %s held by %q, want pending_approval held by %q", apply.Status,
 			apply.HeldByPolicy, wantHeld)

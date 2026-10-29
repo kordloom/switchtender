@@ -15,8 +15,10 @@ import (
 
 	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/dossier"
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/policytest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -561,7 +563,8 @@ func TestAnAgentsApplyTakesTwoApprovals(t *testing.T) {
 	}, { // Test 2: With a reversibility floor in force, which names itself on the proposal.
 		Rules:  func(t *testing.T) policy.Store { return dispatchtest.RulesHolding(t, floor) },
 		Config: dispatchtest.CleanConfig, Opts: dispatchtest.AgentOpts(), WantTwoSteps: true,
-		WantProposalHeldBy: "irreversible needs a person",
+		WantProposalHeldBy: policytest.CommunityHold("irreversible needs a person",
+			license.FeaturePolicyRules),
 	}, { // Test 3: With a configuration that runs a program while it plans.
 		Config: dispatchtest.ExternalConfig, Opts: dispatchtest.AgentOpts(), WantTwoSteps: true,
 	}, { // Test 4: A person's apply applies as it always did, the control.

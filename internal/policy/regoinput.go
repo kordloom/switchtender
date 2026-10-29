@@ -100,7 +100,7 @@ func actorKindOf(actorType string) string {
 }
 
 // reversibilityGrade reads the grade already attached to a run, falling back to grading it here, the
-// same preference reversibilityOf makes for the YAML floor.
+// same preference the rule engine makes for the YAML floor.
 func reversibilityGrade(r *run.Run) run.Reversibility {
 	if r.Reversibility != nil {
 		return *r.Reversibility

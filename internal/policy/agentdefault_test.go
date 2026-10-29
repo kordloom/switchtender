@@ -259,43 +259,6 @@ func TestTheBuiltInHoldIsMarked(t *testing.T) {
 	}
 }
 
-// TestAnExemptionNeverOutranksADeny holds an exemption to lifting the built-in hold and nothing
-// else: a deny rule matching the same agent run still refuses it.
-func TestAnExemptionNeverOutranksADeny(t *testing.T) {
-	t.Parallel()
-	deny := &Policy{ID: "pol_deny", Name: "no drops", CommandContains: "drop database",
-		Effect: EffectDeny, MaxDestroy: DisabledMaxDestroy}
-	exempt := exemption("all bash", func(p *Policy) { p.Tool = "bash" })
-	tests := []struct {
-		// Policies are the rules in force, in order.
-		Policies []*Policy
-		// Run is the run judged.
-		Run *run.Run
-		// WantDenied names the rule that refuses the run, empty when none does.
-		WantDenied string
-	}{{ // Test 0: The deny refuses the agent's run though an exemption also covers it.
-		Policies: []*Policy{exempt, deny}, Run: agentRun("bot", "bash", "psql -c 'drop database x'"),
-		WantDenied: "no drops",
-	}, { // Test 1: Listed first or last, the order changes nothing.
-		Policies: []*Policy{deny, exempt}, Run: agentRun("bot", "bash", "psql -c 'drop database x'"),
-		WantDenied: "no drops",
-	}, { // Test 2: An exemption alone refuses nothing, the control for tests 0 and 1.
-		Policies: []*Policy{exempt}, Run: agentRun("bot", "bash", "psql -c 'drop database x'"),
-	}}
-	for testNum, test := range tests {
-		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
-			t.Parallel()
-			got := ""
-			if p := Denying(test.Policies, test.Run); p != nil {
-				got = p.Label()
-			}
-			if diff := cmp.Diff(test.WantDenied, got); diff != "" {
-				t.Errorf("denied by mismatch (-want +got):\n%s", diff)
-			}
-		})
-	}
-}
-
 // TestValidateAnExemption holds an exemption to the criteria that pick runs out. Everything that
 // only means something on a rule that holds is refused where it is written, since an exemption
 // carrying it would read as narrower or stricter than it is.

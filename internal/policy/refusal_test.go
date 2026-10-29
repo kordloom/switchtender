@@ -112,20 +112,6 @@ policies:
 	if got.CreatedAt.IsZero() || got.CreatedAt.Location() != time.UTC {
 		t.Errorf("CreatedAt = %v, want the file's modification time in UTC", got.CreatedAt)
 	}
-	// The rule the file describes has to behave as written, not merely parse.
-	matching := &run.Run{
-		Tool: run.ToolOpenTofu, Command: "tofu destroy -auto-approve", InventoryID: "inv_prod",
-		Queue: "prod", ActorType: "agent", Actor: "deploy-bot",
-	}
-	if policy.Denying(all, matching) == nil {
-		t.Error("the deny rule the file declares refused nothing")
-	}
-	elsewhere := *matching
-	elsewhere.Queue = "staging"
-	if policy.Denying(all, &elsewhere) != nil {
-		t.Error("a rule scoped to the prod queue refused a run routed elsewhere, so the queue scope " +
-			"was dropped on load")
-	}
 }
 
 // TestFileStoreThresholdIsThreeWay pins the difference between an omitted threshold, a zero
@@ -592,7 +578,7 @@ func TestFileStoreIsSafeUnderConcurrentReadsAndEdits(t *testing.T) {
 							"declares", p.Name)
 						return
 					}
-					_ = p.Matches(&run.Run{Tool: run.ToolTerraform})
+					_ = p.MatchesPlain(&run.Run{Tool: run.ToolTerraform})
 				}
 			}
 		}()

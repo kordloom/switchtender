@@ -136,20 +136,13 @@ type Policy struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// Matches reports whether the policy's criteria match r. Every non-empty criterion must match,
-// so a policy narrows the runs it gates rather than widening them.
-func (p *Policy) Matches(r *run.Run) bool {
-	if p.Rego != nil {
-		d := p.Rego.Decide(r)
-		return d.Err != nil || len(d.Deny) > 0 || len(d.Hold) > 0
-	}
-	return p.matchesBeforeGrade(r) && p.meetsGradeFloors(r)
-}
-
-// matchesBeforeGrade reports whether every criterion but the risk and reversibility floors matches
-// r. Those two are grades computed from the run, and a terraform or opentofu apply has no honest
-// grade until its plan has said what it destroys, so the plan gate asks this question first.
-func (p *Policy) matchesBeforeGrade(r *run.Run) bool {
+// MatchesPlain reports whether every criterion of a criteria rule but the risk and reversibility
+// floors matches r: tool, command, inventory, queue, the dry-run exclusion, actor, account, and actor
+// kind. Every non-empty criterion must match, so a rule narrows the runs it gates rather than
+// widening them. The floors are grades computed from the run and are evaluated by the rule engine,
+// since a terraform or opentofu apply has no honest grade until its plan has said what it destroys.
+// Exemptions are decided on these criteria alone.
+func (p *Policy) MatchesPlain(r *run.Run) bool {
 	// The run's effective mode, not the flag it was submitted with. A dry run whose playbook forces
 	// real work is a change, and exempting it on the strength of the flag let any change through a
 	// rule that excludes dry runs by asking for it as a preview.
@@ -173,18 +166,6 @@ func (p *Policy) matchesBeforeGrade(r *run.Run) bool {
 	return p.matchesActor(r)
 }
 
-// meetsGradeFloors reports whether r's grade clears the policy's risk and reversibility floors. A
-// policy with neither floor has nothing to clear.
-func (p *Policy) meetsGradeFloors(r *run.Run) bool {
-	if p.MinRisk != "" && !meetsRiskFloor(run.AssessRisk(r).Level, p.MinRisk) {
-		return false
-	}
-	if p.Reversibility != "" && !run.MeetsReversibilityFloor(reversibilityOf(r), p.Reversibility) {
-		return false
-	}
-	return true
-}
-
 // containsFold reports whether text contains want, ignoring case. Command criteria are matched this
 // way because the shell and every database that accepts "drop database" accepts "DROP DATABASE" as
 // the same statement, so a case-sensitive rule is a refusal anyone can step around by holding down
@@ -192,20 +173,6 @@ func (p *Policy) meetsGradeFloors(r *run.Run) bool {
 // case here also kept the two halves of the product disagreeing about whether case matters.
 func containsFold(text, want string) bool {
 	return strings.Contains(strings.ToLower(text), strings.ToLower(want))
-}
-
-// meetsRiskFloor reports whether a run assessed at level clears a policy's floor.
-//
-// A floor this build cannot rank holds every run rather than none. Comparing ranks directly put an
-// unknown floor above every level a run can be graded, so a rule written on a newer build, or
-// restored from a backup taken across a version change, read as an active gate on screen and
-// matched nothing at all. An unrankable floor is a rule this build does not understand, and the
-// only safe reading of a rule you do not understand is that it applies.
-func meetsRiskFloor(level, floor string) bool {
-	if riskRank(floor) > riskRank(run.RiskHigh) {
-		return true
-	}
-	return riskRank(level) >= riskRank(floor)
 }
 
 // matchesActor reports whether the policy's actor criteria match who fired r. A run whose actor
@@ -316,22 +283,6 @@ func AllowRules(set ...*Policy) error {
 	return lapse
 }
 
-// riskRank orders risk levels so MinRisk can compare them. An unknown level ranks above high, so a
-// run this build cannot grade fails toward holding rather than passing. An unknown floor is handled
-// by meetsRiskFloor, since ranking alone would push it out of reach of every run.
-func riskRank(level string) int {
-	switch level {
-	case run.RiskLow:
-		return 1
-	case run.RiskMedium:
-		return 2
-	case run.RiskHigh:
-		return 3
-	default:
-		return 4
-	}
-}
-
 // Denies reports whether the policy refuses matched submissions outright.
 func (p *Policy) Denies() bool { return p.Effect == EffectDeny }
 
@@ -344,18 +295,7 @@ func (p *Policy) Exempts() bool { return p.Effect == EffectExempt }
 // A Rego policy that refuses r is returned as a copy labeled with its reasons and its bundle digest,
 // and so is one that could not decide: a gate that cannot be evaluated has not been passed.
 func Denying(policies []*Policy, r *run.Run) *Policy {
-	for _, p := range policies {
-		if p.Rego != nil {
-			if d := p.Rego.Decide(r); d.Err != nil || len(d.Deny) > 0 {
-				return p.regoVerdict(EffectDeny, d.Deny, d.Err)
-			}
-			continue
-		}
-		if p.Denies() && p.Matches(r) {
-			return p
-		}
-	}
-	return nil
+	return CurrentEngine().Denying(policies, r)
 }
 
 // Validate checks the policy's declared vocabulary, so a rule with a typo is refused where it is
@@ -422,16 +362,8 @@ func Requires(policies []*Policy, r *run.Run) bool {
 // is returned the built-in rule AgentDefault describes unless an exemption covers it. An exemption
 // is never itself a reason to hold.
 func Requiring(policies []*Policy, r *run.Run) *Policy {
-	for _, p := range policies {
-		if p.Rego != nil {
-			if d := p.Rego.Decide(r); d.Err != nil || len(d.Hold) > 0 {
-				return p.regoVerdict(EffectRequireApproval, d.Hold, d.Err)
-			}
-			continue
-		}
-		if p.MaxDestroy < 0 && !p.Denies() && !p.Exempts() && p.Matches(r) {
-			return p
-		}
+	if p := CurrentEngine().Requiring(policies, r); p != nil {
+		return p
 	}
 	// No stored rule holds r, so the built-in one decides: a run an agent asked for waits for a
 	// person unless an exemption covers it. It comes last so a stored rule that also holds the run is
@@ -473,18 +405,7 @@ func Noting(policies []*Policy, r *run.Run) []string {
 // A Rego policy demands one when its require_distinct_approver rule holds for r, or when it could
 // not decide, since the stricter answer is the only safe one to a question nobody could answer.
 func RequireDistinct(policies []*Policy, r *run.Run) bool {
-	for _, p := range policies {
-		if p.Rego != nil {
-			if d := p.Rego.Decide(r); d.Err != nil || d.RequireDistinctApprover {
-				return true
-			}
-			continue
-		}
-		if p.RequireDistinctApprover && !p.Denies() && p.Matches(r) {
-			return true
-		}
-	}
-	return false
+	return CurrentEngine().RequireDistinct(policies, r)
 }
 
 // ReasonRequirement returns the strictest reason requirement among the rules that would hold r, so
@@ -493,34 +414,13 @@ func RequireDistinct(policies []*Policy, r *run.Run) bool {
 // holds anything and is skipped. Plan-content rules count too, since the plan gate holds under the
 // same rules.
 func ReasonRequirement(policies []*Policy, r *run.Run) string {
-	out := ""
-	for _, p := range policies {
-		if p.RequireReason == "" || p.Denies() {
-			continue
-		}
-		if p.Rego != nil {
-			if d := p.Rego.Decide(r); d.Err != nil || len(d.Hold) > 0 {
-				out = decision.Stricter(out, p.RequireReason)
-			}
-			continue
-		}
-		if p.Matches(r) {
-			out = decision.Stricter(out, p.RequireReason)
-		}
-	}
-	return out
+	return CurrentEngine().ReasonRequirement(policies, r)
 }
 
 // ExceedingReason returns the strictest reason requirement among the plan-content rules a plan of
 // this size violates, which is what the apply the plan gate holds carries.
 func ExceedingReason(policies []*Policy, r *run.Run, destroys int) string {
-	out := ""
-	for _, p := range policies {
-		if p.MaxDestroy >= 0 && p.RequireReason != "" && p.Matches(r) && destroys > p.MaxDestroy {
-			out = decision.Stricter(out, p.RequireReason)
-		}
-	}
-	return out
+	return CurrentEngine().ExceedingReason(policies, r, destroys)
 }
 
 // Label returns how a policy should be named in evidence: its name, or its id when it has none.
@@ -579,25 +479,7 @@ func PlanGated(policies []*Policy, r *run.Run) bool {
 		r.ApprovedSpecDigest == "" && (r.ApprovalRequested || Requiring(policies, r) != nil) {
 		return true
 	}
-	for _, p := range policies {
-		// A Rego policy plans an apply when its plan_gate rule says so, or when it cannot decide:
-		// the apply it then proposes faces the same policy again, which refuses it, so an
-		// undecidable policy never lets an unplanned apply through.
-		if p.Rego != nil {
-			if d := p.Rego.Decide(r); d.Err != nil || d.PlanGate {
-				return true
-			}
-			continue
-		}
-		if p.MaxDestroy >= 0 && p.Matches(r) {
-			return true
-		}
-		if (p.MinRisk != "" || p.Reversibility != "") && p.matchesBeforeGrade(r) &&
-			!p.meetsGradeFloors(r) {
-			return true
-		}
-	}
-	return false
+	return CurrentEngine().PlanGated(policies, r)
 }
 
 // PlanExceeds reports whether a plan that destroys the given number of resources violates any
@@ -611,12 +493,7 @@ func PlanExceeds(policies []*Policy, r *run.Run, destroys int) bool {
 // Exceeding returns the first plan-content policy a plan of this size violates, or nil when none
 // does, so the rule that held the apply can be recorded on it.
 func Exceeding(policies []*Policy, r *run.Run, destroys int) *Policy {
-	for _, p := range policies {
-		if p.MaxDestroy >= 0 && p.Matches(r) && destroys > p.MaxDestroy {
-			return p
-		}
-	}
-	return nil
+	return CurrentEngine().Exceeding(policies, r, destroys)
 }
 
 // ExceedingDistinct reports whether any rule the destroy count exceeds demands a distinct
@@ -625,12 +502,7 @@ func Exceeding(policies []*Policy, r *run.Run, destroys int) *Policy {
 // match, a loose rule listed ahead of a strict one silently dropped the second person, which is
 // the same ordering drop RequireDistinct exists to prevent on the submission pass.
 func ExceedingDistinct(policies []*Policy, r *run.Run, destroys int) bool {
-	for _, p := range policies {
-		if p.MaxDestroy >= 0 && p.RequireDistinctApprover && p.Matches(r) && destroys > p.MaxDestroy {
-			return true
-		}
-	}
-	return false
+	return CurrentEngine().ExceedingDistinct(policies, r, destroys)
 }
 
 // Store persists approval policies. Implementations must be safe for concurrent use.
@@ -663,19 +535,6 @@ func NewPolicy(name string) *Policy {
 // NewID returns a random policy identifier prefixed with "pol_".
 func NewID() string {
 	return idgen.New("pol_", 6)
-}
-
-// reversibilityOf reads the grade already attached to a run, falling back to grading it here.
-//
-// A grade computed from the run alone is blind to an Ansible playbook, because the work is inside a
-// file and the run carries only its path. A caller that could read the playbook attaches the richer
-// grade first, and this prefers it: without that, a rule written to hold anything that cannot be
-// undone would never fire on the tool this product exists to run.
-func reversibilityOf(r *run.Run) string {
-	if r.Reversibility != nil {
-		return r.Reversibility.Class
-	}
-	return run.AssessReversibility(r).Class
 }
 
 // validateRego checks a Rego policy's shape. Its package decides everything, so a criterion set

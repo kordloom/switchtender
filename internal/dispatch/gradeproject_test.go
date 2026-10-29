@@ -124,16 +124,16 @@ func newGateFixture(t *testing.T, files map[string]string) gateFixture {
 
 // TestTheGateReadsWhatAProjectRunPullsIn is the case the whole path exists for. A project's
 // playbook names a role and the role holds the work, so the gate has to read the role, in the
-// project, to hold a teardown and let a restart through.
+// project, to grade a teardown irreversible and a restart not.
 func TestTheGateReadsWhatAProjectRunPullsIn(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		Files    map[string]string
-		WantHeld bool
-	}{{ // Test 0: A role that tears down an archive is held.
-		Files: merged(restartProject, teardownRole), WantHeld: true,
-	}, { // Test 1: A role that restarts a service goes through.
-		Files: restartProject, WantHeld: false,
+		Files            map[string]string
+		WantIrreversible bool
+	}{{ // Test 0: A role that tears down an archive grades irreversible.
+		Files: merged(restartProject, teardownRole), WantIrreversible: true,
+	}, { // Test 1: A role that restarts a service does not.
+		Files: restartProject, WantIrreversible: false,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -144,9 +144,10 @@ func TestTheGateReadsWhatAProjectRunPullsIn(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
-			if held := r.Status == run.StatusPendingApproval; held != test.WantHeld {
-				t.Errorf("held = %v, want %v: the gate graded %q without reading the role it runs",
-					held, test.WantHeld, r.Playbook)
+			g := f.D.graded(r).Reversibility
+			if got := g != nil && g.Class == run.Irreversible; got != test.WantIrreversible {
+				t.Errorf("irreversible = %v, want %v: the gate graded %q without reading the role "+
+					"it runs", got, test.WantIrreversible, r.Playbook)
 			}
 		})
 	}

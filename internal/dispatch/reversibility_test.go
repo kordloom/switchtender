@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -39,21 +38,19 @@ func TestTheGateSeesWhatThePlaybookDoes(t *testing.T) {
 		t.Fatalf("write playbook: %v", err)
 	}
 
-	// MaxDestroy must be the disabled value, as the file loader sets for any rule without a
-	// plan-content threshold. Left at the zero value, Requiring skips the rule entirely.
-	gate := &policy.Policy{Name: "hold the permanent", Effect: policy.EffectRequireApproval,
-		Reversibility: run.Irreversible, MaxDestroy: policy.DisabledMaxDestroy}
-
+	// The gate's floors read this grade. The comparison is the paid rule engine's, so this pins what
+	// every build computes and hands to it: the run page, the dossier, and the Rego input read the
+	// same grade.
 	wipe := &run.Run{Tool: run.ToolAnsible, Playbook: destructive}
-	if p := policy.Requiring([]*policy.Policy{gate}, gradedLocally(wipe)); p == nil {
-		t.Error("a playbook that deletes an archive was not held by an irreversible rule, so the " +
-			"gate is still blind to what an Ansible run actually does")
+	if g := gradedLocally(wipe).Reversibility; g == nil || g.Class != run.Irreversible {
+		t.Errorf("a playbook that deletes an archive graded %+v, want irreversible, so the gate is "+
+			"still blind to what an Ansible run actually does", g)
 	}
 
 	restart := &run.Run{Tool: run.ToolAnsible, Playbook: benign}
-	if p := policy.Requiring([]*policy.Policy{gate}, gradedLocally(restart)); p != nil {
-		t.Error("a service restart was held by an irreversible rule. A gate that fires on " +
-			"recoverable work is one an operator switches off")
+	if g := gradedLocally(restart).Reversibility; g != nil && g.Class == run.Irreversible {
+		t.Error("a service restart graded irreversible. A gate that fires on recoverable work is " +
+			"one an operator switches off")
 	}
 
 	// The grade rides on a copy. The run about to be persisted and folded into the audit chain's

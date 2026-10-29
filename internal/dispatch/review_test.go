@@ -12,7 +12,9 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/policytest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -52,9 +54,10 @@ func TestPlanSummaryCountsEveryClause(t *testing.T) {
 }
 
 // TestPreviewApplyMatchesTheGate pins the decision a pull request is shown to the decision the
-// dispatcher would make on the real apply: a deny at submission, a blanket hold on the planned
-// apply with its second approver, a plan-content hold weighed on this plan's destroy count, an
-// unreadable plan held, and an apply nothing stops.
+// dispatcher would make on the real apply: a refusal at submission, a restored deny rule this build
+// holds on rather than evaluates, a blanket hold on the planned apply with its second approver, a
+// plan-content hold weighed on this plan's destroy count, an unreadable plan held, and an apply
+// nothing stops.
 func TestPreviewApplyMatchesTheGate(t *testing.T) {
 	t.Parallel()
 	denyAll := &policy.Policy{ID: "pol_d", Name: "no prod", Effect: policy.EffectDeny,
@@ -63,6 +66,9 @@ func TestPreviewApplyMatchesTheGate(t *testing.T) {
 		MaxDestroy: policy.DisabledMaxDestroy, RequireDistinctApprover: true, ExcludeDryRun: true}
 	destroyGuard := &policy.Policy{ID: "pol_g", Name: "destroy guard", Tool: run.ToolTerraform,
 		MaxDestroy: 0}
+	refusing := policytest.Refusing("broken bundle")
+	refusingRule := refusing.RegoVerdict(policy.EffectDeny, nil,
+		refusing.Rego.Decide(&run.Run{}).Err).Label()
 	apply := &run.Run{ID: "run_apply", Tool: run.ToolTerraform, Command: "infra", ProjectID: "proj_1"}
 	tests := []struct {
 		Policies    []*policy.Policy
@@ -71,13 +77,16 @@ func TestPreviewApplyMatchesTheGate(t *testing.T) {
 		Read        bool
 	}{{ // Test 0: No rules lets the apply run.
 		Read: true, WantPreview: ApplyPreview{Outcome: ApplyRuns},
-	}, { // Test 1: A deny rule refuses at submission.
+	}, { // Test 1: A deny rule this build cannot evaluate plans first and holds the planned apply.
 		Policies: []*policy.Policy{denyAll}, Read: true,
-		WantPreview: ApplyPreview{Outcome: ApplyDenied, Rule: "no prod", Stage: StageSubmission},
+		WantPreview: ApplyPreview{Outcome: ApplyHeld,
+			Rule:  policytest.CommunityHold("no prod", license.FeaturePolicyRules),
+			Stage: StagePlan, PlanGated: true},
 	}, { // Test 2: A blanket rule holds the planned apply at the plan gate with its second approver.
 		Policies: []*policy.Policy{holdAll}, Read: true,
-		WantPreview: ApplyPreview{Outcome: ApplyHeld, Rule: "tf review", Stage: StagePlan,
-			RequireDistinctApprover: true, PlanGated: true},
+		WantPreview: ApplyPreview{Outcome: ApplyHeld,
+			Rule:  policytest.CommunityHold("tf review", license.FeaturePolicyFull),
+			Stage: StagePlan, RequireDistinctApprover: true, PlanGated: true},
 	}, { // Test 3: A destroy over the limit holds at the plan gate, naming the count.
 		Policies: []*policy.Policy{destroyGuard}, Destroys: 2, Read: true,
 		WantPreview: ApplyPreview{Outcome: ApplyHeld, Rule: "destroy guard (plan destroys 2, limit 0)",
@@ -90,17 +99,14 @@ func TestPreviewApplyMatchesTheGate(t *testing.T) {
 		WantPreview: ApplyPreview{Outcome: ApplyHeld,
 			Rule:  "plan summary unreadable, so the destroy count was never weighed against the limit",
 			Stage: StagePlan, PlanGated: true},
+	}, { // Test 6: A policy that cannot be evaluated refuses at submission.
+		Policies: []*policy.Policy{refusing}, Read: true,
+		WantPreview: ApplyPreview{Outcome: ApplyDenied, Rule: refusingRule, Stage: StageSubmission},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			store := policy.NewMemStore()
-			for _, p := range test.Policies {
-				if err := store.Save(context.Background(), p); err != nil {
-					t.Fatalf("Save() error = %v", err)
-				}
-			}
-			d := &Dispatcher{policies: store}
+			d := &Dispatcher{policies: policytest.Serving(test.Policies...)}
 			got, err := d.PreviewApply(context.Background(), apply, test.Destroys, test.Read)
 			if err != nil {
 				t.Fatalf("PreviewApply() error = %v", err)

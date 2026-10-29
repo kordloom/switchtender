@@ -48,7 +48,7 @@ func Exempting(policies []*Policy, r *run.Run) *Policy {
 		if p == nil || p.Rego != nil || !p.Exempts() || (p.Actor != "" && p.Account == "") {
 			continue
 		}
-		if p.matchesBeforeGrade(r) {
+		if p.MatchesPlain(r) {
 			return p
 		}
 	}

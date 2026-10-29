@@ -387,20 +387,6 @@ func hasTokenPrefix(fields []string, want string) bool {
 	return false
 }
 
-// MeetsReversibilityFloor reports whether a run graded class is at least as hard to undo as floor.
-//
-// A floor names the easiest class a rule applies to, so a rule with a floor of costly covers costly
-// and irreversible runs and leaves fully reversible ones alone. An unrecognized floor matches
-// nothing rather than everything, so a typo in a policy file cannot silently widen a rule to the
-// whole fleet.
-func MeetsReversibilityFloor(class, floor string) bool {
-	rank := reversibilityRank(floor)
-	if rank < 0 {
-		return false
-	}
-	return reversibilityRank(class) >= rank
-}
-
 // ValidReversibility reports whether class names a reversibility class this product grades.
 func ValidReversibility(class string) bool {
 	return reversibilityRank(class) >= 0

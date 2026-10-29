@@ -17,8 +17,10 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/dispatchtest"
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/plantest"
 	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/policytest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -188,7 +190,9 @@ func TestARuleHeldApplyPlansFirstAndHoldsItsPlan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get(proposal) error = %v", err)
 	}
-	if held.Status != run.StatusPendingApproval || held.HeldByPolicy != "terraform needs a person" ||
+	// A second approver is a Team rule, which this build holds on and enforces without evaluating.
+	wantHeldBy := policytest.CommunityHold("terraform needs a person", license.FeaturePolicyFull)
+	if held.Status != run.StatusPendingApproval || held.HeldByPolicy != wantHeldBy ||
 		!held.RequireDistinctApprover {
 		t.Fatalf("proposal = %q held by %q distinct %v, want held by the rule with its second "+
 			"approver", held.Status, held.HeldByPolicy, held.RequireDistinctApprover)
@@ -365,7 +369,7 @@ func TestARequestThatAsksForApprovalPlansFirst(t *testing.T) {
 			}
 			return rules
 		},
-		WantHeldBy: "terraform needs a person", WantDistinct: true,
+		WantHeldBy: policytest.CommunityHold("terraform needs a person", license.FeaturePolicyFull), WantDistinct: true,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {

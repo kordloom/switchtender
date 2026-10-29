@@ -9,7 +9,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/dispatchtest"
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/policytest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -208,7 +210,7 @@ func TestDistinctApproverBindsARunBornHeld(t *testing.T) {
 		t.Errorf("a run that asked to be held did not pick up its rule's distinct-approver " +
 			"requirement, so the requester can approve their own change")
 	}
-	if r.HeldByPolicy != "production apply" {
+	if r.HeldByPolicy != policytest.CommunityHold("production apply", license.FeaturePolicyFull) {
 		t.Errorf("held by = %q, want the rule that governs it rather than the submitter's request",
 			r.HeldByPolicy)
 	}

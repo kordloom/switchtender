@@ -14,6 +14,7 @@ import (
 	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/policytest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -31,13 +32,10 @@ type refusalEntry struct {
 // and the rule in force could be edited a minute later.
 func TestADenyPolicyRecordsItsRefusalInTheChain(t *testing.T) {
 	t.Parallel()
-	yaml := policy.NewMemStore()
-	if err := yaml.Save(context.Background(), &policy.Policy{
-		ID: policy.NewID(), Name: "no agent bash/shells", ActorKind: policy.ActorKindAgent,
-		Tool: "bash", Effect: policy.EffectDeny, MaxDestroy: policy.DisabledMaxDestroy,
-	}); err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
+	// A deny rule is a paid rule, which a build without the rule engine holds on rather than
+	// refusing, so the refusal here comes from the one every build makes: a Rego policy whose
+	// program cannot be evaluated.
+	yaml := policytest.Serving(policytest.Refusing("no agent bash/shells"))
 	tests := []struct {
 		// Policies are the rules in force.
 		Policies policy.Store

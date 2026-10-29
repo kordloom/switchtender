@@ -189,13 +189,9 @@ policies:
 	if len(all) != 2 {
 		t.Fatalf("loaded %d policies, want 2", len(all))
 	}
-	agentDrop := &run.Run{Tool: "bash", Command: "psql -c 'drop database prod'", ActorType: "agent"}
-	if got := policy.Denying(all, agentDrop); got == nil || got.Name != "agent-destructive-deny" {
-		t.Errorf("Denying() = %v, want the deny rule from the file", got)
-	}
-	risky := &run.Run{Tool: "bash", Command: "rm -rf /srv/data", ActorType: "agent"}
-	if got := policy.Requiring(all, risky); got == nil || got.Name != "agent-high-risk-approval" {
-		t.Errorf("Requiring() = %v, want the high-risk rule from the file", got)
+	if all[0].Effect != policy.EffectDeny || all[1].MinRisk != run.RiskHigh {
+		t.Errorf("List() = %+v, want the deny rule and the high-risk rule as the file declares them",
+			all)
 	}
 
 	bad := writePolicyFile(t, `

@@ -27,7 +27,9 @@ import (
 	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/inventory"
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/policytest"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/review"
 	"github.com/kordloom/switchtender/internal/review/forgetest"
@@ -827,7 +829,8 @@ func TestReviewHookIgnoresWhatIsNotNewCode(t *testing.T) {
 
 // TestReviewCommentShowsTheApplyDecision proves the comment and status carry the decision the apply
 // would get after merge, decided by the same rules the gate enforces: a destroy over a plan-content
-// limit is held, and a deny rule that leaves plans alone fails the check.
+// limit is held, and a deny rule that leaves plans alone, which a build without the rule engine
+// holds on rather than evaluates, holds the apply naming the tier.
 func TestReviewCommentShowsTheApplyDecision(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -839,10 +842,11 @@ func TestReviewCommentShowsTheApplyDecision(t *testing.T) {
 		Policy: &policy.Policy{ID: "pol_g", Name: "destroy guard", Tool: run.ToolTerraform,
 			MaxDestroy: 0},
 		WantState: successState, WantComment: "`destroy guard (plan destroys 2, limit 0)`",
-	}, { // Test 1: A deny rule that excludes dry runs lets the plan run and fails the check.
+	}, { // Test 1: A deny rule that excludes dry runs lets the plan run and holds the apply.
 		Policy: &policy.Policy{ID: "pol_d", Name: "frozen", Tool: run.ToolTerraform,
 			Effect: policy.EffectDeny, ExcludeDryRun: true, MaxDestroy: policy.DisabledMaxDestroy},
-		WantState: "failure", WantComment: "would be refused",
+		WantState:   successState,
+		WantComment: policytest.CommunityHold("frozen", license.FeaturePolicyRules),
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/policytest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -32,13 +32,10 @@ func TestNoExecutionPathGoesAroundTheBoundary(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	denyAll := policy.NewMemStore()
-	if err := denyAll.Save(ctx, &policy.Policy{
-		ID: "pol_deny", Name: "refuse everything", Effect: policy.EffectDeny,
-		MaxDestroy: policy.DisabledMaxDestroy,
-	}); err != nil {
-		t.Fatalf("Save policy: %v", err)
-	}
+	// A Rego policy whose program cannot be evaluated refuses every run on every build, since a gate
+	// that cannot be evaluated has not been passed. A deny rule is a paid rule, and a build without
+	// the rule engine holds on one rather than refusing.
+	denyAll := policytest.Serving(policytest.Refusing("refuse everything"))
 
 	// A store already holding a finished split and a finished run, so the paths that derive a new
 	// run from an old one have something to derive from. They are seeded directly rather than

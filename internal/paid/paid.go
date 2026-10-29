@@ -258,32 +258,6 @@ type RegoCompiler interface {
 	Compile(modules []RegoModule, settings RegoSettings) (RegoProgram, error)
 }
 
-// RuleCriteria are the paid criteria of one YAML rule: the fields a Pro or Team license adds to the
-// one plain hold. The Community core validates and stores them but cannot evaluate them.
-type RuleCriteria struct {
-	// Effect is what the rule does to a matched run, deny among them.
-	Effect string
-	// MinRisk is the risk floor, empty for none.
-	MinRisk string
-	// Reversibility is the reversibility floor, empty for none.
-	Reversibility string
-	// Actor scopes the rule to one actor name.
-	Actor string
-	// Account scopes the rule to the account a credential acts for.
-	Account string
-	// ActorKind scopes the rule to human or agent actors.
-	ActorKind string
-	// RequireDistinctApprover demands an approver other than the requester.
-	RequireDistinctApprover bool
-}
-
-// RuleEvaluator decides the paid criteria of a YAML rule against one run.
-type RuleEvaluator interface {
-	// Matches reports whether r meets every paid criterion in c. A Community build returns
-	// ErrRequiresTier, and the caller holds the run rather than passing it.
-	Matches(r *run.Run, c RuleCriteria) (bool, error)
-}
-
 // RegisterSource is where a change register is drawn from: the period's runs, the chain, the
 // install identity the chain's tree leaves bind to, and the verifier that holds each approval to
 // its seal.
@@ -414,7 +388,6 @@ type Reconciler interface {
 var (
 	directorySlot      = NewSlot[Directory]("directory", stubDirectory{})
 	regoCompilerSlot   = NewSlot[RegoCompiler]("rego compiler", stubRegoCompiler{})
-	ruleEvaluatorSlot  = NewSlot[RuleEvaluator]("rule evaluator", stubRuleEvaluator{})
 	changeRegisterSlot = NewSlot[ChangeRegister]("change register", stubChangeRegister{})
 	workerSlot         = NewSlot[Worker]("worker", stubWorker{})
 	reconcilerSlot     = NewSlot[Reconciler]("reconciler", stubReconciler{})
@@ -431,12 +404,6 @@ func RegisterRegoCompiler(c RegoCompiler) { regoCompilerSlot.Set(c) }
 
 // CurrentRegoCompiler returns the Rego compiler, the Community stub when none is registered.
 func CurrentRegoCompiler() RegoCompiler { return regoCompilerSlot.Get() }
-
-// RegisterRuleEvaluator installs the paid rule evaluator. It panics on a second call.
-func RegisterRuleEvaluator(e RuleEvaluator) { ruleEvaluatorSlot.Set(e) }
-
-// CurrentRuleEvaluator returns the rule evaluator, the Community stub when none is registered.
-func CurrentRuleEvaluator() RuleEvaluator { return ruleEvaluatorSlot.Get() }
 
 // RegisterChangeRegister installs the paid change register. It panics on a second call.
 func RegisterChangeRegister(r ChangeRegister) { changeRegisterSlot.Set(r) }
@@ -460,6 +427,6 @@ func CurrentReconciler() Reconciler { return reconcilerSlot.Get() }
 // the paid build with the module present.
 func Registered() bool {
 	return directorySlot.Registered() && regoCompilerSlot.Registered() &&
-		ruleEvaluatorSlot.Registered() && changeRegisterSlot.Registered() &&
+		changeRegisterSlot.Registered() &&
 		workerSlot.Registered() && reconcilerSlot.Registered()
 }

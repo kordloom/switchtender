@@ -19,6 +19,7 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/policytest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/template"
@@ -99,10 +100,7 @@ func newSlowHook(t *testing.T, rule *policy.Policy) *slowHook {
 		Tool: run.ToolTerraform, Command: dir, DryRun: true}); err != nil {
 		t.Fatalf("save template: %v", err)
 	}
-	policies := policy.NewMemStore()
-	if err := policies.Save(ctx, rule); err != nil {
-		t.Fatalf("save policy: %v", err)
-	}
+	policies := policytest.Serving(rule)
 	runs := run.NewMemStore()
 	audits := audit.NewMemStore()
 	gate := &slowGateRunner{Runner: roundhouse.RunnerFunc(func(context.Context, roundhouse.Spec,
@@ -218,8 +216,7 @@ func TestAPushTriggerAnswersBeforeTheGateFinishes(t *testing.T) {
 // nobody, so the failure is recorded on the chain.
 func TestALaunchThatFailsAfterTheAnswerIsRecorded(t *testing.T) {
 	t.Parallel()
-	h := newSlowHook(t, &policy.Policy{ID: "pol_deny", Name: "no plans", Tool: run.ToolTerraform,
-		Effect: policy.EffectDeny, MaxDestroy: policy.DisabledMaxDestroy})
+	h := newSlowHook(t, policytest.Refusing("no plans"))
 	if got := h.deliver(t); got["accepted"] == nil {
 		t.Fatalf("answer = %v, want the delivery accepted", got)
 	}

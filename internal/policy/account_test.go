@@ -30,18 +30,11 @@ func unnamedAccount() *run.Run {
 	return r
 }
 
-// personOn returns a run a signed-in person on account submitted.
-func personOn(account string) *run.Run {
-	r := personRun("bash", "psql -c 'drop database staging'")
-	r.Account, r.ActorUserID = account, "usr_"+account
-	return r
-}
-
 // TestTheAccountCriterion holds the account criterion to the account a run was requested under.
 // Two agent tokens share the label ci-agent and are bound to different accounts: an exemption
-// naming one account lets that account's agent through and holds the other's, a run whose account
-// is unknown fails closed in both directions, and a hold or deny rule naming an account covers
-// that account's runs and no one else's.
+// naming one account lets that account's agent through and holds the other's, and a run whose
+// account is unknown is not exempt. How a hold or deny rule naming an account is evaluated is the
+// paid rule engine's, and is tested with it.
 //
 //nolint:funlen // Test function.
 func TestTheAccountCriterion(t *testing.T) {
@@ -52,10 +45,6 @@ func TestTheAccountCriterion(t *testing.T) {
 	teamA := exemption("team a agents", func(p *Policy) { p.Account = "team-a" })
 	// labelOnly reached the store without Validate, as nothing written today can.
 	labelOnly := exemption("label only", func(p *Policy) { p.Actor = "ci-agent" })
-	holdTeamA := &Policy{ID: "pol_hold", Name: "team a waits", Account: "team-a",
-		MaxDestroy: DisabledMaxDestroy}
-	denyTeamB := &Policy{ID: "pol_deny", Name: "team b never drops", Account: "team-b",
-		CommandContains: "drop database", Effect: EffectDeny, MaxDestroy: DisabledMaxDestroy}
 	tests := []struct {
 		// Policies are the stored rules.
 		Policies []*Policy
@@ -95,25 +84,6 @@ func TestTheAccountCriterion(t *testing.T) {
 	}, { // Test 6: An exemption naming the label alone exempts nothing, even for its own label.
 		Policies: []*Policy{labelOnly}, Run: ciAgent("team-a"),
 		WantHeldBy: AgentDefaultName, WantNote: AgentDefaultName,
-	}, { // Test 7: A hold naming an account holds that account's person.
-		Policies: []*Policy{holdTeamA}, Run: personOn("team-a"), WantHeldBy: "team a waits",
-	}, { // Test 8: And no other account's.
-		Policies: []*Policy{holdTeamA}, Run: personOn("team-b"),
-	}, { // Test 9: A run whose account name is unknown is held by it, failing closed.
-		Policies: []*Policy{holdTeamA},
-		Run: func() *run.Run {
-			r := personOn("team-a")
-			r.Account = ""
-			return r
-		}(),
-		WantHeldBy: "team a waits",
-	}, { // Test 10: A run no account stands behind is not covered by a rule naming one.
-		Policies: []*Policy{holdTeamA},
-		Run:      &run.Run{Actor: "system:scheduler", ActorType: "system", Tool: "bash"},
-	}, { // Test 11: A deny naming an account refuses that account's run.
-		Policies: []*Policy{denyTeamB}, Run: personOn("team-b"), WantDenied: "team b never drops",
-	}, { // Test 12: And not the same run on another account.
-		Policies: []*Policy{denyTeamB}, Run: personOn("team-a"),
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

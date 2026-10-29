@@ -80,61 +80,43 @@ func TestPolicyMatches(t *testing.T) {
 	}, { // Test 19: A misspelled kind matches nothing rather than everything.
 		Name: "unknown kind matches nothing", Policy: policy.Policy{ActorKind: "robot"},
 		Run: run.Run{ActorType: "agent"}, Want: false,
-	}, { // Test 20: A destructive command grades high and meets a high floor.
-		Name: "min risk met", Policy: policy.Policy{MinRisk: run.RiskHigh},
-		Run: run.Run{Tool: "bash", Command: "rm -rf /var/data"}, Want: true,
-	}, { // Test 21: A dry run grades low and stays under a high floor.
-		Name: "min risk unmet", Policy: policy.Policy{MinRisk: run.RiskHigh},
-		Run: run.Run{Tool: "bash", Command: "echo ok", DryRun: true}, Want: false,
-	}, { // Test 22: A dry run whose playbook forces real tasks is not excluded.
+	}, { // Test 20: A dry run whose playbook forces real tasks is not excluded.
 		Name: "forcing dry run not excluded", Policy: policy.Policy{Tool: "ansible", ExcludeDryRun: true},
 		Run: run.Run{Playbook: "site.yml", DryRun: true, DryRunScans: []run.DryRunScan{{
 			Tool: "ansible", Findings: []string{`site.yml: task "Restart web" sets check_mode to false`},
 		}}},
 		Want: true,
-	}, { // Test 23: A clean Ansible dry run is still excluded.
+	}, { // Test 21: A clean Ansible dry run is still excluded.
 		Name:   "clean ansible dry run excluded",
 		Policy: policy.Policy{Tool: "ansible", ExcludeDryRun: true},
 		Run:    run.Run{Playbook: "site.yml", DryRun: true}, Want: false,
-	}, { // Test 24: A forcing dry run is graded as the change it is, so it can meet a risk floor.
-		Name: "forcing dry run meets a risk floor", Policy: policy.Policy{MinRisk: run.RiskMedium},
-		Run: run.Run{Playbook: "site.yml", DryRun: true, DryRunScans: []run.DryRunScan{{
-			Tool: "ansible", Findings: []string{`site.yml: task "Restart web" sets check_mode to false`},
-		}}},
-		Want: true,
-	}, { // Test 25: A plan whose configuration runs a program is not excluded.
+	}, { // Test 22: A plan whose configuration runs a program is not excluded.
 		Name:   "plan running a program not excluded",
 		Policy: policy.Policy{Tool: "terraform", ExcludeDryRun: true},
 		Run: run.Run{Tool: "terraform", Command: "infra", DryRun: true,
 			DryRunScans: []run.DryRunScan{{Tool: "terraform",
 				Findings: []string{"data.external.x runs a program during plan (main.tf line 1)"}}}},
 		Want: true,
-	}, { // Test 26: A plan whose configuration could not be read in full is not excluded either.
+	}, { // Test 23: A plan whose configuration could not be read in full is not excluded either.
 		Name:   "plan read incompletely not excluded",
 		Policy: policy.Policy{Tool: "opentofu", ExcludeDryRun: true},
 		Run: run.Run{Tool: "opentofu", Command: "infra", DryRun: true,
 			DryRunScans: []run.DryRunScan{{Tool: "opentofu",
 				Unread: []string{`module.vpc from "acme/vpc/aws" (not downloaded here)`}}}},
 		Want: true,
-	}, { // Test 27: A plan whose configuration was read in full and runs nothing is excluded.
+	}, { // Test 24: A plan whose configuration was read in full and runs nothing is excluded.
 		Name:   "change-free plan excluded",
 		Policy: policy.Policy{Tool: "terraform", ExcludeDryRun: true},
 		Run: run.Run{Tool: "terraform", Command: "infra", DryRun: true,
 			DryRunScans: []run.DryRunScan{{Tool: "terraform", Inputs: []string{"infra/main.tf"}}}},
 		Want: false,
-	}, { // Test 28: A plan that runs a program meets a risk floor, graded as the apply it may be.
-		Name: "plan running a program meets a risk floor", Policy: policy.Policy{MinRisk: run.RiskMedium},
-		Run: run.Run{Tool: "terraform", Command: "infra", DryRun: true,
-			DryRunScans: []run.DryRunScan{{Tool: "terraform",
-				Findings: []string{"data.external.x runs a program during plan (main.tf line 1)"}}}},
-		Want: true,
 	}}
 	for _, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {
 			t.Parallel()
 			p, r := test.Policy, test.Run
-			if got := p.Matches(&r); got != test.Want {
-				t.Errorf("Matches() = %v, want %v", got, test.Want)
+			if got := p.MatchesPlain(&r); got != test.Want {
+				t.Errorf("MatchesPlain() = %v, want %v", got, test.Want)
 			}
 		})
 	}
@@ -274,11 +256,6 @@ func TestPlanGated(t *testing.T) {
 		Name:     "workflow step",
 		Policies: []*policy.Policy{{Tool: "terraform", MaxDestroy: policy.DisabledMaxDestroy}},
 		Run:      run.Run{Tool: "terraform", Command: "infra", ParentID: new("run_parent")}, Want: false,
-	}, { // Test 15: A deny rule alone holds nothing, so it plans nothing first.
-		Name: "deny without a floor",
-		Policies: []*policy.Policy{{Effect: policy.EffectDeny, Tool: "terraform",
-			MaxDestroy: policy.DisabledMaxDestroy}},
-		Run: run.Run{Tool: "terraform", Command: "infra"}, Want: false,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -394,46 +371,6 @@ func TestExceedingDistinct(t *testing.T) {
 				t.Errorf("%s: ExceedingDistinct() = %v, want %v", test.Name, got, test.Want)
 			}
 		})
-	}
-}
-
-// TestDenying confirms a deny policy is found for the runs it matches, that a deny rule never
-// doubles as an approval rule, and that Requiring skips it so a denied run is refused rather than
-// parked in front of an approver.
-func TestDenying(t *testing.T) {
-	t.Parallel()
-	deny := &policy.Policy{
-		ID: "pol_deny", Name: "no agent drops", ActorKind: policy.ActorKindAgent,
-		CommandContains: "drop database", Effect: policy.EffectDeny,
-		MaxDestroy: policy.DisabledMaxDestroy,
-	}
-	hold := &policy.Policy{
-		ID: "pol_hold", Name: "hold tf", Tool: "terraform", MaxDestroy: policy.DisabledMaxDestroy,
-	}
-	policies := []*policy.Policy{deny, hold}
-
-	agentDrop := &run.Run{Tool: "bash", Command: "psql -c 'drop database prod'", ActorType: "agent"}
-	if got := policy.Denying(policies, agentDrop); got != deny {
-		t.Errorf("Denying(agent drop) = %v, want the deny policy", got)
-	}
-	// The built-in agent hold covers the agent's run, but no stored rule may: a deny rule never
-	// doubles as an approval rule, and the dispatcher refuses the run before it asks for a hold.
-	if got := policy.Requiring(policies, agentDrop); got != nil && !policy.IsAgentDefault(got) {
-		t.Errorf("Requiring(agent drop) = %v, want no stored rule: a denied run is refused, not "+
-			"held", got)
-	}
-
-	humanDrop := &run.Run{Tool: "bash", Command: "psql -c 'drop database prod'", ActorType: "session"}
-	if got := policy.Denying(policies, humanDrop); got != nil {
-		t.Errorf("Denying(human drop) = %v, want nil: the rule is scoped to agents", got)
-	}
-
-	tfRun := &run.Run{Tool: "terraform", Command: "terraform apply", ActorType: "agent"}
-	if got := policy.Denying(policies, tfRun); got != nil {
-		t.Errorf("Denying(tf) = %v, want nil", got)
-	}
-	if got := policy.Requiring(policies, tfRun); got != hold {
-		t.Errorf("Requiring(tf) = %v, want the hold policy", got)
 	}
 }
 

@@ -41,10 +41,6 @@ func TestReasonRequirementComposesAcrossRules(t *testing.T) {
 		Policies: []*Policy{{Name: "tf", Tool: run.ToolTerraform, MaxDestroy: DisabledMaxDestroy,
 			RequireReason: "always"}},
 		WantRequirement: "",
-	}, { // Test 4: A deny rule holds nothing, so it asks nothing.
-		Policies: []*Policy{{Name: "no", Effect: EffectDeny, MaxDestroy: DisabledMaxDestroy,
-			RequireReason: "always"}},
-		WantRequirement: "",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

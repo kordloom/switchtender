@@ -165,12 +165,11 @@ func TestAllowRulesAsksTeamBeforePro(t *testing.T) {
 	}
 }
 
-// TestALapsedProKeepsEnforcingADenyRuleFromTheFile holds the lapse promise on the tier that now sells
-// deny rules. A Pro install's policy file with a deny rule keeps loading after the term runs out,
-// and the rule keeps refusing the runs it was written to refuse: a lapse takes nothing. A rule Pro
-// never covered is still refused under the same lapsed license, so the lapse is not a way to Team.
-// Not parallel: the license is process state.
-func TestALapsedProKeepsEnforcingADenyRuleFromTheFile(t *testing.T) {
+// TestALapsedProKeepsLoadingADenyRuleFromTheFile holds the lapse promise on the tier that now sells
+// deny rules. A Pro install's policy file with a deny rule keeps loading after the term runs out: a
+// lapse takes nothing. A rule Pro never covered is still refused under the same lapsed license, so
+// the lapse is not a way to Team. Not parallel: the license is process state.
+func TestALapsedProKeepsLoadingADenyRuleFromTheFile(t *testing.T) {
 	held := license.Current()
 	t.Cleanup(func() { license.Set(held) })
 	path := filepath.Join(t.TempDir(), "policies.yml")
@@ -190,16 +189,15 @@ func TestALapsedProKeepsEnforcingADenyRuleFromTheFile(t *testing.T) {
 		t.Fatalf("a live Pro license was refused a deny rule from its file: %v", err)
 	}
 
-	// Test 0: Midnight. The same file keeps loading, and the deny rule keeps refusing.
+	// Test 0: Midnight. The same file keeps loading. That the deny rule keeps refusing is the paid
+	// rule engine's, and is tested with it.
 	license.Set(ladderLicense(license.TierPro, -time.Hour))
 	set, err := store.List(context.Background())
 	if err != nil {
 		t.Fatalf("a lapsed Pro license took the install offline: List() error = %v", err)
 	}
-	if denied := Denying(set, &run.Run{Tool: run.ToolTerraform}); denied == nil ||
-		denied.Name != "never destroy prod" {
-		t.Errorf("Denying() = %v, want the deny rule: the rule written to hold production stopped "+
-			"applying the moment the term ran out", denied)
+	if len(set) != 1 || set[0].Name != "never destroy prod" {
+		t.Errorf("List() = %v, want the deny rule the file declares", set)
 	}
 
 	// Test 1: A rule Pro never had is refused under the same lapsed license, and not as a lapse.

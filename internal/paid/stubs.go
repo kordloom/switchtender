@@ -38,18 +38,6 @@ func (stubRegoCompiler) Compile([]RegoModule, RegoSettings) (RegoProgram, error)
 	return nil, Requires(license.FeaturePolicyFull)
 }
 
-// stubRuleEvaluator is the Community rule evaluator: it refuses naming the tier the criteria need,
-// Team when any Team criterion is set and Pro otherwise, so the caller holds the run and says why.
-type stubRuleEvaluator struct{}
-
-// Matches refuses.
-func (stubRuleEvaluator) Matches(_ *run.Run, c RuleCriteria) (bool, error) {
-	if c.RequireDistinctApprover || c.Actor != "" || c.Account != "" || c.ActorKind != "" {
-		return false, Requires(license.FeaturePolicyFull)
-	}
-	return false, Requires(license.FeaturePolicyRules)
-}
-
 // stubChangeRegister is the Community change register: it refuses naming Team.
 type stubChangeRegister struct{}
 

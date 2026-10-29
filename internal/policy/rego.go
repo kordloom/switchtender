@@ -419,10 +419,10 @@ func mergeReasons(a, b []string) []string {
 	return out
 }
 
-// regoVerdict returns a copy of a Rego policy standing for one decision about one run, labeled
+// RegoVerdict returns a copy of a Rego policy standing for one decision about one run, labeled
 // with what decided and why so the hold, the refusal, and the record all name the bundle that
 // decided rather than only the rule's name.
-func (p *Policy) regoVerdict(effect string, reasons []string, err error) *Policy {
+func (p *Policy) RegoVerdict(effect string, reasons []string, err error) *Policy {
 	cp := *p
 	cp.Effect = effect
 	why := strings.Join(reasons, ", ")
@@ -434,9 +434,14 @@ func (p *Policy) regoVerdict(effect string, reasons []string, err error) *Policy
 }
 
 // regoLabel names a Rego policy's decision about one run: the policy, why, and the first twelve
-// characters of its bundle digest.
+// characters of its bundle digest. A program that was never compiled has no digest, and its
+// refusal is labeled all the same rather than crashing the gate that refused.
 func (p *Policy) regoLabel(why string) string {
-	return fmt.Sprintf("%s (%s, rego sha256:%s)", p.Label(), why, p.Rego.Digest()[:12])
+	digest := p.Rego.Digest()
+	if len(digest) > 12 {
+		digest = digest[:12]
+	}
+	return fmt.Sprintf("%s (%s, rego sha256:%s)", p.Label(), why, digest)
 }
 
 // noteLabel names what one Rego policy noted about a run in the form a hold is named, carrying at

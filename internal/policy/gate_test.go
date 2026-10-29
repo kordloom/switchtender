@@ -67,34 +67,25 @@ func TestEveryCriterionMatchesAndRefuses(t *testing.T) {
 		WantMatch: false,
 	}, { // Test 10: An actor-kind of the wrong case is an unknown kind and matches nothing.
 		Policy: policy.Policy{ActorKind: "Agent"}, Run: run.Run{ActorType: "agent"}, WantMatch: false,
-	}, { // Test 11: A medium floor covers an infrastructure apply, which grades medium.
-		Policy: policy.Policy{MinRisk: run.RiskMedium}, Run: run.Run{Tool: run.ToolTerraform},
-		WantMatch: true,
-	}, { // Test 12: A medium floor leaves an ordinary shell command, which grades low, alone.
-		Policy: policy.Policy{MinRisk: run.RiskMedium}, Run: run.Run{Tool: run.ToolBash, Command: "echo ok"},
-		WantMatch: false,
-	}, { // Test 13: A low floor covers everything, since every run grades at least low.
-		Policy: policy.Policy{MinRisk: run.RiskLow}, Run: run.Run{Tool: run.ToolBash, Command: "echo ok"},
-		WantMatch: true,
-	}, { // Test 14: Excluding dry runs does not exclude a real run of the same shape.
+	}, { // Test 11: Excluding dry runs does not exclude a real run of the same shape.
 		Policy: policy.Policy{ExcludeDryRun: true}, Run: run.Run{Tool: run.ToolTerraform},
 		WantMatch: true,
-	}, { // Test 15: Excluding dry runs beats every other criterion, including a risk floor the dry run
+	}, { // Test 12: Excluding dry runs beats every other criterion, including a risk floor the dry run
 		// would otherwise fail anyway.
 		Policy: policy.Policy{ExcludeDryRun: true, MinRisk: run.RiskLow},
 		Run:    run.Run{Tool: run.ToolTerraform, DryRun: true}, WantMatch: false,
-	}, { // Test 16: An empty command criterion matches a run with no command.
+	}, { // Test 13: An empty command criterion matches a run with no command.
 		Policy: policy.Policy{}, Run: run.Run{Command: ""}, WantMatch: true,
-	}, { // Test 17: A command criterion is a substring, anchored nowhere.
+	}, { // Test 14: A command criterion is a substring, anchored nowhere.
 		Policy: policy.Policy{CommandContains: "destroy"},
 		Run:    run.Run{Command: "cd /infra && terraform destroy -auto-approve"}, WantMatch: true,
-	}, { // Test 18: A command criterion no run text carries does not match.
+	}, { // Test 15: A command criterion no run text carries does not match.
 		Policy: policy.Policy{CommandContains: "destroy"}, Run: run.Run{Command: ""}, WantMatch: false,
-	}, { // Test 19: Unicode in the criterion and the command matches, so a rule written in any script
+	}, { // Test 16: Unicode in the criterion and the command matches, so a rule written in any script
 		// works.
 		Policy: policy.Policy{CommandContains: "supprimer-tout"},
 		Run:    run.Run{Command: "./scripts/supprimer-tout --oui"}, WantMatch: true,
-	}, { // Test 20: Every dimension at once, all satisfied.
+	}, { // Test 17: Every dimension at once, all satisfied.
 		Policy: policy.Policy{
 			Tool: run.ToolTerraform, CommandContains: "destroy", InventoryID: "inv_prod",
 			Queue: "prod", ActorKind: policy.ActorKindAgent, Actor: "bot", MinRisk: run.RiskHigh,
@@ -104,7 +95,7 @@ func TestEveryCriterionMatchesAndRefuses(t *testing.T) {
 			Tool: run.ToolTerraform, Command: "terraform destroy -auto-approve",
 			InventoryID: "inv_prod", Queue: "prod", ActorType: "agent", Actor: "bot",
 		}, WantMatch: true,
-	}, { // Test 21: The same rule with one dimension off does not match, which is what narrowing means.
+	}, { // Test 18: The same rule with one dimension off does not match, which is what narrowing means.
 		Policy: policy.Policy{
 			Tool: run.ToolTerraform, CommandContains: "destroy", InventoryID: "inv_prod",
 			Queue: "prod", ActorKind: policy.ActorKindAgent, Actor: "bot", MinRisk: run.RiskHigh,
@@ -114,11 +105,11 @@ func TestEveryCriterionMatchesAndRefuses(t *testing.T) {
 			Tool: run.ToolTerraform, Command: "terraform destroy -auto-approve",
 			InventoryID: "inv_prod", Queue: "dmz", ActorType: "agent", Actor: "bot",
 		}, WantMatch: false,
-	}, { // Test 22: A person acting through a pull request comment from their linked forge account
+	}, { // Test 19: A person acting through a pull request comment from their linked forge account
 		// is a human actor, so a rule binding people binds the apply their comment asks for.
 		Policy: policy.Policy{ActorKind: policy.ActorKindHuman},
 		Run:    run.Run{ActorType: "forge_comment"}, WantMatch: true,
-	}, { // Test 23: The same comment is not an agent.
+	}, { // Test 20: The same comment is not an agent.
 		Policy: policy.Policy{ActorKind: policy.ActorKindAgent},
 		Run:    run.Run{ActorType: "forge_comment"}, WantMatch: false,
 	}}
@@ -126,8 +117,8 @@ func TestEveryCriterionMatchesAndRefuses(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			p, r := test.Policy, test.Run
-			if got := p.Matches(&r); got != test.WantMatch {
-				t.Errorf("Matches() = %v, want %v for policy %+v and run %+v",
+			if got := p.MatchesPlain(&r); got != test.WantMatch {
+				t.Errorf("MatchesPlain() = %v, want %v for policy %+v and run %+v",
 					got, test.WantMatch, p, r)
 			}
 		})
@@ -164,15 +155,11 @@ func TestAnEmptyRuleMatchesEveryRunShape(t *testing.T) {
 			t.Parallel()
 			r := test.Run
 			empty := policy.Policy{}
-			if !empty.Matches(&r) {
+			if !empty.MatchesPlain(&r) {
 				t.Errorf("an empty rule did not match run %+v, so the blanket gate has a hole in it", r)
 			}
 			if !policy.Requires([]*policy.Policy{blanket(empty)}, &r) {
 				t.Errorf("an empty blanket rule did not require approval for run %+v", r)
-			}
-			deny := policy.Policy{Effect: policy.EffectDeny, MaxDestroy: policy.DisabledMaxDestroy}
-			if policy.Denying([]*policy.Policy{&deny}, &r) == nil {
-				t.Errorf("an empty deny rule did not refuse run %+v", r)
 			}
 		})
 	}
@@ -347,12 +334,6 @@ func TestRequiringNamesTheFirstMatchingRule(t *testing.T) {
 	if got := policy.Requiring(planOnly, r); got != nil {
 		t.Errorf("Requiring() = %v, want nil: a plan-content rule is enforced by the plan gate", got)
 	}
-	// A deny rule is not an approval rule either: a denied run is refused, never parked in front of
-	// an approver who could release it.
-	denyOnly := []*policy.Policy{blanket(policy.Policy{ID: "pol_d", Effect: policy.EffectDeny})}
-	if got := policy.Requiring(denyOnly, r); got != nil {
-		t.Errorf("Requiring() = %v, want nil for a deny rule", got)
-	}
 	if got := policy.Denying(nil, r); got != nil {
 		t.Errorf("Denying(nil) = %v, want nil", got)
 	}
@@ -514,29 +495,21 @@ func TestRequireDistinctIgnoresRulesThatDoNotApply(t *testing.T) {
 	}, { // Test 1: A matching rule with the flag demands a second person.
 		Policies:     []*policy.Policy{blanket(policy.Policy{Queue: "prod", RequireDistinctApprover: true})},
 		WantDistinct: true,
-	}, { // Test 2: A deny rule's flag stays out of it, because a denied run is never approved at all.
-		Policies: []*policy.Policy{blanket(policy.Policy{
-			Effect: policy.EffectDeny, RequireDistinctApprover: true,
-		})}, WantDistinct: false,
-	}, { // Test 3: A rule scoped to another queue does not reach this run.
+	}, { // Test 2: A rule scoped to another queue does not reach this run.
 		Policies: []*policy.Policy{blanket(policy.Policy{
 			Queue: "staging", RequireDistinctApprover: true,
 		})}, WantDistinct: false,
-	}, { // Test 4: A rule scoped to agents does not reach a person's run.
-		Policies: []*policy.Policy{blanket(policy.Policy{
-			ActorKind: policy.ActorKindAgent, RequireDistinctApprover: true,
-		})}, WantDistinct: false,
-	}, { // Test 5: A plan-content rule demanding a second person counts, since the plan gate holds
+	}, { // Test 3: A plan-content rule demanding a second person counts, since the plan gate holds
 		// under the same requirement.
 		Policies:     []*policy.Policy{{Tool: run.ToolTerraform, MaxDestroy: 0, RequireDistinctApprover: true}},
 		WantDistinct: true,
-	}, { // Test 6: One matching rule out of many is enough.
+	}, { // Test 4: One matching rule out of many is enough.
 		Policies: []*policy.Policy{
 			blanket(policy.Policy{Queue: "staging", RequireDistinctApprover: true}),
 			blanket(policy.Policy{Tool: run.ToolBash, RequireDistinctApprover: true}),
 			blanket(policy.Policy{Tool: run.ToolTerraform, RequireDistinctApprover: true}),
 		}, WantDistinct: true,
-	}, { // Test 7: Matching rules without the flag demand nothing.
+	}, { // Test 5: Matching rules without the flag demand nothing.
 		Policies: []*policy.Policy{
 			blanket(policy.Policy{Queue: "prod"}), blanket(policy.Policy{Tool: run.ToolTerraform}),
 		}, WantDistinct: false,
