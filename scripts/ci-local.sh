@@ -28,10 +28,6 @@
 # the version go.mod names, as setup-go does. The image builds on first use, in a few minutes, and
 # again only when a pinned version or the Playwright lockfile changes.
 #
-#   SUPERTEST_LICENSE_FILE      The Team license the supertest workflow reads from its secret.
-#                               Without it the workflow's license step fails here, as in CI.
-#   CI_LOCAL_SUPERTEST_TIER     Set to "community" to run the supertest without its Team phases.
-#                               CI never does that, and the result says so when it happens.
 #   SWITCHTENDER_LOOMSEAL_REPO  The LoomSeal checkout, ../loomseal-ci-local by default. It is cloned
 #                               or moved to the version go.mod pins only when it is not there yet.
 #   CI_LOCAL_MATRIX             Matrix values to narrow to, such as "shard=4,5", to rerun some legs.
@@ -62,6 +58,8 @@ PHASES=(build lint race crossverify conformance integration node e2e assess site
 LINUX_JOBS='
 build       | ci.yml          | checks                | Build
 build       | ci.yml          | checks                | Vet
+build       | ci.yml          | checks                | Public tree holds no paid code
+build       | ci.yml          | checks                | Public module omits paid-tier dependencies
 lint        | ci.yml          | lint                  |
 race        | ci.yml          | test                  |
 crossverify | ci.yml          | crossverify           |
@@ -143,8 +141,6 @@ list() {
 Not run here, and why
    deploy-site.yml deploy, "Deploy site to Cloudflare Pages": it publishes the site with the
      repository's Cloudflare token. Every step before it runs.
-   supertest.yml supertest, "Write the Team license": it reads the SUPERTEST_LICENSE secret.
-     Set SUPERTEST_LICENSE_FILE to the license to run it as CI does.
    upload-artifact steps: the files they would upload are copied into the run directory.
    release.yml, fuzz.yml, demo-refresh.yml: they run on tags, a schedule, or by hand, never on a
      pull request or a push to main.
@@ -207,10 +203,10 @@ read_pins() {
 }
 
 # tree_files prints, NUL-separated, the files a push would carry: tracked or new, not ignored, and
-# still present. Its arguments narrow it to pathspecs.
+# still present, without the private submodule checkout. Its arguments narrow it to pathspecs.
 tree_files() {
   local f
-  git ls-files -z --cached --others --exclude-standard -- "$@" |
+  git ls-files -z --cached --others --exclude-standard -- "$@" ':(exclude)internal/paid/impl' |
     while IFS= read -r -d '' f; do
       if [ -e "$f" ] || [ -L "$f" ]; then
         printf '%s\0' "$f"
@@ -469,12 +465,6 @@ linux_job() {
   if [ "$LOOMSEAL_COMMON" != "$LOOMSEAL_DIR/.git" ]; then
     mounts+=(-v "$LOOMSEAL_COMMON:$LOOMSEAL_COMMON:ro")
   fi
-  if [ -n "${SUPERTEST_LICENSE_FILE:-}" ]; then
-    license="$SUPERTEST_LICENSE_FILE"
-    [ -r "$license" ] || die "cannot read SUPERTEST_LICENSE_FILE: $license"
-    license="$(cd "$(dirname "$license")" && pwd -P)/$(basename "$license")"
-    mounts+=(-v "$license:/ci/secrets/SUPERTEST_LICENSE:ro")
-  fi
   case "$HOST_NETWORK_JOBS" in
     *" $job "*)
       shared_tmp
@@ -484,8 +474,7 @@ linux_job() {
       ;;
     *) network=(--hostname ci-local.runner.internal) ;;
   esac
-  env+=(-e "CI_LOCAL_RUN_ID=$RUN_ID" -e "CI_LOCAL_CONTAINER=$name"
-    -e "CI_LOCAL_SUPERTEST_TIER=${CI_LOCAL_SUPERTEST_TIER:-}")
+  env+=(-e "CI_LOCAL_RUN_ID=$RUN_ID" -e "CI_LOCAL_CONTAINER=$name")
   if [ -n "${CI_LOCAL_MATRIX:-}" ]; then
     read -ra matrix <<< "$CI_LOCAL_MATRIX"
     for kv in "${matrix[@]}"; do
@@ -632,9 +621,6 @@ main() {
     make_snapshot
     check_coverage
   fi
-  if [ "${CI_LOCAL_SUPERTEST_TIER:-}" = community ]; then
-    warn "CI_LOCAL_SUPERTEST_TIER=community: the supertest skips the Team phases CI runs"
-  fi
 
   for phase in "${SELECTED[@]}"; do
     run_phase "$phase"
@@ -651,9 +637,6 @@ main() {
   fi
   if [ -n "${CI_LOCAL_MATRIX:-}" ]; then
     warn "CI_LOCAL_MATRIX=$CI_LOCAL_MATRIX narrowed the matrix jobs to part of what CI runs"
-  fi
-  if [ "${CI_LOCAL_SUPERTEST_TIER:-}" = community ]; then
-    warn "the supertest ran its Community phases only. CI also runs the Team phases"
   fi
 }
 

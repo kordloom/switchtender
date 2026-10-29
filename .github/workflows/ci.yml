@@ -33,6 +33,35 @@ jobs:
         run: go build ./...
       - name: Vet
         run: go vet ./...
+
+      # Public CI runs what a stranger's clone runs: the checkout never inits the paid submodule,
+      # so its directory must be empty and the index may hold only the gitlink. A stray file here
+      # means paid code reached the public tree.
+      - name: Public tree holds no paid code
+        run: |
+          set -euo pipefail
+          dir=internal/paid/impl
+          stray="$(git ls-files -s -- "$dir" | awk '$1 != "160000" {print $4}')"
+          if [ -n "$stray" ]; then
+            echo "tracked files under $dir other than the gitlink:" >&2
+            echo "$stray" >&2
+            exit 1
+          fi
+          if [ -d "$dir" ] && [ -n "$(find "$dir" -mindepth 1 -print -quit)" ]; then
+            echo "files present under $dir in a checkout that never inits the submodule:" >&2
+            find "$dir" -mindepth 1 >&2
+            exit 1
+          fi
+
+      # The paid tier owns its heavy dependencies. If one appears in the public module, the code
+      # that needs it is probably public too.
+      - name: Public module omits paid-tier dependencies
+        run: |
+          set -euo pipefail
+          if grep -nE 'open-policy-agent/opa|coreos/go-oidc|crewjam/saml|go-ldap/ldap' go.mod; then
+            echo "go.mod lists a paid-tier dependency" >&2
+            exit 1
+          fi
       - name: JS unit tests
         run: node --test internal/ui/assets/jstest/*.test.mjs
 

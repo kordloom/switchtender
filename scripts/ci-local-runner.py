@@ -182,26 +182,6 @@ LOCAL_STEPS = {
     },
 }
 
-# COMMUNITY_STEPS replace the supertest's two license steps when CI_LOCAL_SUPERTEST_TIER is
-# "community", for a machine that does not hold the Team license. CI always runs the Team phases,
-# so ci-local.sh says in its result when a run did not.
-COMMUNITY_STEPS = {
-    ("supertest.yml", "supertest", "Write the Team license"): {
-        "ci": "e48e2df71e05a567",
-        "why": "CI_LOCAL_SUPERTEST_TIER=community: no Team license is written.",
-        "script": "echo 'the Team phases will not run'\n",
-    },
-    ("supertest.yml", "supertest", "Run the supertest"): {
-        "ci": "95f5c02e6bd8378a",
-        "why": "CI_LOCAL_SUPERTEST_TIER=community: the supertest runs with -skip-team.",
-        "script": "set -euo pipefail\n"
-                  "go run ./test/supertest \\\n"
-                  "  -skip-team \\\n"
-                  "  -shots /tmp/supertest-shots \\\n"
-                  "  -report \"$GITHUB_STEP_SUMMARY\"\n",
-    },
-}
-
 # LOCAL_EXTRA_STEPS run after the CI step they are keyed by, for what a local run must check that
 # CI checks some other way.
 LOCAL_EXTRA_STEPS = {
@@ -768,8 +748,6 @@ def run_step(job, step, raw_name, name):
                                  .get("working-directory") or ""))
         workdir = os.path.join(job.workspace, workdir)
         local = LOCAL_STEPS.get(key)
-        if os.environ.get("CI_LOCAL_SUPERTEST_TIER") == "community":
-            local = local or COMMUNITY_STEPS.get(key)
         if local:
             if digest(script) != local["ci"]:
                 raise JobError(f"{job.workflow} changed the step \"{raw_name}\" in job "
