@@ -12,6 +12,7 @@ import (
 	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/dossier"
 	"github.com/kordloom/switchtender/internal/license"
+	"github.com/kordloom/switchtender/internal/paid"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/scrub"
 	"github.com/kordloom/switchtender/internal/util"
@@ -106,11 +107,15 @@ func runEvidenceHandler(store run.Store, audits audit.Store, producer audit.Iden
 // or an RFC 3339 time; the period defaults to the last 90 days.
 //
 // binder holds the row each approval released to its seal, so a rewritten approver is flagged on its
-// row and counted in the banner; nil marks every approval unchecked.
+// row and counted in the banner; nil marks every approval unchecked. register is the paid module's
+// change register, which on Community refuses naming Team.
 func auditRegisterHandler(store run.Store, audits audit.Store, producer audit.Identity,
-	binder *binding.Verifier, log *zap.Logger) http.HandlerFunc {
+	binder *binding.Verifier, register paid.ChangeRegister, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: auditRegisterHandler: Store required")
+	}
+	if register == nil {
+		panic("server: auditRegisterHandler: ChangeRegister required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if audits == nil {
@@ -147,40 +152,47 @@ func auditRegisterHandler(store run.Store, audits audit.Store, producer audit.Id
 			return
 		}
 		// The period is caller controlled, so the bound is the store query's and not the reader's
-		// good manners. A truncated document says so on its face.
-		in, err := dossier.CollectRegister(r.Context(), store, audits, producer, from, to,
-			time.Now(), dossier.MaxRegisterRuns)
-		if err != nil {
-			log.Error("server: collect change register: " + err.Error())
-			respondError(w, log, http.StatusInternalServerError, "could not collect the register")
-			return
-		}
-		dossier.AttachRegisterSeals(r.Context(), in, binder, store)
+		// good manners: a period with no limit takes the register's default cap, and a truncated
+		// document says so on its face.
+		src := paid.RegisterSource{Runs: store, Audits: audits, Producer: producer, Binder: binder}
+		period := paid.RegisterPeriod{From: from, To: to, Now: time.Now()}
 		// The register page in the web interface reads the same register as data. The form is
-		// chosen only here, after the license gate and the collection, so the JSON is gated and
-		// bounded exactly as the document is, and its rows come from the one builder the document
-		// renders, so the page and the download cannot disagree.
+		// chosen only here, after the license gate, so the JSON is gated and bounded exactly as the
+		// document is, and its rows come from the one builder the document renders, so the page and
+		// the download cannot disagree.
 		if r.URL.Query().Get("format") == "json" {
-			reg, err := dossier.BuildRegister(in)
-			if err != nil {
-				log.Error("server: build change register: " + err.Error())
-				respondError(w, log, http.StatusInternalServerError, "could not build the register")
+			reg, err := register.Build(r.Context(), src, period)
+			if registerFailed(w, log, err, "build") {
 				return
 			}
 			releaseWalk(r.Context())
 			respondJSON(w, log, http.StatusOK, reg, wantsPretty(r))
 			return
 		}
-		doc, err := dossier.RenderRegister(in)
-		if err != nil {
-			log.Error("server: render change register: " + err.Error())
-			respondError(w, log, http.StatusInternalServerError, "could not render the register")
+		doc, err := register.Render(r.Context(), src, period)
+		if registerFailed(w, log, err, "render") {
 			return
 		}
 		releaseWalk(r.Context())
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(doc)
 	}
+}
+
+// registerFailed answers a register that could not be produced and reports whether it did. A
+// Community build's refusal names the tier it needs; any other failure is the server's, logged and
+// answered without its cause.
+func registerFailed(w http.ResponseWriter, log *zap.Logger, err error, verb string) bool {
+	switch {
+	case err == nil:
+		return false
+	case errors.Is(err, paid.ErrRequiresTier):
+		respondError(w, log, http.StatusForbidden, err.Error())
+	default:
+		log.Error("server: " + verb + " change register: " + err.Error())
+		respondError(w, log, http.StatusInternalServerError, "could not "+verb+" the register")
+	}
+	return true
 }
 
 // parseRegisterTime accepts a date or an RFC 3339 time.

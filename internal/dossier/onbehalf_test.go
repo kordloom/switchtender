@@ -11,8 +11,7 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 )
 
-// TestDocumentsNameTheAccountBehindADecision pins who the dossier and the change register say
-// decided a run.
+// TestDocumentsNameTheAccountBehindADecision pins who the dossier says decided a run.
 //
 // A decision made with a token bound to an account carries that account, and both documents named
 // only the token's label, so two tokens sharing a label on different accounts read as one approver
@@ -30,20 +29,18 @@ func TestDocumentsNameTheAccountBehindADecision(t *testing.T) {
 		Actor, ActorType, OnBehalfOf string
 		// WantCell is the dossier's actor cell on the decision row.
 		WantCell string
-		// WantDecision is the register's decision cell.
-		WantDecision string
 	}{{ // Test 0: A token bound to an account names the account.
 		Name: "bound token", Actor: "laptop", ActorType: "token", OnBehalfOf: "alice",
-		WantCell: "laptop on behalf of alice", WantDecision: "Approved by laptop on behalf of alice",
+		WantCell: "laptop on behalf of alice",
 	}, { // Test 1: A browser session is named for its own account, which is said once.
 		Name: "browser session", Actor: "casey", ActorType: "session", OnBehalfOf: "casey",
-		WantCell: "casey", WantDecision: "Approved by casey",
+		WantCell: "casey",
 	}, { // Test 2: An install serving open records the caller class its request carries.
 		Name: "open install", Actor: "unauthenticated", ActorType: "unauthenticated",
-		WantCell: "unauthenticated", WantDecision: "Approved by unauthenticated",
+		WantCell: "unauthenticated",
 	}, { // Test 3: A decision recorded before decisions carried the account.
 		Name: "before the account", Actor: "pat", ActorType: "session",
-		WantCell: "pat", WantDecision: "Approved by pat",
+		WantCell: "pat",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -78,20 +75,6 @@ func TestDocumentsNameTheAccountBehindADecision(t *testing.T) {
 			wantRow := "<tr><td>Approved</td><td>" + test.WantCell + "</td>"
 			if !strings.Contains(string(doc), wantRow) {
 				t.Errorf("dossier is missing the decision row %q:\n%s", wantRow, doc)
-			}
-
-			reg, err := CollectRegister(ctx, runs, audits, audit.Identity{}, at.Add(-time.Hour),
-				at.Add(time.Hour), at.Add(time.Hour), 0)
-			if err != nil {
-				t.Fatalf("CollectRegister() error = %v", err)
-			}
-			page, err := RenderRegister(reg)
-			if err != nil {
-				t.Fatalf("RenderRegister() error = %v", err)
-			}
-			wantCell := "<td>" + test.WantDecision + " <span"
-			if !strings.Contains(string(page), wantCell) {
-				t.Errorf("register is missing the decision cell %q:\n%s", wantCell, page)
 			}
 		})
 	}

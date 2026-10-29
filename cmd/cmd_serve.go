@@ -35,7 +35,6 @@ import (
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/dispatch"
-	"github.com/kordloom/switchtender/internal/evidence"
 	"github.com/kordloom/switchtender/internal/extplugin"
 	"github.com/kordloom/switchtender/internal/factcache"
 	"github.com/kordloom/switchtender/internal/federation"
@@ -1817,14 +1816,19 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			if producer != nil {
 				packProducer = *producer
 			}
-			packs := evidence.NewEmitter(bundle.Runs(), bundle.Audits(), packProducer, evidenceDir,
-				evidenceCadence,
-				log, evidence.WithNotify(func(path string, from, to time.Time) {
+			packs, err := paid.CurrentChangeRegister().NewEmitter(paid.EmitterConfig{
+				Source: paid.RegisterSource{Runs: bundle.Runs(), Audits: bundle.Audits(),
+					Producer: packProducer,
+					Binder:   dispatch.NewBindingVerifier(bundle.Runs(), bundle.Audits(), bindingKey)},
+				Dir: evidenceDir, Cadence: evidenceCadence, Log: log,
+				Notify: func(path string, from, to time.Time) {
 					log.Info("evidence pack ready", zap.String("path", path),
 						zap.Time("from", from), zap.Time("to", to))
-				}),
-				evidence.WithBinder(dispatch.NewBindingVerifier(bundle.Runs(), bundle.Audits(),
-					bindingKey)))
+				},
+			})
+			if err != nil {
+				return err
+			}
 			if err := packs.Start(); err != nil {
 				return err
 			}

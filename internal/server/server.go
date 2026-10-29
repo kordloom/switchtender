@@ -218,6 +218,15 @@ func WithReconciler(r paid.Reconciler) Option {
 	return func(srv *Server) { srv.reconciler = r }
 }
 
+// WithChangeRegister sets what produces the period change register. A server built without it uses
+// whatever the paid module registered, which on Community is the stub that refuses naming Team.
+func WithChangeRegister(r paid.ChangeRegister) Option {
+	if r == nil {
+		panic("server: WithChangeRegister: ChangeRegister required")
+	}
+	return func(srv *Server) { srv.register = r }
+}
+
 // WithPolicies enables the approval policy endpoints backed by the given store.
 func WithPolicies(store policy.Store) Option {
 	return func(srv *Server) { srv.policies = store }
@@ -465,6 +474,8 @@ type Server struct {
 	policies policy.Store
 	// reconciler builds one-click reconcile proposals.
 	reconciler paid.Reconciler
+	// register produces the period change register.
+	register paid.ChangeRegister
 	// audits backs the audit trail when configured.
 	audits audit.Store
 	// producer is the install's signing identity, published so a verifier can pin it. Nil when the
@@ -571,7 +582,8 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 		log = zap.NewNop()
 	}
 	srv := &Server{store: store, submitter: submitter, log: log, hooks: newHookFlights(),
-		guard: user.DefaultGuard(), reconciler: paid.CurrentReconciler()}
+		guard: user.DefaultGuard(), reconciler: paid.CurrentReconciler(),
+		register: paid.CurrentChangeRegister()}
 	for _, opt := range opts {
 		opt(srv)
 	}
@@ -734,7 +746,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/audit/bundle", walks.hold(auditBundleHandler(s.audits, s.producer,
 		s.producerProblem, s.productVersion, s.log)))
 	mux.Handle("GET /v1/audit/register", walks.hold(auditRegisterHandler(s.store, s.audits, producer,
-		dispatch.NewBindingVerifier(s.store, s.audits, s.bindingKey), s.log)))
+		dispatch.NewBindingVerifier(s.store, s.audits, s.bindingKey), s.register, s.log)))
 	mux.Handle("GET /v1/audit/witness", witnessHandler(s.witness, s.log))
 	// Served unauthenticated: the beat feed exists so an outside watcher can see the chain is
 	// alive and whole, and that watcher has no account here.

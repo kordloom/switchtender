@@ -3,97 +3,85 @@ package server
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"html"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/binding"
-	"github.com/kordloom/switchtender/internal/dossier"
+	"github.com/kordloom/switchtender/internal/license"
+	"github.com/kordloom/switchtender/internal/paid"
 	"github.com/kordloom/switchtender/internal/run"
-	"github.com/kordloom/switchtender/internal/scrub"
 	"github.com/kordloom/switchtender/internal/user"
 )
 
-// registerBase is the instant the seeded register periods are built around.
-var registerBase = time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
-
-// registerPeriod is the query naming the seeded period explicitly, so the two forms of one register
-// read the same window whatever the clock says when the test runs.
+// registerPeriod is the query naming a period explicitly, so a test reads the same window whatever
+// the clock says when it runs.
 const registerPeriod = "from=2026-08-03&to=2026-08-04"
 
-// registerSecret is the password the seeded script assigns inline, which neither form may carry.
-const registerSecret = "hunter2secret"
-
-// seedRegisterKinds stores one run of every kind the register describes differently: approved,
-// rejected, held, a dry run that is not change free, a failure, a run with no actor, and a script
-// with an inline secret whose actor carries markup. It also records the outcome of a run the store
-// no longer holds, so the period reads as pruned.
-func seedRegisterKinds(t *testing.T) (run.Store, audit.Store) {
-	t.Helper()
-	ctx := context.Background()
-	runs := run.NewMemStore()
-	audits := audit.NewMemStore()
-	at := func(minutes int) time.Time { return registerBase.Add(time.Duration(minutes) * time.Minute) }
-	for _, r := range []*run.Run{
-		{ID: "run_approved", Playbook: "site.yml", Status: run.StatusSucceeded, Actor: "alice",
-			Source: "template", SourceID: "tpl_web", CreatedAt: at(0)},
-		{ID: "run_rejected", Tool: "terraform", Command: "infra/network", Status: run.StatusRejected,
-			Actor: "alice", CreatedAt: at(1)},
-		{ID: "run_held", Playbook: "db.yml", Status: run.StatusPendingApproval, Actor: "agent-7",
-			HeldByPolicy: "requested by an agent, held by default", CreatedAt: at(2)},
-		{ID: "run_dry", Tool: "plugin-tool", Command: "plan everything", DryRun: true,
-			Status: run.StatusSucceeded, Actor: "alice", CreatedAt: at(3)},
-		{ID: "run_failed", Playbook: "patch.yml", Status: run.StatusFailed, Actor: "alice",
-			CreatedAt: at(4)},
-		{ID: "run_noactor", Playbook: "site.yml", Status: run.StatusSucceeded, CreatedAt: at(5)},
-		{ID: "run_secret", Tool: run.ToolBash, Status: run.StatusSucceeded,
-			Command: "export DB_PASSWORD=" + registerSecret + "\npsql -c 'select 1'",
-			Actor:   `dev "ops" <a&b>`, CreatedAt: at(6)},
-	} {
-		if err := runs.Save(ctx, r); err != nil {
-			t.Fatalf("Save() error = %v", err)
-		}
-	}
-	for _, e := range []struct{ Actor, Method, Path string }{
-		{"bob", audit.MethodDecision, "/runs/run_approved/decision/approved"},
-		{"carol", audit.MethodDecision, "/runs/run_rejected/decision/rejected"},
-		{"system:dispatcher", audit.MethodRun, "/runs/run_gone/outcome/succeeded"},
-	} {
-		if err := audits.Append(ctx, &audit.Entry{
-			ID: audit.NewID(), At: at(10), Actor: e.Actor, Method: e.Method, Path: e.Path,
-		}); err != nil {
-			t.Fatalf("Append() error = %v", err)
-		}
-	}
-	return runs, audits
+// recordingRegister is a change register that records what the handler asked it for and answers
+// with a fixed document and value. It knows nothing about collecting a register, so a test using it
+// is about the handler: its gates, its period, and the form it answers in.
+type recordingRegister struct {
+	// mu guards the recorded fields.
+	mu sync.Mutex
+	// src is the source of the last request.
+	src paid.RegisterSource
+	// period is the period of the last request.
+	period paid.RegisterPeriod
+	// calls names each method called, in order.
+	calls []string
+	// err, when set, is returned by Render and Build.
+	err error
 }
 
-// seedRegisterPastTheCap stores one change more than a register carries, so both forms are cut.
-func seedRegisterPastTheCap(t *testing.T) (run.Store, audit.Store) {
-	t.Helper()
-	ctx := context.Background()
-	runs := run.NewMemStore()
-	for i := range dossier.MaxRegisterRuns + 1 {
-		if err := runs.Save(ctx, &run.Run{
-			ID: fmt.Sprintf("run_%05d", i), Playbook: "site.yml", Status: run.StatusSucceeded,
-			Actor: "alice", CreatedAt: registerBase.Add(time.Duration(i) * time.Second),
-		}); err != nil {
-			t.Fatalf("Save() error = %v", err)
-		}
+// NewEmitter is not reached by the handler.
+func (r *recordingRegister) NewEmitter(paid.EmitterConfig) (paid.Emitter, error) {
+	panic("the register handler starts no emitter")
+}
+
+// Render records the request and returns a fixed document.
+func (r *recordingRegister) Render(_ context.Context, src paid.RegisterSource,
+	p paid.RegisterPeriod) ([]byte, error) {
+	r.record("render", src, p)
+	if r.err != nil {
+		return nil, r.err
 	}
-	return runs, audit.NewMemStore()
+	return []byte("<html>register</html>"), nil
+}
+
+// Build records the request and returns a fixed value.
+func (r *recordingRegister) Build(_ context.Context, src paid.RegisterSource,
+	p paid.RegisterPeriod) (any, error) {
+	r.record("build", src, p)
+	if r.err != nil {
+		return nil, r.err
+	}
+	return map[string]string{"status": "verified"}, nil
+}
+
+// record keeps one request.
+func (r *recordingRegister) record(call string, src paid.RegisterSource, p paid.RegisterPeriod) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, call)
+	r.src, r.period = src, p
+}
+
+// last returns the calls made and the last request.
+func (r *recordingRegister) last() ([]string, paid.RegisterSource, paid.RegisterPeriod) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.calls...), r.src, r.period
 }
 
 // getRegister asks handler for the register at query with an optional bearer token.
@@ -107,268 +95,127 @@ func getRegister(handler http.Handler, query, bearer string) *httptest.ResponseR
 	return rec
 }
 
-// decodeRegister reads the JSON form of the register, failing the test when it is not one.
-func decodeRegister(t *testing.T, rec *httptest.ResponseRecorder) dossier.Register {
-	t.Helper()
-	if rec.Code != http.StatusOK {
-		t.Fatalf("register JSON = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
-		t.Fatalf("register JSON content type = %q, want application/json", got)
-	}
-	var reg dossier.Register
-	if err := json.Unmarshal(rec.Body.Bytes(), &reg); err != nil {
-		t.Fatalf("register JSON does not decode: %v", err)
-	}
-	return reg
-}
-
-// registerRowPattern and registerCellPattern cut the document's change table into rows and cells,
-// and registerTagPattern strips the markup inside a cell, leaving the text a reader sees.
-var (
-	registerRowPattern  = regexp.MustCompile(`(?s)<tr>(.*?)</tr>`)
-	registerCellPattern = regexp.MustCompile(`(?s)<td[^>]*>(.*?)</td>`)
-	registerTagPattern  = regexp.MustCompile(`<[^>]+>`)
-)
-
-// documentRows returns the text of every cell in the document's change table, row by row, in the
-// order the document lists them.
-func documentRows(t *testing.T, doc string) [][]string {
-	t.Helper()
-	_, table, ok := strings.Cut(doc, `id="register-table"`)
-	if !ok {
-		t.Fatal("the register document carries no change table")
-	}
-	_, body, ok := strings.Cut(table, "<tbody>")
-	if !ok {
-		t.Fatal("the change table has no body")
-	}
-	body, _, _ = strings.Cut(body, "</tbody>")
-	var rows [][]string
-	for _, tr := range registerRowPattern.FindAllStringSubmatch(body, -1) {
-		var cells []string
-		for _, td := range registerCellPattern.FindAllStringSubmatch(tr[1], -1) {
-			text := registerTagPattern.ReplaceAllString(td[1], "")
-			cells = append(cells, strings.TrimSpace(html.UnescapeString(text)))
-		}
-		rows = append(rows, cells)
-	}
-	return rows
-}
-
-// documentCells returns what the document prints for one JSON row in the five columns the parity
-// test compares: run, change, actor, decision, and outcome. It applies the document's own words for
-// an empty value, so a row reads the same whichever form it came from.
-func documentCells(row dossier.RegisterRow) []string {
-	change := row.Change
-	if row.DryRun {
-		change += " dry run"
-	}
-	if row.NotChangeFree {
-		change += " not change free"
-	}
-	actor := row.Actor
-	if actor == "" {
-		actor = "none recorded"
-	}
-	decision := "—"
-	if row.Decision != "" {
-		decision = fmt.Sprintf("%s #%d", row.Decision, row.DecisionSeq)
-	}
-	return []string{row.Run, change, actor, decision, row.Outcome}
-}
-
-// TestRegisterJSONAndDocumentAgree pins that the register page and the downloaded document show the
-// same changes in the same words, row for row and in order.
-//
-// The web interface renders the register from its JSON form and the auditor receives the HTML
-// document. If the two were built by separate code they would drift, and the page a reviewer
-// checked would stop being the document they were sent. Both forms come from one builder; this
-// holds them to it across every kind of row the register describes differently, and across the
-// notices a pruned or truncated period carries.
-func TestRegisterJSONAndDocumentAgree(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		Name       string
-		Seed       func(t *testing.T) (run.Store, audit.Store)
-		Query      string
-		WantRows   int
-		WantNotice func(reg dossier.Register) string
-	}{{ // Test 0: Every kind of row, over a period retention thinned.
-		Name: "every kind", Seed: seedRegisterKinds, Query: registerPeriod, WantRows: 7,
-		WantNotice: func(reg dossier.Register) string { return reg.PrunedText },
-	}, { // Test 1: A period past the cap, cut in both forms at the same row.
-		Name: "past the cap", Seed: seedRegisterPastTheCap, Query: registerPeriod,
-		WantRows:   dossier.MaxRegisterRuns,
-		WantNotice: func(reg dossier.Register) string { return reg.TruncatedText },
-	}}
-	for testNum, test := range tests {
-		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
-			t.Parallel()
-			runs, audits := test.Seed(t)
-			handler := New(runs, &fakeSubmitter{}, zap.NewNop(), WithAudit(audits)).Handler()
-
-			reg := decodeRegister(t, getRegister(handler, test.Query+"&format=json", ""))
-			rec := getRegister(handler, test.Query, "")
-			if rec.Code != http.StatusOK {
-				t.Fatalf("%s: register document = %d, want 200", test.Name, rec.Code)
-			}
-			doc := rec.Body.String()
-			rows := documentRows(t, doc)
-			if len(reg.Rows) != test.WantRows || len(rows) != test.WantRows {
-				t.Fatalf("%s: JSON carries %d rows and the document %d, want %d in both", test.Name,
-					len(reg.Rows), len(rows), test.WantRows)
-			}
-			for i, row := range reg.Rows {
-				got := rows[i]
-				if len(got) != 9 {
-					t.Fatalf("%s: document row %d has %d cells, want 9", test.Name, i, len(got))
-				}
-				printed := []string{got[1], got[2], got[3], got[7], got[8]}
-				if diff := cmp.Diff(documentCells(row), printed, cmpopts.EquateEmpty()); diff != "" {
-					t.Fatalf("%s: row %d differs between the forms (-json +document):\n%s",
-						test.Name, i, diff)
-				}
-			}
-			notice := test.WantNotice(reg)
-			if notice == "" {
-				t.Fatalf("%s: the JSON form carries no notice for this period", test.Name)
-			}
-			if !strings.Contains(doc, html.EscapeString(notice)) {
-				t.Errorf("%s: the document does not carry the JSON form's notice %q", test.Name, notice)
-			}
-		})
-	}
-}
-
-// TestRegisterHoldsApprovalsToTheirSeals pins that both forms of the register state the seal check
-// on every approval they list. Dropping the check from the handler printed each approval as plain,
-// which reads to an auditor as checked and holding, and no test noticed. An install with no binding
-// key marks the approval unchecked, and one with a key finds that the row the approval released
-// carries no seal, which also proves the server's key reaches the check.
-func TestRegisterHoldsApprovalsToTheirSeals(t *testing.T) {
+// TestRegisterHandlerHandsThePeriodToTheRegister pins what the handler passes the paid register:
+// the period the caller named, the install's stores and identity, and the binder that holds each
+// approval to its seal when the install has a key. It pins which form answers too: the document by
+// default and the data when format=json is asked for.
+func TestRegisterHandlerHandsThePeriodToTheRegister(t *testing.T) {
 	t.Parallel()
 	key, err := binding.DeriveKey(bytes.Repeat([]byte{7}, 32))
 	if err != nil {
 		t.Fatalf("DeriveKey() error = %v", err)
 	}
 	tests := []struct {
+		// Query is the request's query string.
+		Query string
 		// Key is the install's binding key, nil for an install that holds none.
 		Key *binding.Key
-		// WantDecision is the approved row's decision text.
-		WantDecision string
-	}{{ // Test 0: No key marks the approval unchecked.
-		WantDecision: "Approved by bob, seal unchecked",
-	}, { // Test 1: A key finds the released row carries no seal.
-		Key: key, WantDecision: "Approved by bob, unsealed",
+		// WantCall is the register method the form reaches.
+		WantCall string
+		// WantType is the response's content type prefix.
+		WantType string
+	}{{ // Test 0: The document, with no binding key, so nothing is held to a seal.
+		Query: registerPeriod, WantCall: "render", WantType: "text/html",
+	}, { // Test 1: The data form, with a key, so each approval is held to its seal.
+		Query: registerPeriod + "&format=json", Key: key, WantCall: "build",
+		WantType: "application/json",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			runs, audits := seedRegisterKinds(t)
-			opts := []Option{WithAudit(audits)}
+			runs, audits := run.NewMemStore(), audit.NewMemStore()
+			reg := &recordingRegister{}
+			opts := []Option{WithAudit(audits), WithChangeRegister(reg)}
 			if test.Key != nil {
 				opts = append(opts, WithBinder(test.Key))
 			}
-			handler := New(runs, &fakeSubmitter{}, zap.NewNop(), opts...).Handler()
-			reg := decodeRegister(t, getRegister(handler, registerPeriod+"&format=json", ""))
-			var got string
-			for _, row := range reg.Rows {
-				if row.Run == "run_approved" {
-					got = row.Decision
-				}
-			}
-			if got != test.WantDecision {
-				t.Errorf("JSON decision = %q, want %q", got, test.WantDecision)
-			}
-			rec := getRegister(handler, registerPeriod, "")
+			rec := getRegister(New(runs, &fakeSubmitter{}, zap.NewNop(), opts...).Handler(),
+				test.Query, "")
 			if rec.Code != http.StatusOK {
-				t.Fatalf("register document = %d, want 200", rec.Code)
+				t.Fatalf("register = %d, want 200: %s", rec.Code, rec.Body.String())
 			}
-			if !strings.Contains(rec.Body.String(), html.EscapeString(test.WantDecision)) {
-				t.Errorf("the register document does not read %q", test.WantDecision)
+			if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, test.WantType) {
+				t.Errorf("content type = %q, want %s", got, test.WantType)
+			}
+			calls, src, p := reg.last()
+			if diff := cmp.Diff([]string{test.WantCall}, calls); diff != "" {
+				t.Errorf("register calls (-want +got):\n%s", diff)
+			}
+			from := time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)
+			if !p.From.Equal(from) || !p.To.Equal(from.AddDate(0, 0, 1)) {
+				t.Errorf("period = %s to %s, want the day the query named", p.From, p.To)
+			}
+			if p.Now.IsZero() {
+				t.Error("the register was handed no collection time")
+			}
+			if src.Runs != runs || src.Audits != audits {
+				t.Error("the register was not handed the install's stores")
+			}
+			if (src.Binder != nil) != (test.Key != nil) {
+				t.Errorf("binder present = %t, want %t", src.Binder != nil, test.Key != nil)
 			}
 		})
 	}
 }
 
-// TestRegisterJSONRedactsAnInlineSecret pins that the JSON form scrubs a secret a run's script
-// assigned, as the document does. The register page renders this form, so a secret that survived
-// here would be shown on screen and copied into every export the page offers.
-func TestRegisterJSONRedactsAnInlineSecret(t *testing.T) {
+// TestRegisterHandlerRefusesWhereTheRegisterDoes pins how a refusal reads. A Community build's
+// register refuses naming Team, which the caller is told as a 403 in both forms, where any other
+// failure is the server's and says nothing of the cause.
+func TestRegisterHandlerRefusesWhereTheRegisterDoes(t *testing.T) {
 	t.Parallel()
-	runs, audits := seedRegisterKinds(t)
-	handler := New(runs, &fakeSubmitter{}, zap.NewNop(), WithAudit(audits)).Handler()
-	rec := getRegister(handler, registerPeriod+"&format=json", "")
-	reg := decodeRegister(t, rec)
-	if strings.Contains(rec.Body.String(), registerSecret) {
-		t.Fatal("the JSON register publishes a secret from a run's script")
-	}
-	for _, row := range reg.Rows {
-		if row.Run != "run_secret" {
-			continue
-		}
-		if !strings.Contains(row.Change, scrub.Marker) {
-			t.Errorf("the scripted run's change = %q, want the secret replaced by %q", row.Change,
-				scrub.Marker)
-		}
-		return
-	}
-	t.Fatal("the JSON register does not list the scripted run")
-}
-
-// TestRegisterJSONFollowsTheLicense pins that the JSON form is gated exactly as the document is: a
-// Team install reads the rows, and a Community install is refused with the sentence that names Team
-// and the pricing page, which is what the register page turns into its offer.
-//
-// Deliberately not parallel: the license is process state, and asCommunity swaps it out.
-func TestRegisterJSONFollowsTheLicense(t *testing.T) {
 	tests := []struct {
-		Name       string
-		Community  bool
+		// Name labels the case.
+		Name string
+		// Err is what the register returns.
+		Err error
+		// WantStatus is the response code for both forms.
 		WantStatus int
-		WantRuns   []string
-		WantText   []string
-	}{{ // Test 0: The package runs under Team, so the rows come back.
-		Name: "team", WantStatus: http.StatusOK,
-		WantRuns: []string{"run_approved", "run_rejected", "run_held", "run_dry", "run_failed",
-			"run_noactor", "run_secret"},
-	}, { // Test 1: Community is refused, and told what to buy and where.
-		Name: "community", Community: true, WantStatus: http.StatusForbidden,
-		WantText: []string{"Team license", "https://switchtender.com/pricing"},
+		// WantText is a phrase the body carries.
+		WantText string
+	}{{ // Test 0: The Community stub names the tier and the price list.
+		Name: "community", Err: paid.Requires(license.FeatureRegister), WantStatus: http.StatusForbidden,
+		WantText: "switchtender.com/pricing",
+	}, { // Test 1: A store fault is the server's, and its text stays in the log.
+		Name: "fault", Err: errors.New("disk on fire"), WantStatus: http.StatusInternalServerError,
+		WantText: "could not",
 	}}
 	for testNum, test := range tests {
-		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
-			runs, audits := seedRegisterKinds(t)
-			handler := New(runs, &fakeSubmitter{}, zap.NewNop(), WithAudit(audits)).Handler()
-			var rec *httptest.ResponseRecorder
-			fetch := func() { rec = getRegister(handler, registerPeriod+"&format=json", "") }
-			if test.Community {
-				asCommunity(t, fetch)
-			} else {
-				fetch()
-			}
-			if rec.Code != test.WantStatus {
-				t.Fatalf("%s: register JSON = %d, want %d: %s", test.Name, rec.Code, test.WantStatus,
-					rec.Body.String())
-			}
-			for _, want := range test.WantText {
-				if !strings.Contains(rec.Body.String(), want) {
-					t.Errorf("%s: the refusal does not carry %q: %s", test.Name, want,
-						rec.Body.String())
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			reg := &recordingRegister{err: test.Err}
+			handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+				WithAudit(audit.NewMemStore()), WithChangeRegister(reg)).Handler()
+			for _, query := range []string{registerPeriod, registerPeriod + "&format=json"} {
+				rec := getRegister(handler, query, "")
+				if rec.Code != test.WantStatus {
+					t.Errorf("%s: register %q = %d, want %d: %s", test.Name, query, rec.Code,
+						test.WantStatus, rec.Body.String())
+				}
+				if !strings.Contains(rec.Body.String(), test.WantText) {
+					t.Errorf("%s: register %q body %q, want it to carry %q", test.Name, query,
+						rec.Body.String(), test.WantText)
+				}
+				if strings.Contains(rec.Body.String(), "disk on fire") {
+					t.Errorf("%s: a store fault's text reached the caller", test.Name)
 				}
 			}
-			if test.WantRuns == nil {
-				return
-			}
-			var got []string
-			for _, row := range decodeRegister(t, rec).Rows {
-				got = append(got, row.Run)
-			}
-			if diff := cmp.Diff(test.WantRuns, got, cmpopts.EquateEmpty()); diff != "" {
-				t.Errorf("%s: register rows (-want +got):\n%s", test.Name, diff)
-			}
 		})
+	}
+}
+
+// TestCommunityBuildRefusesTheRegisterNamingTeam pins the wall on the HTTP surface. This test
+// binary carries no paid module, so the server's default register is the Community stub, and even
+// a Team license reads a refusal naming Team rather than a register.
+func TestCommunityBuildRefusesTheRegisterNamingTeam(t *testing.T) {
+	t.Parallel()
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+		WithAudit(audit.NewMemStore())).Handler()
+	for _, query := range []string{registerPeriod, registerPeriod + "&format=json"} {
+		rec := getRegister(handler, query, "")
+		if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "Team license") {
+			t.Errorf("register %q on Community = %d %s, want 403 naming Team", query, rec.Code,
+				rec.Body.String())
+		}
 	}
 }
 
@@ -379,7 +226,6 @@ func TestRegisterJSONFollowsTheLicense(t *testing.T) {
 func TestRegisterJSONHoldsToAdmin(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	runs, audits := seedRegisterKinds(t)
 	tokens := auth.NewMemStore()
 	users := user.NewMemStore()
 	mint := func(name string, role user.Role) string {
@@ -402,8 +248,8 @@ func TestRegisterJSONHoldsToAdmin(t *testing.T) {
 	}
 	viewer := mint("reader", user.RoleViewer)
 	admin := mint("boss", user.RoleAdmin)
-	handler := New(runs, &fakeSubmitter{}, zap.NewNop(), WithAudit(audits), WithTokens(tokens),
-		WithUsers(users)).Handler()
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithAudit(audit.NewMemStore()),
+		WithTokens(tokens), WithUsers(users), WithChangeRegister(&recordingRegister{})).Handler()
 
 	tests := []struct {
 		Name       string

@@ -88,7 +88,10 @@ func TestGatesRefuseInOneLineOnCommunity(t *testing.T) {
 // also caught those would break the promise that proofs are free on every tier.
 func TestChangeRegisterIsTeamOverHTTP(t *testing.T) {
 	audits := audit.NewMemStore()
-	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithAudit(audits)).Handler()
+	// The register is the recording fake, so a 200 below is the gate letting the request through
+	// to a register that answers; this build's own register is the Community stub.
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithAudit(audits),
+		WithChangeRegister(&recordingRegister{})).Handler()
 
 	asCommunity(t, func() {
 		// Test 0: the register refuses, names Team, and points at the price list.

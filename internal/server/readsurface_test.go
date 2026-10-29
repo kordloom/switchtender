@@ -479,7 +479,8 @@ func TestAuditRegisterRefusesABadPeriod(t *testing.T) {
 				audits = audit.NewMemStore()
 			}
 			rec := httptest.NewRecorder()
-			auditRegisterHandler(run.NewMemStore(), audits, audit.Identity{InstallID: "install_1"}, nil, zap.NewNop()).
+			auditRegisterHandler(run.NewMemStore(), audits, audit.Identity{InstallID: "install_1"},
+				nil, &recordingRegister{}, zap.NewNop()).
 				ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
 					"/v1/audit/register"+test.Query, nil))
 			if rec.Code != test.WantStatus {
@@ -499,7 +500,21 @@ func TestAuditRegisterHandlerPanicsWithoutAStore(t *testing.T) {
 			t.Error("auditRegisterHandler accepted a nil run store")
 		}
 	}()
-	auditRegisterHandler(nil, audit.NewMemStore(), audit.Identity{InstallID: "install_1"}, nil, zap.NewNop())
+	auditRegisterHandler(nil, audit.NewMemStore(), audit.Identity{InstallID: "install_1"}, nil,
+		&recordingRegister{}, zap.NewNop())
+}
+
+// TestAuditRegisterHandlerPanicsWithoutARegister pins that the handler refuses to be built without
+// the change register, which on Community is the stub and never nil.
+func TestAuditRegisterHandlerPanicsWithoutARegister(t *testing.T) {
+	t.Parallel()
+	defer func() {
+		if recover() == nil {
+			t.Error("auditRegisterHandler accepted a nil change register")
+		}
+	}()
+	auditRegisterHandler(run.NewMemStore(), audit.NewMemStore(),
+		audit.Identity{InstallID: "install_1"}, nil, nil, zap.NewNop())
 }
 
 // TestParseRegisterTime pins both accepted spellings of a period bound and the refusal of anything
