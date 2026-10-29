@@ -136,3 +136,72 @@ if (footLogo) {
 		});
 	});
 })();
+
+// Decks: one card at a time from a stack, cycled with the arrows, the dots, the arrow keys, or a
+// swipe. The controls are built here, so a page without script keeps a plain list of cards and no
+// buttons that do nothing.
+const chevron = (d) => `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="${d}"/></svg>`;
+for (const deck of document.querySelectorAll("[data-deck]")) {
+	const cards = [...deck.querySelectorAll(".deck-stack > .card")];
+	if (cards.length < 2) continue;
+	deck.classList.add("deck-on");
+	deck.setAttribute("role", "region");
+	deck.setAttribute("aria-roledescription", "carousel");
+	deck.tabIndex = 0;
+
+	const controls = document.createElement("div");
+	controls.className = "deck-controls";
+	const arrow = (label, points) => {
+		const b = document.createElement("button");
+		b.className = "deck-arrow";
+		b.type = "button";
+		b.setAttribute("aria-label", label);
+		b.innerHTML = chevron(points);
+		return b;
+	};
+	const prev = arrow("Previous card", "15 18 9 12 15 6");
+	const next = arrow("Next card", "9 18 15 12 9 6");
+	const dots = document.createElement("div");
+	dots.className = "deck-dots";
+	const dotFor = cards.map((card, i) => {
+		const d = document.createElement("button");
+		d.className = "deck-dot";
+		d.type = "button";
+		d.setAttribute("aria-label", card.querySelector("h3")?.textContent || `Card ${i + 1}`);
+		d.addEventListener("click", () => show(i));
+		dots.append(d);
+		return d;
+	});
+	controls.append(prev, dots, next);
+	deck.append(controls);
+
+	let current = 0;
+	const show = (i) => {
+		current = (i + cards.length) % cards.length;
+		cards.forEach((card, k) => {
+			const pos = (k - current + cards.length) % cards.length;
+			card.dataset.pos = pos <= 2 ? String(pos) : "hidden";
+			card.inert = pos !== 0;
+			card.setAttribute("aria-hidden", String(pos !== 0));
+		});
+		dotFor.forEach((d, k) => d.setAttribute("aria-current", String(k === current)));
+	};
+	prev.addEventListener("click", () => show(current - 1));
+	next.addEventListener("click", () => show(current + 1));
+	deck.addEventListener("keydown", (e) => {
+		if (e.key === "ArrowLeft") show(current - 1);
+		if (e.key === "ArrowRight") show(current + 1);
+	});
+	// A horizontal swipe on the stack turns the deck; a vertical one is left to scroll the page.
+	let startX = null;
+	let startY = null;
+	const stack = deck.querySelector(".deck-stack");
+	stack.addEventListener("pointerdown", (e) => { startX = e.clientX; startY = e.clientY; });
+	stack.addEventListener("pointerup", (e) => {
+		if (startX === null) return;
+		const dx = e.clientX - startX;
+		if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(e.clientY - startY)) show(current + (dx < 0 ? 1 : -1));
+		startX = null;
+	});
+	show(0);
+}
