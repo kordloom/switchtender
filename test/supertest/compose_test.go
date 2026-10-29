@@ -57,9 +57,8 @@ func (s composeService) mountTargets() map[string]bool {
 
 // TestTheComposeStackRunsOnCommunity pins the documented Docker path to what Community can run.
 //
-// The stack profile was PostgreSQL, and creating a PostgreSQL schema is Team, so the quickstart's
-// Docker command failed on every install without a license. The stack is one server on SQLite with
-// its data in a volume. The team profile carries what processes sharing one database need: the
+// The stack is one server on SQLite with its data in a volume, so the quickstart's Docker command
+// needs no license and no second container. The team profile carries what processes sharing one database need: the
 // signing key, since none of them mints one, and a license that is refused when missing rather than
 // replaced by an empty directory.
 func TestTheComposeStackRunsOnCommunity(t *testing.T) {
@@ -91,7 +90,7 @@ func TestTheComposeStackRunsOnCommunity(t *testing.T) {
 	for _, name := range stack {
 		svc := file.Services[name]
 		if strings.Contains(svc.Image, "postgres") || strings.Contains(strings.Join(svc.Command, " "), "postgres://") {
-			t.Errorf("the stack profile's %s needs PostgreSQL, whose schema only a Team install creates", name)
+			t.Errorf("the stack profile's %s needs PostgreSQL, and the stack is one server on SQLite", name)
 		}
 		if _, ok := svc.mountTargets()["/data"]; !ok && svc.Image == "" {
 			t.Errorf("the stack profile's %s keeps its database and signing key in no volume", name)

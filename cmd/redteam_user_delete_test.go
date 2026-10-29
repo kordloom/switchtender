@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/forgelink"
-	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/user"
 )
 
@@ -38,12 +37,6 @@ func TestRedTeamCLIUserDeleteRemovesForgeLinks(t *testing.T) {
 					}
 					t.Skip("SWITCHTENDER_TEST_POSTGRES_DSN not set")
 				}
-				// A new PostgreSQL install needs a Team license, which is process-global.
-				license.Set(&license.License{Claims: license.Claims{
-					V: 1, ID: "lic_redteam_cli", Org: "test", Tier: license.TierTeam,
-					Issued: "2026-01-01T00:00:00Z", Expires: "2099-01-01T00:00:00Z",
-				}})
-				t.Cleanup(func() { license.Set(nil) })
 				db = ownDatabase(t, dsn)
 			}
 			setString(t, &userDB, db)

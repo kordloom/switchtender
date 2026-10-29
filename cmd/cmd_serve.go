@@ -965,9 +965,8 @@ func notificationSealerOf(sealer *credential.Sealer) notification.Sealer {
 // openBundle opens the stores for the --db value: a postgres:// or postgresql:// DSN selects the
 // PostgreSQL backend, anything else is a SQLite file path.
 func openBundle(db string) (storeBundle, error) {
-	// The license loads before the store opens, because initializing a new PostgreSQL schema is
-	// itself gated, and it loads here so init, import, the server, and the workers all read the
-	// same answer from one place. A file that does not verify is loud and non-fatal: broken
+	// The license loads here, before the store opens, so init, import, the server, and the workers
+	// all read the same answer from one place. A file that does not verify is loud and non-fatal: broken
 	// licensing fails toward Community, never toward a command that will not run.
 	if lic, lerr := license.Load(license.PathFor(db)); lerr != nil {
 		fmt.Fprintln(os.Stderr, "license file did not verify, running Community: "+lerr.Error())

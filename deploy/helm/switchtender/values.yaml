@@ -47,10 +47,8 @@ worker:
 database:
   # dsn is the PostgreSQL connection string every server and worker shares. Empty runs the server
   # on its own SQLite file on the persistent volume below, which is the Community shape: one
-  # server, no license, complete. Point it at PostgreSQL for multiple servers and dedicated
-  # workers, and know that initializing a NEW PostgreSQL schema takes a Team license: the old
-  # default here sent a Community install straight into that refusal on first boot, which read as
-  # the chart being broken rather than as a tier boundary.
+  # server, no license, complete. Point it at PostgreSQL for multiple servers, and for dedicated
+  # workers on a Team license.
   #
   # UPGRADING from a chart older than 0.8.0: the default used to be a PostgreSQL DSN. If your
   # install relied on that default rather than setting its own, keep your values file explicit

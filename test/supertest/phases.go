@@ -130,7 +130,7 @@ func (h *harness) phaseFleet() error {
 // phaseCommunity installs the free tier the way the chart installs it, with no license and no
 // external database, and proves a real playbook lands on the real fleet. This is the install the
 // Kubernetes quickstart produces, and until this phase existed it did not boot at all: the chart
-// defaulted to PostgreSQL, whose fresh schema only a Team license may initialize.
+// defaulted to a PostgreSQL DSN.
 func (h *harness) phaseCommunity() error {
 	const phase = "community"
 
@@ -261,8 +261,7 @@ func (h *harness) phaseTeam(license string) error {
 		return fmt.Errorf("helm install team: %w\n%s\n%s", err, out,
 			h.installForensics("team"))
 	}
-	h.pass(phase, "a fresh PostgreSQL schema initialized under the license",
-		"the exact operation a Community install is refused")
+	h.pass(phase, "a fresh PostgreSQL schema initialized", "a database the install has never seen")
 
 	service, err := h.serviceName("team")
 	if err != nil {

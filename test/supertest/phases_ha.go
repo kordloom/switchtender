@@ -51,7 +51,7 @@ func (h *harness) phaseHA(license string) error {
 		return fmt.Errorf("helm install ha: %w\n%s\n%s", err, out, h.installForensics("ha"))
 	}
 	h.pass(phase, "two active servers share one database and one signing identity",
-		"server.replicas=2 on PostgreSQL, the shape the Team tier prices")
+		"server.replicas=2 on PostgreSQL")
 
 	service, err := h.serviceName("ha")
 	if err != nil {

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/sqlutil"
 )
@@ -987,20 +986,15 @@ func Open(dsn string) (*DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("ping postgres: %w", err)
 	}
-	// Cap the pool so a burst of API reads and SSE streams cannot exhaust the server's
-	// max_connections, and recycle connections so a load balancer or pooler can rebalance.
-	// Initializing a brand-new schema is a Team feature; opening a database that already holds
-	// one is never gated, in any license state, because a lapsed license must take nothing. The
-	// probe runs before the migration lock so a Community refusal leaves the database untouched.
+	// A table named runs is not proof the schema is this product's. Another application's runs
+	// table once passed for it and then failed the migration with an error about a column nobody
+	// had heard of. The columns every version of this schema has had are what identify it, and the
+	// probe runs before the migration lock so a refusal leaves the database untouched.
 	var initialized bool
 	if err := db.QueryRow("SELECT to_regclass('runs') IS NOT NULL").Scan(&initialized); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("probe postgres schema: %w", err)
 	}
-	// A table named runs is not proof the schema is this product's. Another application's runs
-	// table passed the probe, which skipped the gate above and then failed the migration with an
-	// error about a column nobody had heard of. The columns every version of this schema has had
-	// are what identify it.
 	if initialized {
 		var ours int
 		if err := db.QueryRow(`SELECT count(*) FROM information_schema.columns
@@ -1015,12 +1009,8 @@ AND column_name IN ('playbook', 'inventory', 'status')`).Scan(&ours); err != nil
 				"Point --db at a database of SwitchTender's own", ErrForeignSchema)
 		}
 	}
-	if !initialized {
-		if aerr := license.Allow(license.FeaturePostgresInit); aerr != nil {
-			_ = db.Close()
-			return nil, aerr
-		}
-	}
+	// Cap the pool so a burst of API reads and SSE streams cannot exhaust the server's
+	// max_connections, and recycle connections so a load balancer or pooler can rebalance.
 	db.SetMaxOpenConns(poolMaxOpen)
 	db.SetMaxIdleConns(poolMaxIdle)
 	db.SetConnMaxLifetime(poolMaxLifetime)

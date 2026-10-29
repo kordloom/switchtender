@@ -23,7 +23,6 @@ func TestTheGateMapIsWhatThePricingPageSells(t *testing.T) {
 		FeaturePolicyRules:   TierPro,
 		FeatureRegister:      TierTeam,
 		FeatureWorkers:       TierTeam,
-		FeaturePostgresInit:  TierTeam,
 		FeatureReconcile:     TierTeam,
 		FeatureHostedWitness: TierEnterprise,
 	}
@@ -56,17 +55,15 @@ func TestTheGateMapIsWhatThePricingPageSells(t *testing.T) {
 		Tier: "Team", WantPhrase: "<b>The full policy engine</b>",
 	}, { // Test 3: FeatureRegister.
 		Tier: "Team", WantPhrase: "<b>The period change register</b>",
-	}, { // Test 4: FeaturePostgresInit.
-		Tier: "Team", WantPhrase: "<b>Creating a new PostgreSQL schema</b>",
-	}, { // Test 5: FeatureWorkers.
+	}, { // Test 4: FeatureWorkers.
 		Tier: "Team", WantPhrase: "<b>Distributed workers</b>",
-	}, { // Test 6: FeatureReconcile.
+	}, { // Test 5: FeatureReconcile.
 		Tier: "Team", WantPhrase: "<b>One-click drift reconcile</b>",
-	}, { // Test 7: FeaturePolicyRules, which Pro sells and the gate names in the same words.
+	}, { // Test 6: FeaturePolicyRules, which Pro sells and the gate names in the same words.
 		Tier: "Pro", WantPhrase: "<b>Deny rules and risk and reversibility floors</b>",
-	}, { // Test 8: FeatureHostedWitness, which Team buys as an add-on.
+	}, { // Test 7: FeatureHostedWitness, which Team buys as an add-on.
 		Tier: "Team", WantPhrase: "<b>Hosted witness add-on</b>, $3,000 a year",
-	}, { // Test 9: FeatureHostedWitness, which Enterprise includes.
+	}, { // Test 8: FeatureHostedWitness, which Enterprise includes.
 		Tier: "Enterprise", WantPhrase: "<b>Hosted witness, included</b>",
 	}}
 	for testNum, test := range tests {

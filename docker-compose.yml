@@ -5,8 +5,7 @@
 #   Team:            docker compose --profile team up --build
 #
 # The stack is one server on SQLite, with its database and its signing key kept in a volume, which is
-# everything Community runs. It used to be PostgreSQL, and creating a PostgreSQL schema is Team, so
-# the documented command failed on every install without a license.
+# everything one node needs.
 #
 # The team profile is PostgreSQL, a server, and a worker. It needs a Team license, read from
 # ./switchtender-license.json or the file SWITCHTENDER_LICENSE_FILE names, and SWITCHTENDER_AUDIT_KEY,

@@ -42,7 +42,7 @@ func TestAllowRefusesWhatTheBuildDoesNotCarry(t *testing.T) {
 	if PaidBuild() {
 		t.Error("PaidBuild() = true with nothing carried, want false")
 	}
-	if err := Allow(FeaturePostgresInit); err != nil {
-		t.Errorf("Allow(FeaturePostgresInit) with nothing carried = %v, want nil", err)
+	if !Carried(FeatureHostedWitness) {
+		t.Error("Carried(FeatureHostedWitness) = false with nothing registered, want true")
 	}
 }

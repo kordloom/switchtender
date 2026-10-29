@@ -15,15 +15,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/backup"
-	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/template"
 )
 
 // TestBackupRestoreMovesSQLiteToPostgres proves the documented growth path end to end: back up a
 // SQLite install and restore it into PostgreSQL through the same bundle wiring the CLI commands
-// use. Restoring into an empty PostgreSQL database initializes the schema, which is the licensed
-// act, so the test runs under a Team license and puts Community back when it ends. It does not run
-// in parallel because the license is process-global.
+// use.
 func TestBackupRestoreMovesSQLiteToPostgres(t *testing.T) {
 	dsn := os.Getenv("SWITCHTENDER_TEST_POSTGRES_DSN")
 	if dsn == "" {
@@ -35,11 +32,6 @@ func TestBackupRestoreMovesSQLiteToPostgres(t *testing.T) {
 	}
 	t.Setenv("SWITCHTENDER_ENCRYPTION_KEY", "migrate-test-key")
 	t.Setenv("SWITCHTENDER_ENCRYPTION_SALT", "migrate-test-salt")
-	license.Set(&license.License{Claims: license.Claims{
-		V: 1, ID: "lic_migrate_test", Org: "test", Tier: license.TierTeam,
-		Issued: "2026-01-01T00:00:00Z", Expires: "2099-01-01T00:00:00Z",
-	}})
-	t.Cleanup(func() { license.Set(nil) })
 	ctx := context.Background()
 
 	src, err := openBundle(filepath.Join(t.TempDir(), "source.db"))

@@ -213,7 +213,7 @@ func TestTierCoverage(t *testing.T) {
 		{Tier: TierPro, Feature: FeatureSSO, WantAllowed: true},              // Test 0: SSO is the Pro grant.
 		{Tier: TierPro, Feature: FeaturePolicyFull, WantAllowed: false},      // Test 1: the full engine is not.
 		{Tier: TierPro, Feature: FeatureWorkers, WantAllowed: false},         // Test 2.
-		{Tier: TierPro, Feature: FeaturePostgresInit, WantAllowed: false},    // Test 3.
+		{Tier: TierPro, Feature: FeatureHostedWitness, WantAllowed: false},   // Test 3.
 		{Tier: TierPro, Feature: FeatureRegister, WantAllowed: false},        // Test 4.
 		{Tier: TierPro, Feature: FeatureReconcile, WantAllowed: false},       // Test 5.
 		{Tier: TierTeam, Feature: FeatureSSO, WantAllowed: true},             // Test 6: Team includes Pro.

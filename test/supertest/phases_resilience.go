@@ -551,8 +551,8 @@ func (h *harness) phaseRollback(prevImage string) error {
 
 // phaseUpgradeTeam proves the paid shape survives the next version too: PostgreSQL, a license, and
 // a dedicated worker, upgraded in place. The Community upgrade proof left the paid tier's upgrade
-// as an inference, and an inference is not a proof: the schema is initialized by the old binary
-// under license, written by real work, and must be read whole by the new one.
+// as an inference, and an inference is not a proof: the schema is initialized by the old binary,
+// written by real work, and must be read whole by the new one.
 func (h *harness) phaseUpgradeTeam(prevImage, license string) error {
 	const phase = "upgrade-team"
 	if _, err := h.kubectl("create", "namespace", "upteam"); err != nil {

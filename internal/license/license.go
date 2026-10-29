@@ -52,9 +52,6 @@ const (
 	FeatureRegister Feature = "register"
 	// FeatureWorkers is distributed execution: relay workers and queues beyond the server's own.
 	FeatureWorkers Feature = "workers"
-	// FeaturePostgresInit is initializing a NEW PostgreSQL schema. Opening an existing schema is
-	// never gated, in any state, because a lapsed license must take nothing.
-	FeaturePostgresInit Feature = "postgres-init"
 	// FeatureReconcile is the one-click drift reconcile proposal. Drift detection stays Community.
 	FeatureReconcile Feature = "reconcile"
 	// FeatureHostedWitness is enrolling the install with the KordLoom-operated witness. Enterprise
@@ -148,7 +145,6 @@ var featureTier = map[Feature]string{
 	FeaturePolicyRules:   TierPro,
 	FeatureRegister:      TierTeam,
 	FeatureWorkers:       TierTeam,
-	FeaturePostgresInit:  TierTeam,
 	FeatureReconcile:     TierTeam,
 	FeatureHostedWitness: TierEnterprise,
 }
@@ -299,7 +295,6 @@ func Current() *License { return current.Load() }
 // source. A feature in neither builtIn nor a registered paid slot is refused on every build, which
 // fails toward the paid side the way featureTier does.
 var builtIn = map[Feature]bool{
-	FeaturePostgresInit:  true,
 	FeatureHostedWitness: true,
 }
 
@@ -499,7 +494,6 @@ var featureNames = map[Feature]string{
 	FeaturePolicyRules:   "Deny rules and risk and reversibility floors",
 	FeatureRegister:      "The period change register",
 	FeatureWorkers:       "Running distributed workers",
-	FeaturePostgresInit:  "Initializing a new PostgreSQL database",
 	FeatureReconcile:     "One-click drift reconcile",
 	FeatureHostedWitness: "The hosted witness",
 }
