@@ -96,7 +96,7 @@
 		<section class="wrap gs-hero reveal">
 			<span class="eyebrow">Get started</span>
 			<h1>Running in <span class="grad">about a minute.</span></h1>
-			<p class="lede">One binary, one SQLite file. No Kubernetes, no Postgres, no Redis to stand up first. The same binary grows with the team: on a Team license it runs active-active on PostgreSQL, and relay workers run inside networks the control node cannot reach. On Kubernetes, a Helm chart runs the same binary with no operator. Here's every step, from download to a live run. Or skip the install and poke at the <a href="https://demo.switchtender.com/ui/held?who=agent">live demo</a> first.</p>
+			<p class="lede">One binary, one SQLite file. No Kubernetes, no Postgres, no Redis to stand up first. The paid build grows with the team: on a Team license, relay workers run inside networks the control node cannot reach. On Kubernetes, a Helm chart runs the same binary with no operator. Here's every step, from download to a live run. Or skip the install and poke at the <a href="https://demo.switchtender.com/ui/held?who=agent">live demo</a> first.</p>
 		</section>
 
 		<section class="gs-steps wrap" id="steps">
@@ -126,7 +126,7 @@
 					<div class="gs-num">2</div>
 					<div class="gs-body">
 						<h3>Serve</h3>
-						<p>Start the server. SQLite is the default. Point <code>--db</code> at a Postgres DSN when you want more than one instance. Creating a new PostgreSQL schema needs a Team license; opening one that already exists is never gated, in any license state. Set the encryption pair if you plan to store credentials. On a public address with no tokens yet, serve mints your initial admin token and prints it once, so the API requires auth from its very first request; only loopback and <code>--read-only</code> may run open, and it says so.</p>
+						<p>Start the server. SQLite is the default. Point <code>--db</code> at a Postgres DSN when you want more than one instance. PostgreSQL, including creating a new schema and running active-active HA on it, is free. Set the encryption pair if you plan to store credentials. On a public address with no tokens yet, serve mints your initial admin token and prints it once, so the API requires auth from its very first request; only loopback and <code>--read-only</code> may run open, and it says so.</p>
 						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code><span class="c"># needed for stored secrets and for the addresses and callback keys an import seals, so keep both values</span>
 export SWITCHTENDER_ENCRYPTION_KEY=$(openssl rand -hex 32)
 export SWITCHTENDER_ENCRYPTION_SALT=$(openssl rand -hex 16)
@@ -167,7 +167,7 @@ switchtender token revoke &lt;initial-token-id&gt; --db switchtender.db</code></
 				</li>
 			</ol>
 			<div class="gs-callout reveal">
-				<p><strong>On Kubernetes?</strong> The Helm chart in the repository runs the same binary as an ordinary Deployment, with no operator: one server on SQLite with the whole install on a persistent volume, or on a Team license, active-active servers on PostgreSQL with dedicated workers. Write the keys to a file first and keep it, because every stored credential is sealed against them, and pass the same file to every upgrade:</p>
+				<p><strong>On Kubernetes?</strong> The Helm chart in the repository runs the same binary as an ordinary Deployment, with no operator: one server on SQLite with the whole install on a persistent volume, or active-active servers on PostgreSQL, with dedicated workers on a Team license, from the paid build. Write the keys to a file first and keep it, because every stored credential is sealed against them, and pass the same file to every upgrade:</p>
 				<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>git clone https://github.com/kordloom/switchtender
 cd switchtender
 printf 'encryptionKey: "%s"\nencryptionSalt: "%s"\nauditKey: "%s"\n' \

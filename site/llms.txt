@@ -15,7 +15,7 @@
 > OpenTofu. Source-available under BSL 1.1: the controller, every
 > tool, and the full evidence chain are free to self-host with no seat, host, or run limits. Paid
 > tiers add what an organization needs around it: SSO, more approval policies and the full policy
-> engine, creating a new PostgreSQL schema, distributed workers, drift reconcile, and audit-ready change registers. Each
+> engine, dedicated workers and named queues and the relay that runs them inside networks the control node cannot reach, drift reconcile, and audit-ready change registers. Each
 > release converts to Apache 2.0 two years after it ships.
 
 Install: `go install github.com/kordloom/switchtender@latest`, Homebrew, or release binaries

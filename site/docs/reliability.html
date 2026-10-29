@@ -159,7 +159,7 @@ reporting may only be cut off from the store rather than gone, and a run requeue
 could execute a second time on the same hosts. The lease sweep's reclaim is the safe version of that
 move, because it waits for the lease to expire first, and the panel shows exactly when it will.</p>
 <h2 id="high-availability">High availability</h2>
-<p>High availability is a Team feature. On PostgreSQL the control plane runs active-active. Start two or more <code>serve</code> processes against the
+<p>High availability is Community. On PostgreSQL the control plane runs active-active. Start two or more <code>serve</code> processes against the
 same database, put any load balancer in front, and every replica serves the full API and UI while
 all of them execute work. There is no leader to elect and no coordinator to stand up, because every
 cross-process decision already happens in the store:</p>

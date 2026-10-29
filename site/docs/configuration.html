@@ -107,14 +107,9 @@ believes it has a control it does not have.</p>
 <td><code>audit report</code>, and <code>GET /v1/audit/register</code>.</td>
 </tr>
 <tr>
-<td>Distributed workers</td>
+<td>Dedicated workers and named queues, and the relay that runs them inside networks the control node cannot reach</td>
 <td>Team</td>
-<td>Every <code>switchtender worker</code>, whether it shares the database or reaches the server over the mesh relay with <code>--server</code>.</td>
-</tr>
-<tr>
-<td>Initializing a new PostgreSQL database</td>
-<td>Team</td>
-<td>The first <code>serve</code> against a <code>postgres://</code> DSN. Opening a schema that already exists is never gated.</td>
+<td>Every <code>switchtender worker</code>, whether it shares the database or reaches the server over the mesh relay with <code>--server</code>. PostgreSQL, including active-active HA on it, is Community.</td>
 </tr>
 <tr>
 <td>One-click drift reconcile</td>

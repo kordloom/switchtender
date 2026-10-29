@@ -58,13 +58,18 @@ func TestTheGateMapIsWhatThePricingPageSells(t *testing.T) {
 	}, { // Test 4: FeatureWorkers.
 		Tier: "Team", WantPhrase: "<b>Distributed workers</b>",
 	}, { // Test 5: FeatureReconcile.
-		Tier: "Team", WantPhrase: "<b>One-click drift reconcile</b>",
+		Tier: "Team", WantPhrase: "<b>One-click drift reconcile</b>, from detection to a held, approvable fix. " +
+			"Terraform and OpenTofu reconcile the exact plan the check kept. Ansible reruns the " +
+			"playbook on the drifted host, bound to the check that found it, a rerun you can also " +
+			"launch by hand on Community",
 	}, { // Test 6: FeaturePolicyRules, which Pro sells and the gate names in the same words.
 		Tier: "Pro", WantPhrase: "<b>Deny rules and risk and reversibility floors</b>",
 	}, { // Test 7: FeatureHostedWitness, which Team buys as an add-on.
 		Tier: "Team", WantPhrase: "<b>Hosted witness add-on</b>, $3,000 a year",
 	}, { // Test 8: FeatureHostedWitness, which Enterprise includes.
 		Tier: "Enterprise", WantPhrase: "<b>Hosted witness, included</b>",
+	}, { // Test 9: The Pro card names the paid build.
+		Tier: "Pro", WantPhrase: "The paid build, unlocked by a signed license file the product verifies offline.",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

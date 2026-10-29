@@ -117,7 +117,7 @@ move, because it waits for the lease to expire first, and the panel shows exactl
 
 ## High availability
 
-High availability is a Team feature. On PostgreSQL the control plane runs active-active. Start two or more `serve` processes against the
+High availability is Community. On PostgreSQL the control plane runs active-active. Start two or more `serve` processes against the
 same database, put any load balancer in front, and every replica serves the full API and UI while
 all of them execute work. There is no leader to elect and no coordinator to stand up, because every
 cross-process decision already happens in the store:

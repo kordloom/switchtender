@@ -57,7 +57,7 @@
    "name": "Do I need Kubernetes?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "No. SwitchTender is one binary that is the API, the executor, the scheduler, and the UI. State is one database: a SQLite file to start, or PostgreSQL when you want more than one instance. No Redis, no operator, no separate task engine. One caveat on the second half of that sentence. SQLite is free forever, but creating a new PostgreSQL database is a Team feature: a Community or Pro install pointed at an empty PostgreSQL refuses to start and says A Team license is required for initializing a new PostgreSQL database. Opening a PostgreSQL database that already holds the schema is never gated, in any license state, so a lapsed license never locks a server out of its own data."
+    "text": "No. SwitchTender is one binary that is the API, the executor, the scheduler, and the UI. State is one database: a SQLite file to start, or PostgreSQL when you want more than one instance. No Redis, no operator, no separate task engine. SQLite and PostgreSQL are both free. PostgreSQL, including initializing a new schema and active-active HA on it, is Community. A lapsed license never locks a server out of its own data."
    }
   },
   {
@@ -153,7 +153,7 @@
    "name": "What about scale?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Runs stream and page by a sequence cursor, the runs list and event history paginate, and a large host matrix renders one cell at a time. An Ansible run shards across the inventory by measured host duration, and the server executes those shards in its own concurrent slots on any tier. Sharding is Ansible only. It fans one playbook across inventory hosts, which is a thing Ansible does and the other tools do not: a Bash, Python, PowerShell, Go, Terraform, or OpenTofu run, or one using a tool an extension registered, executes once wherever it is claimed. Submitting one with a shard count is not an error and does not warn. It simply runs as a single run, with no kind of split and no shard count on it, so read the submitted run back if you expected a fan-out. Going wider is Team. Separate worker processes and initializing a new PostgreSQL database for more than one instance both need a Team license. Opening a PostgreSQL database that already holds the schema is never gated, in any license state, so a lapsed license never locks a server out of its own data, though starting a worker process after one lapses is refused."
+    "text": "Runs stream and page by a sequence cursor, the runs list and event history paginate, and a large host matrix renders one cell at a time. An Ansible run shards across the inventory by measured host duration, and the server executes those shards in its own concurrent slots on any tier. Sharding is Ansible only. It fans one playbook across inventory hosts, which is a thing Ansible does and the other tools do not: a Bash, Python, PowerShell, Go, Terraform, or OpenTofu run, or one using a tool an extension registered, executes once wherever it is claimed. Submitting one with a shard count is not an error and does not warn. It simply runs as a single run, with no kind of split and no shard count on it, so read the submitted run back if you expected a fan-out. More than one server instance on PostgreSQL is Community. Team adds dedicated workers and named queues, and the relay that runs them inside networks the control node cannot reach. Starting a worker process after a license lapses is refused, and a lapsed license never locks a server out of its own data."
    }
   },
   {
@@ -209,7 +209,7 @@
    "name": "What is the license?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Business Source License 1.1: free to self-host, modify, and run in production for your own organization. The one restriction is offering it to third parties as a hosted or managed service that provides its primary functionality, and each release converts to Apache 2.0 two years after it ships. The Community tier is free and complete on its own, with the built-in hold on agent runs and one plain rule of your own. Pro adds directory sign-in, five approval policies instead of one, and deny rules and risk and reversibility floors. Team adds the full policy engine, the period change register, distributed workers, initializing a new PostgreSQL database, and one-click drift reconcile. Both unlock with a signed license file the binary verifies offline, flat per organization by fleet band, and a lapsed license takes nothing: paid features stop while your data, evidence, and every Community feature keep working. There is no license server and nothing ever phones home."
+    "text": "Business Source License 1.1: free to self-host, modify, and run in production for your own organization. The one restriction is offering it to third parties as a hosted or managed service that provides its primary functionality, and each release converts to Apache 2.0 two years after it ships. The Community tier is free and complete on its own, with the built-in hold on agent runs and one plain rule of your own. Pro adds directory sign-in, five approval policies instead of one, and deny rules and risk and reversibility floors. Team adds the full policy engine, the period change register, dedicated workers and named queues, and the relay that runs them inside networks the control node cannot reach, and one-click drift reconcile. Both unlock in the paid build with a signed license file the binary verifies offline, flat per organization by fleet band, and a lapsed license takes nothing: paid features stop while your data, evidence, and every Community feature keep working. There is no license server and nothing ever phones home."
    }
   }
  ]
@@ -253,11 +253,8 @@ kubectl, the cloud CLIs, and your own scripts all work.</p>
 <p>No. SwitchTender is one binary that is the API, the executor, the scheduler, and the UI. State is one
 database: a SQLite file to start, or PostgreSQL when you want more than one instance. No Redis, no
 operator, no separate task engine.</p>
-<p>One caveat on the second half of that sentence. SQLite is free forever, but creating a new
-PostgreSQL database is a Team feature: a Community or Pro install pointed at an empty PostgreSQL
-refuses to start and says <code>A Team license is required for initializing a new PostgreSQL database</code>.
-Opening a PostgreSQL database that already holds the schema is never gated, in any license state,
-so a lapsed license never locks a server out of its own data.</p>
+<p>SQLite and PostgreSQL are both free. PostgreSQL, including initializing a new schema and
+active-active HA on it, is Community. A lapsed license never locks a server out of its own data.</p>
 <h2 id="what-is-a-dry-run">What is a dry run?</h2>
 <p>A run in the tool's no-change mode. Ansible runs in check mode, and Terraform and OpenTofu run plan
 instead of apply. Those are the only dry runs that preview a change. A Bash, Python, or PowerShell
@@ -391,10 +388,10 @@ does and the other tools do not: a Bash, Python, PowerShell, Go, Terraform, or O
 using a tool an extension registered, executes once wherever it is claimed. Submitting one with a
 shard count is not an error and does not warn. It simply runs as a single run, with no <code>kind</code> of
 <code>split</code> and no shard count on it, so read the submitted run back if you expected a fan-out.</p>
-<p>Going wider is Team. Separate worker processes and initializing a new PostgreSQL database for more
-than one instance both need a Team license. Opening a PostgreSQL database that already holds the
-schema is never gated, in any license state, so a lapsed license never locks a server out of its own
-data, though starting a worker process after one lapses is refused.</p>
+<p>More than one server instance on PostgreSQL is Community. Team adds dedicated workers and named
+queues, and the relay that runs them inside networks the control node cannot reach. Starting a
+worker process after a license lapses is refused, and a lapsed license never locks a server out of
+its own data.</p>
 <h2 id="does-switchtender-need-an-agent-on-each-host">Does SwitchTender need an agent on each host?</h2>
 <p>No. It reaches the machines it manages over SSH, the same way Ansible does, and installs nothing
 on them. There is no per-host daemon to deploy, patch, or account for.</p>
@@ -473,7 +470,7 @@ ships. The Community
 tier is free and complete on its own, with the built-in hold on agent runs and one plain rule of
 your own. Pro adds directory sign-in, five approval policies instead of one, and deny rules and
 risk and reversibility floors. Team adds the full policy engine, the period change register,
-distributed workers, initializing a new PostgreSQL database, and one-click drift reconcile. Both unlock with a signed license file the binary verifies
+dedicated workers and named queues, and the relay that runs them inside networks the control node cannot reach, and one-click drift reconcile. Both unlock in the paid build with a signed license file the binary verifies
 offline, flat per organization by fleet band, and a lapsed license takes nothing: paid features stop
 while your data, evidence, and every Community feature keep working. There is no license server and
 nothing ever phones home.</p>

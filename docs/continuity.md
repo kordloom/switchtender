@@ -9,7 +9,7 @@ one place.
 The binary is self-hosted and self-contained. There is no license server, no online activation,
 and no phone-home, so nothing stops working when the vendor does. A paid license keeps verifying
 offline through the end of its term. When a term lapses, its paid features and services stop and
-nothing else does: your data, your evidence, and every Community feature keep working.
+nothing else does: your data, your evidence, and every Community feature keep working. The paid module is not published. Its source stays private, the way Semaphore's and Grafana's paid code does, and a paid license keeps working offline until its own expiry whatever happens to KordLoom.
 
 ## Your evidence stays verifiable forever
 

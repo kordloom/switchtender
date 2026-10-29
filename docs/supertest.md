@@ -33,8 +33,8 @@ the server names in its log, from inside the pod, exactly as an operator would. 
 playbook across all three machines. Then it reads the files that playbook wrote back through
 `kubectl exec`, because proof that comes from the product's own reporting is not proof.
 
-**Team initializes a PostgreSQL schema it has never seen, under a license, with a dedicated
-worker and a shared signing identity.** Then it walks the arc the product exists for:
+**Team runs a dedicated worker against a PostgreSQL schema it has never seen, under a license,
+with a shared signing identity.** Then it walks the arc the product exists for:
 
 1. A routine playbook runs ungated, because creating files grades reversible.
 2. A destructive playbook, submitted by an AI agent's token, is graded **irreversible from its
@@ -58,8 +58,8 @@ old run's receipt must still verify offline, and a new run must execute with the
 Then the same release is rolled back in place, on the volume the newer binary already wrote: the
 chain must verify with the newer binary's entries included, the newer binary's runs must read
 back, and the rolled-back install must execute new work, because an upgrade an operator cannot
-walk back is a one-way door sold as a swap. The licensed PostgreSQL shape gets its own upgrade
-proof: schema initialized by the old binary under license, real work through the dedicated
+walk back is a one-way door sold as a swap. The Team PostgreSQL shape gets its own upgrade
+proof: schema initialized by the old binary, real work through the dedicated
 worker, then server and worker rolled together in place with the schema reused, the license
 carried, and the chain verifying across the boundary.
 
@@ -74,8 +74,8 @@ installed with two server replicas on one PostgreSQL and one signing identity. A
 second run is held by policy, and one replica is deleted while the first run executes. The survivor,
 dialed by name while the deployment provably has one ready replica, still serves authenticated
 reads, the held run is approved on it and executes, the mid-flight run completes exactly once, and
-when both replicas are back the chain verifies as one unforked history. Active-active HA is the word
-the Team tier prices, and this is the phase that keeps it from being only a word.
+when both replicas are back the chain verifies as one unforked history. Active-active HA is free on every
+tier, and this is the phase that keeps it from being only a word.
 
 **A destroyed install comes back from its backup, and the evidence outlives the install.** A sealed
 backup is taken with the product's own command, then the install is destroyed for real, namespace

@@ -17,11 +17,8 @@ No. SwitchTender is one binary that is the API, the executor, the scheduler, and
 database: a SQLite file to start, or PostgreSQL when you want more than one instance. No Redis, no
 operator, no separate task engine.
 
-One caveat on the second half of that sentence. SQLite is free forever, but creating a new
-PostgreSQL database is a Team feature: a Community or Pro install pointed at an empty PostgreSQL
-refuses to start and says `A Team license is required for initializing a new PostgreSQL database`.
-Opening a PostgreSQL database that already holds the schema is never gated, in any license state,
-so a lapsed license never locks a server out of its own data.
+SQLite and PostgreSQL are both free. PostgreSQL, including initializing a new schema and
+active-active HA on it, is Community. A lapsed license never locks a server out of its own data.
 
 ## What is a dry run?
 
@@ -188,10 +185,10 @@ using a tool an extension registered, executes once wherever it is claimed. Subm
 shard count is not an error and does not warn. It simply runs as a single run, with no `kind` of
 `split` and no shard count on it, so read the submitted run back if you expected a fan-out.
 
-Going wider is Team. Separate worker processes and initializing a new PostgreSQL database for more
-than one instance both need a Team license. Opening a PostgreSQL database that already holds the
-schema is never gated, in any license state, so a lapsed license never locks a server out of its own
-data, though starting a worker process after one lapses is refused.
+More than one server instance on PostgreSQL is Community. Team adds dedicated workers and named
+queues, and the relay that runs them inside networks the control node cannot reach. Starting a
+worker process after a license lapses is refused, and a lapsed license never locks a server out of
+its own data.
 
 ## Does SwitchTender need an agent on each host?
 
@@ -293,7 +290,7 @@ ships. The Community
 tier is free and complete on its own, with the built-in hold on agent runs and one plain rule of
 your own. Pro adds directory sign-in, five approval policies instead of one, and deny rules and
 risk and reversibility floors. Team adds the full policy engine, the period change register,
-distributed workers, initializing a new PostgreSQL database, and one-click drift reconcile. Both unlock with a signed license file the binary verifies
+dedicated workers and named queues, and the relay that runs them inside networks the control node cannot reach, and one-click drift reconcile. Both unlock in the paid build with a signed license file the binary verifies
 offline, flat per organization by fleet band, and a lapsed license takes nothing: paid features stop
 while your data, evidence, and every Community feature keep working. There is no license server and
 nothing ever phones home.

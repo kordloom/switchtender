@@ -193,8 +193,7 @@ SWITCHTENDER_ENCRYPTION_KEY=... SWITCHTENDER_ENCRYPTION_SALT=... \
   switchtender restore --db &quot;postgres://user:pass@host/db&quot; --in move.stbak
 switchtender serve --db &quot;postgres://user:pass@host/db&quot;
 </code></pre>
-<p>The restore initializes the PostgreSQL schema, which requires a Team license, so install the
-license first. Use the same encryption key and salt on both sides, since they seal the file and
+<p>The restore initializes the PostgreSQL schema, which is Community. Use the same encryption key and salt on both sides, since they seal the file and
 the stored secrets.</p>
 <p>Two things stay behind by design. Run history and the audit chain remain in the SQLite file,
 which stays valid evidence: keep the file, and every receipt minted from it verifies offline

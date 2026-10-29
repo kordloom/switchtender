@@ -240,7 +240,7 @@ service user alone:
 
 Sign in with it, create named accounts and tokens, and delete it.
 
-On a Team license, point `database.dsn` at PostgreSQL to run more than one server, and set
+Point `database.dsn` at PostgreSQL to run more than one server, and on a Team license set
 `worker.enabled=true` for dedicated workers. Pass the license with
 `--set-file license=switchtender-license.json`: `--set` parses commas and braces and changes it. The
 DSN reaches the pods from a Secret rather than as an argument, so the password is not in the pod

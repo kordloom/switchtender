@@ -152,7 +152,7 @@ set rather than by not finding it.</p>
 </tr>
 <tr>
 <td>Datastore</td>
-<td>SQLite, Postgres optional (creating a new schema is Team, opening an existing one is never gated)</td>
+<td>SQLite, Postgres optional (including active-active HA, all free)</td>
 <td>PostgreSQL 15 [1]</td>
 <td>PostgreSQL 15 [2]</td>
 <td>SQLite, MySQL or Postgres [3]</td>
@@ -408,7 +408,7 @@ than &quot;structured versus scrollback&quot;.</p>
 </tr>
 <tr>
 <td>Paid tiers</td>
-<td>SwitchTender: Community free with one plain rule, Pro $500 a year to 500 hosts (SSO, five approval policies, deny rules, risk and reversibility floors, and email support), Team $7,500 to $45,000 by fleet band (full policy engine, PostgreSQL active-active HA, distributed workers, drift reconcile, change register), Enterprise from $50,000. AWX: free, no paid tier; the paid product is Ansible Automation Platform. Semaphore: Community free, Pro from $199 a year at 50 managed nodes, Enterprise by contract. Ascender: core free; Ascender Pro $100 per node per year Standard or $150 Premium, with no node minimum on the pricing page and no minimum after an initial 100-node purchase on the compare page, as of 2026-10-08.</td>
+<td>SwitchTender: Community free with one plain rule, Pro $500 a year to 500 hosts (SSO, five approval policies, deny rules, risk and reversibility floors, and email support), Team $7,500 to $45,000 by fleet band (full policy engine, dedicated workers and named queues, and the relay that runs them inside networks the control node cannot reach, drift reconcile, change register), Enterprise from $50,000. AWX: free, no paid tier; the paid product is Ansible Automation Platform. Semaphore: Community free, Pro from $199 a year at 50 managed nodes, Enterprise by contract. Ascender: core free; Ascender Pro $100 per node per year Standard or $150 Premium, with no node minimum on the pricing page and no minimum after an initial 100-node purchase on the compare page, as of 2026-10-08.</td>
 </tr>
 </tbody>
 </table>
@@ -442,7 +442,7 @@ runs, which no other product in the table documents. Outside the table, Spacelif
 accepts the plan generated in the planning phase for infrastructure-as-code runs; it does not cover
 an inventory snapshot or a container image. The controller work underneath, one binary, a live
 matrix, balanced splits, fleet memory, a visual DAG editor, and a one-command import from six
-tools, ships in the same binary. It is younger, and its integration catalog is smaller. Both gaps
+tools, ships in the paid build. It is younger, and its integration catalog is smaller. Both gaps
 are being closed on purpose.</p>
 <p>The <a href="/docs/reliability">reliability</a> page details how runs execute under load: bounded workers, splits
 balanced by measured duration, coordinated pipeline failure, crash recovery through leases, and a

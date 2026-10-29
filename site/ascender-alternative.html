@@ -133,7 +133,7 @@
 						<tr><td>Approval bound to the content that runs: inventory, image, commit, plan</td><td class="us"><i class="y"></i> <span class="muted">a digest recomputed before execution</span></td><td><span class="muted">Workflow node records a decision, not a digest; jobs record the revision used after the fact</span></td></tr>
 						<tr><td>Hard ceiling on AI agents: cannot approve its own run or touch identity or secrets</td><td class="us"><i class="y"></i> <span class="muted">agents are principals capped below admin</span></td><td><span class="muted">No AI feature documented</span></td></tr>
 						<tr><td>Evidence a third party verifies offline, without trusting the server</td><td class="us"><i class="y"></i> <span class="muted">signed hash chain, Apache-2.0 verifier</span></td><td><i class="n"></i></td></tr>
-						<tr><td>Deploy</td><td class="us">One binary, SQLite or Postgres <span class="muted">creating a new Postgres schema is Team, opening an existing one is never gated</span></td><td><span class="muted">Kubernetes or k3s + Postgres + Receptor</span></td></tr>
+						<tr><td>Deploy</td><td class="us">One binary, SQLite or Postgres, both free</td><td><span class="muted">Kubernetes or k3s + Postgres + Receptor</span></td></tr>
 						<tr><td>Model</td><td class="us">Source-available, self-host free</td><td><span class="muted">Core, Ledger, and Galaxy Proxy are Apache 2.0; Reaqt and Registry ship only as subscription images; Ascender Pro lists at $100 or $150 per node per year</span></td></tr>
 						<tr><td>Commercial support and SLA</td><td class="us"><span class="muted">Email support from Pro, SLA at Enterprise</span></td><td><span class="muted">Standard is business hours, Premium is 24/7 with a 30-minute Severity 1 response; no self-support tier</span></td></tr>
 						<tr><td>Tools</td><td class="us">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td><span class="muted">Ansible only</span></td></tr>
@@ -144,7 +144,7 @@
 						<tr><td>LDAP, SAML, OIDC sign-in</td><td class="us"><i class="y"></i> <span class="muted">Pro, $500/yr</span></td><td><i class="y"></i></td></tr>
 						<tr><td>Execution environments</td><td class="us">All seven tools, Docker or Podman</td><td><span class="muted">Ansible only, run as pods on Kubernetes</span></td></tr>
 						<tr><td>Instance groups</td><td class="us"><i class="y"></i> <span class="muted">worker queues, Team</span></td><td><i class="y"></i></td></tr>
-						<tr><td>High availability</td><td class="us">Active-active on Postgres <span class="muted">creating the schema is Team, opening an existing one is never gated</span></td><td><span class="muted">Via Kubernetes</span></td></tr>
+						<tr><td>High availability</td><td class="us">Active-active on Postgres <span class="muted">on every tier</span></td><td><span class="muted">Via Kubernetes</span></td></tr>
 						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><span class="muted">Job slicing, each slice runs a portion of the inventory</span></td></tr>
 						<tr><td>Flaky-host detection and duration trends</td><td class="us"><i class="y"></i></td><td><span class="muted">Per-host job summaries, neither of these</span></td></tr>
 						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><span class="muted">Activity stream forwarded to Logstash, Splunk, Loggly, Sumologic, or Elastic Stack; Ledger change diffs exported as CSV or PDF; no hashing or signing documented in either</span></td></tr>

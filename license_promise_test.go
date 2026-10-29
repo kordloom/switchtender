@@ -76,3 +76,33 @@ func TestTheSupplementalGrantCoversTheVersionsThatShippedWithoutIt(t *testing.T)
 		}
 	}
 }
+
+// TestLicensingPromiseSaysWherePaidCodeLives holds LICENSING.md to the open-core mechanism. The
+// Community build is the public repository, the paid code sits in a private module, and a page that
+// goes back to saying paid features ship in the public binary promises a lock that is not there.
+func TestLicensingPromiseSaysWherePaidCodeLives(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile("LICENSING.md")
+	if err != nil {
+		t.Fatalf("read LICENSING.md: %v", err)
+	}
+	text := whitespaceRun.ReplaceAllString(string(raw), " ")
+
+	for _, want := range []string{
+		"The Community build is this repository.",
+		"Paid features live in a private module, and the paid build that carries them is a separate download",
+		"mounted at internal/paid/impl as a git submodule that public clones do not fetch",
+		"A Community build refuses each paid feature by naming the tier it needs.",
+		"The paid engine is not there to patch a key out of.",
+		"Team is what lets you write the rule.",
+		"PostgreSQL, including active-active high availability on it, is Community.",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("LICENSING.md no longer says %q", want)
+		}
+	}
+	if strings.Contains(strings.ToLower(text), "paid features ship in the same binary") {
+		t.Error("LICENSING.md says paid features ship in the same binary, but the paid code is in a " +
+			"private module and the paid build is a separate download")
+	}
+}

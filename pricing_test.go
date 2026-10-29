@@ -170,6 +170,11 @@ func TestRetiredPricingClaimsStayGone(t *testing.T) {
 	}, { // Test 16: Signed macOS packages as future work.
 		Pattern: `(?i)signed desktop packages for macOS`,
 		Why:     "The macOS app in the .dmg is signed and notarized, so only the tarball is left.",
+	}, { // Test 17: Paid features shipping in the one public binary.
+		Pattern: `(?i)ships? in the same binary|unlocks? in the same binary|same binary, unlocked|` +
+			`same binary you already downloaded|the same binary grows with the team`,
+		Why: "Paid code lives in a private module and the paid build is a separate download, so no " +
+			"page says paid features ship in the same binary.",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -401,5 +406,64 @@ func TestCommunityImportersAreThePromise(t *testing.T) {
 		if strings.Contains(readFlat(t, path), "license.") {
 			t.Errorf("%s calls the license package, and every importer is a Community feature", path)
 		}
+	}
+}
+
+// TestPricingSurfacesDescribeThePaidBuild pins the open-core mechanism sentences to the surfaces that
+// state them. Paid code lives in a private module, so a page that says paid features ride in the
+// public binary, or that PostgreSQL and high availability need Team, describes a product that no
+// longer exists.
+func TestPricingSurfacesDescribeThePaidBuild(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		File       string
+		WantPhrase string
+	}{{ // Test 0: The licensing overview states the open-core mechanism.
+		File: "LICENSING.md",
+		WantPhrase: "The commercial model is open core. The Community build is this repository. " +
+			"Paid features live in a private module, and the paid build that carries them is a " +
+			"separate download, unlocked by a small signed file verified offline against a key " +
+			"compiled into the binary.",
+	}, { // Test 1: The licensing overview says where the paid code lives.
+		File: "LICENSING.md",
+		WantPhrase: "The paid code is kept in a private repository, mounted at internal/paid/impl as " +
+			"a git submodule that public clones do not fetch. A Community build refuses each paid " +
+			"feature by naming the tier it needs. The paid engine is not there to patch a key out of.",
+	}, { // Test 2: The README names the paid build.
+		File: "README.md",
+		WantPhrase: "Every paid feature ships in the paid build, a separate download unlocked by a " +
+			"signed license file: no license server, no phone-home, flat per org.",
+	}, { // Test 3: The README says where the paid code lives.
+		File: "README.md",
+		WantPhrase: "The paid code is kept in a private repository, mounted at internal/paid/impl as " +
+			"a git submodule that public clones do not fetch. A Community build refuses each paid " +
+			"feature by naming the tier it needs, and the paid engine is not there to patch a key out of.",
+	}, { // Test 4: The Pro card names the paid build.
+		File:       "site/pricing.html",
+		WantPhrase: "The paid build, unlocked by a signed license file the product verifies offline.",
+	}, { // Test 5: The migration page names the paid build.
+		File: "site/awx-alternative.html",
+		WantPhrase: "SwitchTender ships all three in the paid build, unlocked by Pro at $500 a year, " +
+			"flat per organization.",
+	}, { // Test 6: PostgreSQL and HA are Community in the README.
+		File:       "README.md",
+		WantPhrase: "PostgreSQL, including active-active HA on it, is Community.",
+	}, { // Test 7: PostgreSQL and HA are Community in the reliability doc.
+		File:       "docs/reliability.md",
+		WantPhrase: "High availability is Community.",
+	}, { // Test 8: Team's scope on the pricing FAQ is workers, not the database.
+		File:       "site/pricing.html",
+		WantPhrase: "PostgreSQL, including active-active HA on it, is Community.",
+	}, { // Test 9: The comparison doc names the paid build.
+		File:       "docs/comparison.md",
+		WantPhrase: "ships in the paid build",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			if !strings.Contains(readFlat(t, test.File), test.WantPhrase) {
+				t.Errorf("%s no longer says %q", test.File, test.WantPhrase)
+			}
+		})
 	}
 }

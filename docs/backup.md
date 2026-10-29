@@ -149,8 +149,7 @@ PostgreSQL with the same two commands, because both accept either a file path or
       switchtender restore --db "postgres://user:pass@host/db" --in move.stbak
     switchtender serve --db "postgres://user:pass@host/db"
 
-The restore initializes the PostgreSQL schema, which requires a Team license, so install the
-license first. Use the same encryption key and salt on both sides, since they seal the file and
+The restore initializes the PostgreSQL schema, which is Community. Use the same encryption key and salt on both sides, since they seal the file and
 the stored secrets.
 
 Two things stay behind by design. Run history and the audit chain remain in the SQLite file,

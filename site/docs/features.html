@@ -87,8 +87,9 @@
 			<h1 id="features">Features</h1>
 <p>What SwitchTender does today. Almost all of it runs on Community, which needs no license. Six
 capabilities are licensed, and the rows below say so where they appear: directory sign-in is Pro,
-and the full policy engine, the period change register, distributed workers, creating a new
-PostgreSQL schema, and one-click drift reconcile are Team. The number of approval policies is
+and the full policy engine, the period change register, dedicated workers and named queues, and
+the relay that runs them inside networks the control node cannot reach, and one-click drift
+reconcile are Team. The number of approval policies is
 licensed too: one on Community, five on Pro, and any number on Team. Tiers are at
 <a href="https://switchtender.com/pricing">https://switchtender.com/pricing</a>.</p>
 <table>
@@ -149,7 +150,7 @@ licensed too: one on Community, five on Pro, and any number on Team. Tiers are a
 </tr>
 <tr>
 <td>Storage</td>
-<td>SQLite by default. The same flag takes a PostgreSQL DSN for multi-instance. Creating a new PostgreSQL schema needs Team; opening one that already exists is never gated.</td>
+<td>SQLite by default. The same flag takes a PostgreSQL DSN for multi-instance. PostgreSQL, including creating a new schema, is Community.</td>
 </tr>
 <tr>
 <td>Projects</td>
@@ -281,7 +282,7 @@ licensed too: one on Community, five on Pro, and any number on Team. Tiers are a
 </tr>
 <tr>
 <td>High availability</td>
-<td>Two servers on one PostgreSQL database share the schedule without double-firing. It has no license check of its own: creating a new PostgreSQL schema is Team, and opening one that already exists is never gated. A token can carry a lifetime (<code>token new --ttl</code>) on any tier.</td>
+<td>Two servers on one PostgreSQL database share the schedule without double-firing. It is Community, with no license check. A token can carry a lifetime (<code>token new --ttl</code>) on any tier.</td>
 </tr>
 <tr>
 <td>Git triggers</td>
