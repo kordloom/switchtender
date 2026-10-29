@@ -218,7 +218,7 @@ func TestAPersonIsToldTheWholeReason(t *testing.T) {
 			}
 			seedDrift(t, runs, "chk_web", "", "web01", 3)
 			handler := New(runs, &fakeSubmitter{err: test.Err}, zap.NewNop(),
-				WithTemplates(templates), WithAI(reply)).Handler()
+				WithTemplates(templates), WithAI(reply), WithReconciler(&testReconciler{})).Handler()
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, test.Path,
 				strings.NewReader(test.Body)))

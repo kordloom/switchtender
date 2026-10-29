@@ -265,7 +265,7 @@ func newWiringFixture(t *testing.T) *wiringFixture {
 		WithInventories(inventories), WithTemplates(templates), WithSchedules(schedules),
 		WithInventorySources(sources, nil), WithAudit(audit.NewMemStore()),
 		WithApprover(&recordingApprover{runs: runs}), WithRetrier(retrier),
-		WithAI(explainer))
+		WithAI(explainer), WithReconciler(&testReconciler{}))
 
 	return &wiringFixture{
 		Handler: srv.Handler(), Runs: runs, Projects: projects, Inventories: inventories,

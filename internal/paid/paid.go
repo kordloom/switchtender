@@ -389,7 +389,7 @@ type Worker interface {
 }
 
 // ReconcileRequest is what a reconcile proposal is built from: the drift check that observed the
-// drift, the drifted host, the sealed plan a Terraform or OpenTofu check kept, and who asked.
+// drift, the drifted host, and the sealed plan a Terraform or OpenTofu check kept.
 type ReconcileRequest struct {
 	// Check is the drift check run.
 	Check *run.Run
@@ -397,13 +397,15 @@ type ReconcileRequest struct {
 	Host string
 	// PlanFile is the sealed plan the check saved, empty for an Ansible check.
 	PlanFile string
-	// Actor, ActorAccount, and ActorType name who proposed the reconcile.
-	Actor, ActorAccount, ActorType string
 }
 
 // Reconciler builds one-click reconcile proposals. A Community build refuses naming Team.
+//
+// The reconciler owns only the run spec that turns the check into the change. The caller holds
+// the proposal for approval and records who proposed it after the spec is applied, so no
+// reconciler can release its own proposal.
 type Reconciler interface {
-	// Propose returns the submit options for a held run that reconciles the drift.
+	// Propose returns the submit options that reconcile the drift the check observed.
 	Propose(ctx context.Context, req ReconcileRequest) ([]run.SubmitOption, error)
 }
 

@@ -105,8 +105,8 @@ func TestReconcileIsScopedToTheCheckOrg(t *testing.T) {
 		t.Errorf("reconcile of the caller's own objectless check = %d, want %d (body %s)",
 			own.Code, http.StatusAccepted, own.Body.String())
 	}
-	if f.Submitter.gotRun == nil || f.Submitter.gotRun.Limit != "mine-1" {
-		t.Errorf("the caller's own reconcile did not propose a change limited to their host: %+v",
+	if f.Submitter.gotRun == nil || f.Submitter.gotRun.ProposedFrom != mine.ID {
+		t.Errorf("the caller's own reconcile did not propose a change from their check: %+v",
 			f.Submitter.gotRun)
 	}
 	if list := f.do(t, http.MethodGet, "/v1/drift", ""); !strings.Contains(list.Body.String(), "mine-1") {

@@ -90,7 +90,7 @@ func TestManualLaunchMatchingNoHostsLinksToThePreview(t *testing.T) {
 			}
 			seedDrift(t, runs, "chk_web", "", "web01", 3)
 			handler := New(runs, &fakeSubmitter{err: test.SubmitErr}, zap.NewNop(),
-				WithTemplates(noHostsTemplates(t))).Handler()
+				WithTemplates(noHostsTemplates(t)), WithReconciler(&testReconciler{})).Handler()
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(test.Method, test.Path, strings.NewReader(test.Body))
 			if test.Body != "" {

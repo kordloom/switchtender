@@ -209,6 +209,15 @@ func WithInventories(store inventory.Store) Option {
 	return func(srv *Server) { srv.inventories = store }
 }
 
+// WithReconciler sets what builds one-click reconcile proposals. A server built without it uses
+// whatever the paid module registered, which on Community is the stub that refuses naming Team.
+func WithReconciler(r paid.Reconciler) Option {
+	if r == nil {
+		panic("server: WithReconciler: Reconciler required")
+	}
+	return func(srv *Server) { srv.reconciler = r }
+}
+
 // WithPolicies enables the approval policy endpoints backed by the given store.
 func WithPolicies(store policy.Store) Option {
 	return func(srv *Server) { srv.policies = store }
@@ -454,6 +463,8 @@ type Server struct {
 	inventories inventory.Store
 	// policies backs the approval policy endpoints when configured.
 	policies policy.Store
+	// reconciler builds one-click reconcile proposals.
+	reconciler paid.Reconciler
 	// audits backs the audit trail when configured.
 	audits audit.Store
 	// producer is the install's signing identity, published so a verifier can pin it. Nil when the
@@ -560,7 +571,7 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 		log = zap.NewNop()
 	}
 	srv := &Server{store: store, submitter: submitter, log: log, hooks: newHookFlights(),
-		guard: user.DefaultGuard()}
+		guard: user.DefaultGuard(), reconciler: paid.CurrentReconciler()}
 	for _, opt := range opts {
 		opt(srv)
 	}
@@ -709,7 +720,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /metrics", metricsHandler(s.store, health, authz, s.log))
 	mux.Handle("GET /v1/fleet", fleetHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/drift", driftHandler(s.store, authz, s.log))
-	mux.Handle("POST /v1/drift/reconcile", reconcileDriftHandler(s.store, s.submitter, authz, s.log))
+	mux.Handle("POST /v1/drift/reconcile", reconcileDriftHandler(s.store, s.submitter, s.reconciler, authz, s.log))
 	mux.Handle("GET /v1/hosts/{host}/runs", hostHistoryHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/hosts/{host}/facts", hostFactsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/estate", estateHandler(s.store, authz, s.log))

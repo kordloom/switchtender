@@ -177,7 +177,8 @@ func newAgentHoldServer(t *testing.T, db agentHoldDB, policyStore bool) *agentHo
 		WithForgeLinks(forgelink.NewMemStore(), forgelink.App{Provider: "github",
 			WebURL: "https://github.example.com", APIURL: "https://github.example.com/api/v3",
 			ClientID: "client"}),
-		WithReviewReporting("https://switchtender.example.com", nil, time.Minute)}
+		WithReviewReporting("https://switchtender.example.com", nil, time.Minute),
+		WithReconciler(&testReconciler{})}
 	if policyStore {
 		serverOpts = append(serverOpts, WithPolicies(db.policies))
 	}

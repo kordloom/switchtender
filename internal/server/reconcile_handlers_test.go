@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,8 +15,47 @@ import (
 
 	"github.com/kordloom/switchtender/internal/ai"
 	"github.com/kordloom/switchtender/internal/event"
+	"github.com/kordloom/switchtender/internal/license"
+	"github.com/kordloom/switchtender/internal/paid"
 	"github.com/kordloom/switchtender/internal/run"
 )
+
+// testReconciler stands in for the paid reconciler. It knows none of the reconcile rules: it
+// records the request and returns Spec, or reruns the check as it ran when Spec is nil, so the
+// handler's own behavior can be tested on a build that has no reconciler.
+type testReconciler struct {
+	// mu guards got and calls.
+	mu sync.Mutex
+	// got is the last request Propose saw.
+	got paid.ReconcileRequest
+	// calls counts Propose calls.
+	calls int
+	// Spec is what Propose returns, the check's own execution options when nil.
+	Spec []run.SubmitOption
+	// Err is returned from Propose when set.
+	Err error
+}
+
+// Propose records req and returns the configured spec.
+func (r *testReconciler) Propose(_ context.Context, req paid.ReconcileRequest) ([]run.SubmitOption, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.got, r.calls = req, r.calls+1
+	if r.Err != nil {
+		return nil, r.Err
+	}
+	if r.Spec != nil {
+		return r.Spec, nil
+	}
+	return req.Check.ExecutionOptions(), nil
+}
+
+// last returns the last request and the number of calls.
+func (r *testReconciler) last() (paid.ReconcileRequest, int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.got, r.calls
+}
 
 // seedDrift stores a check run and a host summary so DriftStatus reports the host.
 func seedDrift(t *testing.T, store run.Store, runID, tool, host string, changed int, events ...event.Event) {
@@ -54,9 +95,11 @@ func seedDrift(t *testing.T, store run.Store, runID, tool, host string, changed 
 	}
 }
 
-// TestReconcileDrift covers the proposal builder: an Ansible check clones held and limited to the
-// host, a Terraform check applies its working directory, an in-sync target is refused, an unknown
-// target is not found, a tool with no reconcile is refused, and an empty target is invalid.
+// TestReconcileDrift covers what the public handler owns around the paid proposal builder: a drifted
+// host reaches the reconciler with its check, host, and no plan for Ansible, the proposal is held,
+// attributed, and sourced whatever the spec says, an in-sync target is refused, an unknown target is
+// not found, a tool with no reconcile is refused, an empty target is invalid, and a Terraform check
+// reaches the reconciler with the plan it kept.
 func TestReconcileDrift(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
@@ -66,7 +109,13 @@ func TestReconcileDrift(t *testing.T) {
 	seedDrift(t, store, "chk_tf", run.ToolTerraform, "infra/network", 5)
 
 	fake := &fakeSubmitter{run: &run.Run{ID: "run_prop", Status: run.StatusPendingApproval}}
-	handler := New(store, fake, zap.NewNop()).Handler()
+	// The spec tries to release its own proposal and to claim another source. The handler applies
+	// the hold and the attribution after it, so neither takes.
+	rec0 := &testReconciler{Spec: []run.SubmitOption{
+		run.WithLimit("from-spec"), run.WithRequireApproval(false),
+		run.WithSource("spec", "elsewhere"), run.WithProposedFrom("elsewhere"),
+	}}
+	handler := New(store, fake, zap.NewNop(), WithReconciler(rec0)).Handler()
 	post := func(body string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/drift/reconcile",
@@ -74,31 +123,30 @@ func TestReconcileDrift(t *testing.T) {
 		return rec
 	}
 
-	// Test 0: A drifted host produces a held proposal cloned from its check run.
+	// Test 0: A drifted host reaches the reconciler and its spec is submitted held.
 	rec := post(`{"host":"web01"}`)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("reconcile status = %d, want 202: %s", rec.Code, rec.Body.String())
+	}
+	req, calls := rec0.last()
+	if calls != 1 || req.Check == nil || req.Check.ID != "chk_web" || req.Host != "web01" ||
+		req.PlanFile != "" {
+		t.Errorf("reconciler saw %+v after %d calls, want chk_web, web01, no plan, once", req, calls)
 	}
 	if fake.gotPlaybook != "site.yml" || fake.gotInventory != "hosts.ini" {
 		t.Errorf("submitted %q %q, want the check run's playbook and inventory",
 			fake.gotPlaybook, fake.gotInventory)
 	}
 	got := fake.gotRun
-	if got.Limit != "web01" {
-		t.Errorf("limit = %q, want web01", got.Limit)
+	if got.Limit != "from-spec" {
+		t.Errorf("limit = %q, want the reconciler's spec applied", got.Limit)
 	}
 	if got.Status != run.StatusPendingApproval {
-		t.Errorf("status = %q, want pending_approval", got.Status)
+		t.Errorf("status = %q, want pending_approval whatever the spec says", got.Status)
 	}
-	if got.ProposedFrom != "chk_web" {
-		t.Errorf("proposed_from = %q, want chk_web", got.ProposedFrom)
-	}
-	if got.DryRun {
-		t.Error("proposal is a dry run, want a real run")
-	}
-	if got.ProjectID != "proj1" || got.InventoryID != "inv1" || got.Queue != "dmz" ||
-		len(got.CredentialIDs) != 1 || got.CredentialIDs[0] != "cred1" {
-		t.Errorf("proposal did not clone the check run's objects: %+v", got)
+	if got.ProposedFrom != "chk_web" || got.Source != "reconcile" {
+		t.Errorf("proposal from %q with source %q, want chk_web and reconcile", got.ProposedFrom,
+			got.Source)
 	}
 	var resp run.Run
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
@@ -127,49 +175,32 @@ func TestReconcileDrift(t *testing.T) {
 	if rec := post(`{"host":"  "}`); rec.Code != http.StatusBadRequest {
 		t.Errorf("empty host status = %d, want 400", rec.Code)
 	}
+	if _, calls := rec0.last(); calls != 1 {
+		t.Errorf("reconciler called %d times, want only the one valid request", calls)
+	}
 
-	// Test 5: A Terraform drift check applies its working directory, held for approval, with no host
-	// limit, run for real rather than as a plan.
-	rec = post(`{"host":"infra/network"}`)
-	if rec.Code != http.StatusAccepted {
+	// Test 5: A Terraform check reaches the reconciler with the plan it kept.
+	if rec := post(`{"host":"infra/network"}`); rec.Code != http.StatusAccepted {
 		t.Fatalf("terraform reconcile status = %d, want 202: %s", rec.Code, rec.Body.String())
 	}
-	tf := fake.gotRun
-	if run.NormalizeTool(tf.Tool) != run.ToolTerraform || tf.Command != "infra/network" {
-		t.Errorf("terraform proposal tool/command = %q/%q, want terraform applying infra/network",
-			tf.Tool, tf.Command)
+	if req, _ := rec0.last(); req.Check.ID != "chk_tf" || req.PlanFile != "sealed-plan-chk_tf" {
+		t.Errorf("terraform reconciler request = %s with plan %q, want chk_tf with its kept plan",
+			req.Check.ID, req.PlanFile)
 	}
-	if tf.Limit != "" {
-		t.Errorf("terraform proposal limit = %q, want none", tf.Limit)
-	}
-	if tf.DryRun {
-		t.Error("terraform proposal is a dry run, want a real apply")
-	}
-	if tf.Status != run.StatusPendingApproval || tf.ProposedFrom != "chk_tf" {
+	if tf := fake.gotRun; tf.Status != run.StatusPendingApproval || tf.ProposedFrom != "chk_tf" {
 		t.Errorf("terraform proposal = status %q from %q, want pending_approval from chk_tf",
 			tf.Status, tf.ProposedFrom)
 	}
 }
 
-// TestAReconcileCarriesThePlanItsCheckSaved pins the Terraform and OpenTofu reconcile. It carries
-// the sealed plan its drift check kept, with the digest bound into the approval, and is pinned to
-// the commit that plan was made from, so the apply runs exactly the plan shown with the check
-// rather than planning again. A check that kept no plan, here because a later check dropped it, has
-// nothing to carry, and the request is refused with what to do next rather than proposing an apply
-// that would plan again.
-func TestAReconcileCarriesThePlanItsCheckSaved(t *testing.T) {
+// TestAReconcileWithNoKeptPlanIsRefused pins the Terraform and OpenTofu side the handler owns. A
+// check that kept no plan, here because a later check dropped it, has nothing to carry, so the
+// request is refused with what to do next before the reconciler is asked, rather than proposing an
+// apply that would plan again.
+func TestAReconcileWithNoKeptPlanIsRefused(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	seedDrift(t, store, "chk_tf", run.ToolTerraform, "infra/network", 5)
-	check, err := store.Get(ctx, "chk_tf")
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-	check.CommitSHA = "c0ffee1234"
-	if err := store.Save(ctx, check); err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
 	seedDrift(t, store, "chk_old", run.ToolOpenTofu, "infra/storage", 2)
 	newer := &run.Run{ID: "chk_newer", Tool: run.ToolOpenTofu, Command: "infra/storage",
 		ProjectID: "proj1", DryRun: true, Status: run.StatusRunning, CreatedAt: time.Now()}
@@ -181,40 +212,66 @@ func TestAReconcileCarriesThePlanItsCheckSaved(t *testing.T) {
 	}
 
 	fake := &fakeSubmitter{run: &run.Run{ID: "run_prop", Status: run.StatusPendingApproval}}
-	handler := New(store, fake, zap.NewNop()).Handler()
-	post := func(body string) *httptest.ResponseRecorder {
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/drift/reconcile",
-			strings.NewReader(body)))
-		return rec
-	}
-
-	rec := post(`{"host":"infra/network"}`)
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("reconcile status = %d, want 202: %s", rec.Code, rec.Body.String())
-	}
-	got := fake.gotRun
-	if got.PlanSealed != "sealed-plan-chk_tf" ||
-		got.PlanSHA256 != run.SealedBlobSHA256(got.PlanSealed) {
-		t.Errorf("the reconcile carries plan %q bound by %q, want the plan the check kept",
-			got.PlanSealed, got.PlanSHA256)
-	}
-	if got.PinnedCommit != "c0ffee1234" {
-		t.Errorf("pinned commit = %q, want the commit the check planned", got.PinnedCommit)
-	}
-	if got.Source != "reconcile" || got.ProposedFrom != "chk_tf" {
-		t.Errorf("reconcile source %q from %q, want reconcile from chk_tf", got.Source, got.ProposedFrom)
-	}
-
-	fake.gotRun = nil
-	rec = post(`{"host":"infra/storage"}`)
+	reconciler := &testReconciler{}
+	handler := New(store, fake, zap.NewNop(), WithReconciler(reconciler)).Handler()
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/drift/reconcile",
+		strings.NewReader(`{"host":"infra/storage"}`)))
 	if rec.Code != http.StatusConflict ||
 		!strings.Contains(rec.Body.String(), "Run the drift check again") {
 		t.Errorf("a check with no kept plan answered %d (%s), want 409 saying to run it again",
 			rec.Code, rec.Body.String())
 	}
-	if fake.gotRun != nil {
-		t.Error("a reconcile was submitted from a check that kept no plan")
+	if _, calls := reconciler.last(); calls != 0 || fake.gotRun != nil {
+		t.Errorf("a check with no kept plan reached the reconciler %d times and submitted %v",
+			calls, fake.gotRun)
+	}
+}
+
+// TestACommunityReconcileRefusesNamingTeam covers a build with no reconciler on an install that
+// holds a Team license, which is the one case the license gate alone lets through: the stub
+// refuses with 403 in the Community line, and nothing is submitted. A reconciler failing for any
+// other reason is a server error, not a refusal.
+func TestACommunityReconcileRefusesNamingTeam(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	seedDrift(t, store, "chk_web", "", "web01", 3)
+
+	tests := []struct {
+		Reconciler paid.Reconciler
+		WantStatus int
+		WantText   string
+	}{{ // Test 0: The Community stub, as New installs it on a build with no paid module.
+		Reconciler: paid.CurrentReconciler(), WantStatus: http.StatusForbidden,
+		WantText: license.Unlicensed(license.FeatureReconcile).Error(),
+	}, { // Test 1: A reconciler that fails is a 500 with a generic line.
+		Reconciler: &testReconciler{Err: errors.New("boom")},
+		WantStatus: http.StatusInternalServerError, WantText: "could not build the reconcile proposal",
+	}}
+	for testNum, test := range tests {
+		fake := &fakeSubmitter{run: &run.Run{ID: "run_prop", Status: run.StatusPendingApproval}}
+		handler := New(store, fake, zap.NewNop(), WithReconciler(test.Reconciler)).Handler()
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/drift/reconcile",
+			strings.NewReader(`{"host":"web01"}`)))
+		if rec.Code != test.WantStatus || !strings.Contains(rec.Body.String(), test.WantText) {
+			t.Errorf("test %d: reconcile = %d %s, want %d containing %q", testNum, rec.Code,
+				rec.Body.String(), test.WantStatus, test.WantText)
+		}
+		if fake.gotRun != nil {
+			t.Errorf("test %d: a refused reconcile submitted %+v", testNum, fake.gotRun)
+		}
+	}
+}
+
+// TestNewUsesTheRegisteredReconciler pins the default: a server built without WithReconciler asks
+// the seam, which on a build with no paid module is the Community stub.
+func TestNewUsesTheRegisteredReconciler(t *testing.T) {
+	t.Parallel()
+	srv := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop())
+	if srv.reconciler != paid.CurrentReconciler() {
+		t.Errorf("reconciler = %T, want the registered one, %T", srv.reconciler,
+			paid.CurrentReconciler())
 	}
 }
 

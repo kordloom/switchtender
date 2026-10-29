@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/license"
+	"github.com/kordloom/switchtender/internal/paid"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -182,10 +184,12 @@ type reconcileRequest struct {
 // limited to the drifted host, and a Terraform or OpenTofu check's apply carries out the plan file
 // the check saved. The proposal is deterministic, no model constructs it, and it is born held for
 // approval, so a person releases it or it never executes. The actor must hold use on every object
-// the run will touch, exactly as a template launch requires.
-func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authorizer, log *zap.Logger) http.HandlerFunc {
-	if store == nil || submitter == nil {
-		panic("server: reconcileDriftHandler: Store and Submitter required")
+// the run will touch, exactly as a template launch requires. The reconciler, which the paid module
+// supplies, builds only the run spec; on Community it is the stub and the request is refused
+// naming Team before anything is submitted.
+func reconcileDriftHandler(store run.Store, submitter Submitter, reconciler paid.Reconciler, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+	if store == nil || submitter == nil || reconciler == nil {
+		panic("server: reconcileDriftHandler: Store, Submitter, and Reconciler required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Seeing drift is Community; the one-click reconcile proposal is Team. The gate sits
@@ -251,30 +255,13 @@ func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authoriz
 			return
 		}
 
-		// The proposal reruns the check's own execution spec, so it carries the image, pull
-		// credential, and timeout the check ran under. Hand-building the options dropped those, so a
-		// reconcile of a containerized check escaped its pinned image and ran on the host under the
-		// default timeout. The one difference from a plain rerun is the dry-run flag: the check
-		// observed drift in check mode, the reconcile applies it for real, so DryRun is forced off
-		// after the spec sets it.
-		opts := append(check.ExecutionOptions(),
-			run.WithDryRun(false),
-			run.WithRequireApproval(true),
-			run.WithProposedFrom(check.ID),
-			run.WithSource("reconcile", check.ID),
-			run.WithActor(actorName(r)), run.WithActorAccount(actorAccount(r)),
-			run.WithActorType(actorType(r)),
-		)
-		if tool == run.ToolAnsible {
-			// The Ansible fix reruns the playbook limited to the drifted host, applying exactly the
-			// divergent tasks.
-			opts = append(opts, run.WithLimit(host))
-		} else {
-			// A Terraform or OpenTofu fix carries out the plan the check saved, the plan its approver
-			// is shown, with its digest bound into the approval, and runs at the commit that plan was
-			// made from. Planning again when it runs would apply something nobody saw. A check that
-			// kept no plan is refused, and the operator runs the check again.
-			sealed, perr := store.DriftPlan(r.Context(), check.ID)
+		// A Terraform or OpenTofu fix carries out the plan the check saved, so a check that kept no
+		// plan is refused here, and the operator runs the check again. Planning again when it runs
+		// would apply something nobody saw.
+		var sealed string
+		if tool != run.ToolAnsible {
+			var perr error
+			sealed, perr = store.DriftPlan(r.Context(), check.ID)
 			if perr != nil {
 				log.Error("server: reconcile drift plan: " + perr.Error())
 				respondError(w, log, http.StatusInternalServerError, "could not read the check's plan")
@@ -287,11 +274,29 @@ func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authoriz
 					"propose the reconcile.")
 				return
 			}
-			opts = append(opts, run.WithPlanFile(sealed))
-			if check.CommitSHA != "" {
-				opts = append(opts, run.WithPinnedCommit(check.CommitSHA))
-			}
 		}
+		spec, err := reconciler.Propose(r.Context(), paid.ReconcileRequest{
+			Check: check, Host: host, PlanFile: sealed,
+		})
+		if errors.Is(err, paid.ErrRequiresTier) {
+			respondError(w, log, http.StatusForbidden, err.Error())
+			return
+		}
+		if err != nil {
+			log.Error("server: reconcile proposal: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not build the reconcile proposal")
+			return
+		}
+		// The hold and the attribution come after the spec, so the proposal is born held and names
+		// who asked whatever the spec says. Clipping keeps the appends off any array the reconciler
+		// holds.
+		opts := append(slices.Clip(spec),
+			run.WithRequireApproval(true),
+			run.WithProposedFrom(check.ID),
+			run.WithSource("reconcile", check.ID),
+			run.WithActor(actorName(r)), run.WithActorAccount(actorAccount(r)),
+			run.WithActorType(actorType(r)),
+		)
 		proposal, err := submitter.Submit(r.Context(), check.Playbook, check.Inventory, opts...)
 		// A check over a composed inventory can resolve to no hosts by the time it is reconciled,
 		// which is the operator's to see in the preview, not a server failure.
