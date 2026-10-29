@@ -63,23 +63,14 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
 
-      - name: Write the Team license
-        env:
-          SUPERTEST_LICENSE: ${{ secrets.SUPERTEST_LICENSE }}
-        run: |
-          set -euo pipefail
-          if [ -z "$SUPERTEST_LICENSE" ]; then
-            echo "::error title=No Team license::the SUPERTEST_LICENSE secret is empty, and a \
-          supertest that quietly skips the paid tier would report less than it claims"
-            exit 1
-          fi
-          printf '%s' "$SUPERTEST_LICENSE" > /tmp/supertest-license.json
-
       - name: Run the supertest
         run: |
           set -euo pipefail
+          # The public tree builds the Community binary, which cannot do the paid things because
+          # the code that does them is not in it, so the Team tier is exercised by the paid
+          # module's own pipeline against the paid build. This run covers the Community tier.
           go run ./test/supertest \
-            -license /tmp/supertest-license.json \
+            -skip-team \
             -shots /tmp/supertest-shots \
             -report "$GITHUB_STEP_SUMMARY"
 
