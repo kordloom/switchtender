@@ -83,6 +83,11 @@ var approvalPaths = map[string]approvalPath{
 		Why: "the append-at-once form of DecisionEntry, called by nothing that decides"},
 	"internal/outcome/approval.go:CommitStepDecisionWith:StepDecisionEntry": {Surface: "system",
 		Why: "the append-at-once form used for a step's request"},
+	"internal/dossiertest/dossiertest.go:NewSealedInstall:ClaimDecision": {
+		Surface: "test helper", Why: "seals one approved run for evidence document tests; no " +
+			"binary imports the package and it serves no route"},
+	"internal/dossiertest/dossiertest.go:NewSealedInstall:SettleDecision": {
+		Surface: "test helper", Why: "the same helper settling the decision it just claimed"},
 	"internal/outcometest/outcometest.go:ApproveSealed:CommitDecisionWith": {
 		Surface: "test helper", Why: "builds a sealed approval for receipt tests; no binary " +
 			"imports the package and it serves no route"},

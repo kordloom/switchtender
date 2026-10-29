@@ -94,7 +94,7 @@ func deciderOf(rec *decision.Record, entries map[string]*audit.Entry, note strin
 		return withNote(name, note)
 	}
 	name := e.Actor
-	if account := onBehalfOf(e); account != "" {
+	if account := OnBehalfOf(e); account != "" {
 		name += " on behalf of " + account
 	}
 	if stored := audit.AsStored(&audit.Entry{Actor: rec.Actor}).Actor; stored != e.Actor {

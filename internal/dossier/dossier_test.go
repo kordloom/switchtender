@@ -1,7 +1,6 @@
 package dossier
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,132 +12,11 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/kordloom/switchtender/internal/audit"
-	"github.com/kordloom/switchtender/internal/binding"
 	"github.com/kordloom/switchtender/internal/decision"
+	"github.com/kordloom/switchtender/internal/dossiertest"
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/run"
 )
-
-// sealedInstall is a keyed install holding one run an approver released, sealed to the DECISION
-// entry recording the approval the way the dispatcher seals it.
-type sealedInstall struct {
-	// Runs is the run store.
-	Runs run.Store
-	// Audits is the chain as appended.
-	Audits audit.Store
-	// Key is the binding key the run was sealed under.
-	Key *binding.Key
-	// Run is the approved run as stored.
-	Run *run.Run
-	// DecisionID is the approval's chain entry.
-	DecisionID string
-}
-
-// newSealedInstall stores a run held for approval at at, records alice's approval of it, settles it
-// with that decision, and seals it under the install's key.
-func newSealedInstall(t *testing.T, runID string, at time.Time) *sealedInstall {
-	t.Helper()
-	ctx := context.Background()
-	key, err := binding.DeriveKey(bytes.Repeat([]byte{7}, 32))
-	if err != nil {
-		t.Fatalf("DeriveKey() error = %v", err)
-	}
-	in := &sealedInstall{Runs: run.NewMemStore(), Audits: audit.NewMemStore(), Key: key,
-		DecisionID: audit.NewID()}
-	ended := at.Add(time.Minute)
-	if err := in.Runs.Save(ctx, &run.Run{
-		ID: runID, Playbook: "site.yml", Inventory: "hosts.ini", Status: run.StatusPendingApproval,
-		CreatedAt: at, EndedAt: &ended, Actor: "deploy-bot", ApprovalRequested: true,
-		HeldByPolicy: "prod changes",
-	}); err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
-	if err := in.Audits.Append(ctx, &audit.Entry{ID: in.DecisionID, At: at, Actor: "alice",
-		ActorType: "session", Method: audit.MethodDecision,
-		Path: "/runs/" + runID + "/decision/approved", ContentDigest: "sha256:" +
-			strings.Repeat("ab", 32)}); err != nil {
-		t.Fatalf("Append() error = %v", err)
-	}
-	if ok, err := in.Runs.ClaimDecision(ctx, runID, in.DecisionID, "claim"); err != nil || !ok {
-		t.Fatalf("ClaimDecision() = %v, %v", ok, err)
-	}
-	settle := run.DecisionSettle{Status: run.StatusSucceeded, EndedAt: ended}
-	if ok, err := in.Runs.SettleDecision(ctx, runID, in.DecisionID, settle); err != nil || !ok {
-		t.Fatalf("SettleDecision() = %v, %v", ok, err)
-	}
-	r, err := in.Runs.Get(ctx, runID)
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-	entry, err := in.Audits.Entry(ctx, in.DecisionID)
-	if err != nil {
-		t.Fatalf("Entry() error = %v", err)
-	}
-	rec, err := binding.RunRecord(r, binding.RootOf(entry))
-	if err != nil {
-		t.Fatalf("RunRecord() error = %v", err)
-	}
-	r.SpecSeal = key.Seal(rec)
-	if err := in.Runs.Save(ctx, r); err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
-	in.Run = r
-	return in
-}
-
-// verifier returns the checks a keyed process holds rows to, over audits.
-func (in *sealedInstall) verifier(audits audit.Store) *binding.Verifier {
-	return &binding.Verifier{Runs: in.Runs, Audits: audits, Key: in.Key,
-		SpecSeal: func(r *run.Run) string { return r.SpecSeal },
-		Entry: func(ctx context.Context, id string) (*audit.Entry, error) {
-			e, err := audits.Entry(ctx, id)
-			if errors.Is(err, audit.ErrEntryNotFound) {
-				return nil, nil
-			}
-			return e, err
-		}}
-}
-
-// actorRewritten is a chain on which a writer renamed the decider of one entry, read by id and
-// streamed alike, and linked every entry from it on again so the walk still verifies.
-type actorRewritten struct {
-	audit.Store
-	// id is the entry rewritten.
-	id string
-	// actor is the name the writer put on it.
-	actor string
-}
-
-// Entry reads an entry by id as the writer left it.
-func (c *actorRewritten) Entry(ctx context.Context, id string) (*audit.Entry, error) {
-	e, err := c.Store.Entry(ctx, id)
-	if err == nil && e != nil && e.ID == c.id {
-		e.Actor = c.actor
-	}
-	return e, err
-}
-
-// ChainScan streams the rewritten chain above afterSeq, linked again from the rewrite on.
-func (c *actorRewritten) ChainScan(ctx context.Context, afterSeq int64,
-	fn func(*audit.Entry) error) error {
-	prev, relinking := "", false
-	return c.Store.ChainScan(ctx, 0, func(e *audit.Entry) error {
-		cp := *e
-		if cp.ID == c.id {
-			cp.Actor = c.actor
-			relinking = true
-		}
-		if relinking {
-			cp.PrevHash = prev
-			cp.Hash = audit.EntryHash(&cp)
-		}
-		prev = cp.Hash
-		if cp.Seq <= afterSeq {
-			return nil
-		}
-		return fn(&cp)
-	})
-}
 
 // seedEvidence stores one approved run and the chain entries recording it, returning the stores.
 func seedEvidence(t *testing.T) (run.Store, audit.Store, string) {
@@ -790,10 +668,10 @@ func TestDossierFlagsARewrittenDecider(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
-			sealed := newSealedInstall(t, "run_sealed", at)
+			sealed := dossiertest.NewSealedInstall(t, "run_sealed", at)
 			audits := sealed.Audits
 			if test.Rewrite {
-				audits = &actorRewritten{Store: audits, id: sealed.DecisionID, actor: "mallory"}
+				audits = &dossiertest.ActorRewritten{Store: audits, ID: sealed.DecisionID, Actor: "mallory"}
 			}
 			in, err := Collect(ctx, sealed.Runs, audits, audit.Identity{}, "run_sealed",
 				at.Add(time.Hour))
@@ -803,7 +681,7 @@ func TestDossierFlagsARewrittenDecider(t *testing.T) {
 			if !in.ChainOK {
 				t.Fatal("the re-linked chain does not verify; the rewrite helper is wrong")
 			}
-			v := sealed.verifier(audits)
+			v := sealed.Verifier(audits)
 			if test.Unkeyed {
 				v = nil
 			}

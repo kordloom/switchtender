@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dossiertest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -252,7 +253,7 @@ func TestRegisterFlagsARewrittenDecider(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
-			sealed := newSealedInstall(t, "run_sealed", at)
+			sealed := dossiertest.NewSealedInstall(t, "run_sealed", at)
 			// A decision on a run retention has since pruned from the store.
 			if err := sealed.Audits.Append(ctx, &audit.Entry{ID: audit.NewID(), At: at,
 				Actor: "bob", Method: audit.MethodDecision,
@@ -261,14 +262,14 @@ func TestRegisterFlagsARewrittenDecider(t *testing.T) {
 			}
 			audits := sealed.Audits
 			if test.Rewrite {
-				audits = &actorRewritten{Store: audits, id: sealed.DecisionID, actor: "mallory"}
+				audits = &dossiertest.ActorRewritten{Store: audits, ID: sealed.DecisionID, Actor: "mallory"}
 			}
 			in, err := CollectRegister(ctx, sealed.Runs, audits, audit.Identity{},
 				at.Add(-time.Hour), at.Add(time.Hour), at.Add(time.Hour), 0)
 			if err != nil {
 				t.Fatalf("CollectRegister() error = %v", err)
 			}
-			v := sealed.verifier(audits)
+			v := sealed.Verifier(audits)
 			if test.Unkeyed {
 				v = nil
 			}

@@ -42,9 +42,9 @@ func TestWorkflowApprovalStepEntriesAreNamed(t *testing.T) {
 			if got := entryRole(e); got != test.WantRole {
 				t.Errorf("entryRole() = %q, want %q", got, test.WantRole)
 			}
-			id, verdict := decisionOf(e)
+			id, verdict := DecisionOf(e)
 			if id != test.WantID || verdict != test.WantVerdict {
-				t.Errorf("decisionOf() = (%q, %q), want (%q, %q)", id, verdict, test.WantID,
+				t.Errorf("DecisionOf() = (%q, %q), want (%q, %q)", id, verdict, test.WantID,
 					test.WantVerdict)
 			}
 		})

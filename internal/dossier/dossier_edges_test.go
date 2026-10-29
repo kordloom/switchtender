@@ -14,6 +14,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dossiertest"
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -158,7 +159,7 @@ func TestAnUnrecognizedVerdictIsNotLabeledApproved(t *testing.T) {
 	if got := entryRole(entry); got == "Approved" {
 		t.Errorf("entryRole(expired decision) = %q, which reports an approval nobody gave", got)
 	}
-	id, verdict := decisionOf(entry)
+	id, verdict := DecisionOf(entry)
 	if (verdict != "") != (entryRole(entry) != "") {
 		t.Errorf("the dossier says %q and the register says %q for run %q, so the two evidence "+
 			"documents disagree about the same entry", entryRole(entry), verdict, id)
@@ -410,35 +411,6 @@ func seedHostRun(t *testing.T, store run.Store, id string, at time.Time, hosts [
 	}
 }
 
-// failingAnchors is an audit store whose anchor read fails, which is a store fault rather than an
-// install with no anchors.
-type failingAnchors struct {
-	audit.Store
-}
-
-// Anchors always fails.
-func (failingAnchors) Anchors(context.Context, int64) ([]*audit.Anchor, error) {
-	return nil, errors.New("anchor store is unavailable")
-}
-
-// SaveAnchor is never called; it exists so this store satisfies audit.AnchorStore and the anchor
-// read is actually attempted.
-func (failingAnchors) SaveAnchor(context.Context, *audit.Anchor) error { return nil }
-
-// DeleteAnchor is never called; it exists for the same reason as SaveAnchor.
-func (failingAnchors) DeleteAnchor(context.Context, string) error { return nil }
-
-// failingScan is an audit store whose chain walk fails partway, the way a truncated or unreadable
-// chain reads.
-type failingScan struct {
-	audit.Store
-}
-
-// ChainScan always fails.
-func (failingScan) ChainScan(context.Context, int64, func(*audit.Entry) error) error {
-	return errors.New("chain is unreadable")
-}
-
 // TestCollectFailsRatherThanAssertingByOmission pins the direction every store fault errs in.
 //
 // This is the one property an evidence document cannot get wrong. A read that failed is not a read
@@ -470,11 +442,11 @@ func TestCollectFailsRatherThanAssertingByOmission(t *testing.T) {
 		{ // Test 2: A failed anchor read is not an unanchored install, which is a far quieter verdict
 			// than the store being unreadable.
 			Name:   "anchor read fails",
-			Audits: func(s audit.Store) audit.Store { return failingAnchors{Store: s} },
+			Audits: func(s audit.Store) audit.Store { return dossiertest.FailingAnchors{Store: s} },
 		},
 		{ // Test 3: A failed chain walk is not a chain that verified.
 			Name:   "chain walk fails",
-			Audits: func(s audit.Store) audit.Store { return failingScan{Store: s} },
+			Audits: func(s audit.Store) audit.Store { return dossiertest.FailingScan{Store: s} },
 		},
 		{ // Test 4: A failed per-host read is not a run that touched no hosts.
 			Name: "host summary read fails",

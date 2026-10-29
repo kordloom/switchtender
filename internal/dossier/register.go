@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"errors"
 	"fmt"
 	"html/template"
 	"strings"
@@ -172,11 +171,11 @@ func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store,
 		if id := outcomeOf(e); id != "" && !e.At.Before(from) && e.At.Before(to) && !listed[id] {
 			pruned[id] = true
 		}
-		if id, verdict := decisionOf(e); id != "" && credits(e) {
+		if id, verdict := DecisionOf(e); id != "" && credits(e) {
 			// The decision the run, or its approval step, stores as its winner is the one
 			// credited. A run decided before winners were stored credits the newest decision,
 			// as the chain tells it, in order.
-			d := Decision{Verdict: verdict, Actor: e.Actor, OnBehalfOf: onBehalfOf(e),
+			d := Decision{Verdict: verdict, Actor: e.Actor, OnBehalfOf: OnBehalfOf(e),
 				At: e.At, Seq: e.Seq, EntryID: e.ID}
 			if _, stepID, _, isStep := outcome.ParseStepDecisionPath(e.Path); isStep {
 				d.StepID = stepID
@@ -193,7 +192,7 @@ func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store,
 	// The register's subject is the whole period's chain rather than one run, so every anchor that
 	// still holds counts. It folds through the same helper so a disowned anchor is reported here
 	// for the same reason it is in a dossier.
-	holding, problems := foldAnchors(anchorScan, 1)
+	holding, problems := FoldAnchors(anchorScan, 1)
 	in.Anchored = len(holding)
 	in.AnchorProblems = problems
 	// Counted only when this document is the whole period. The membership set is built from the
@@ -230,45 +229,9 @@ func AttachRegisterSeals(ctx context.Context, in *RegisterInput, v *binding.Veri
 		if d.Verdict != "Approved" {
 			continue
 		}
-		d.Seal, d.SealText = registerSeal(ctx, v, runs, listed[id], id, d)
+		d.Seal, d.SealText = ApprovalSeal(ctx, v, runs, listed[id], id, d.StepID, d.EntryID)
 		in.Decisions[id] = d
 	}
-}
-
-// registerSeal checks the row the approval d on run id released and returns the Seal state and,
-// when it did not hold, what the check found. r is the run as listed, nil to read it from runs.
-func registerSeal(ctx context.Context, v *binding.Verifier, runs run.Store, r *run.Run, id string,
-	d Decision) (string, string) {
-	if v == nil {
-		return SealUnchecked, noKeyText
-	}
-	if r == nil {
-		got, err := runs.Get(ctx, id)
-		switch {
-		case errors.Is(err, run.ErrNotFound):
-			return SealUnchecked, "the run is no longer in the store, which retention prunes"
-		case err != nil:
-			return SealUnchecked, "the run could not be read: " + err.Error()
-		}
-		r = got
-	}
-	var err error
-	switch {
-	case d.StepID != "":
-		var node *run.Run
-		if node, err = runs.Get(ctx, d.StepID); err != nil {
-			return SealUnchecked, "the approval step could not be read: " + err.Error()
-		}
-		err = gateCheck(ctx, v, runs, r.ID, node)
-	case r.DecisionID == "":
-		if err = v.Sealed(ctx, r); err == nil {
-			err = fmt.Errorf("run %s: %w", r.ID, errNamesNoDecision)
-		}
-	default:
-		err = v.Sealed(ctx, r)
-	}
-	c := sealCheckOf(r.ID, "", d.EntryID, err)
-	return c.Status, c.Text
 }
 
 // trimAt returns rows, which are oldest first, without the tail created at or after at.
@@ -305,44 +268,6 @@ func creditedBy(ctx context.Context, runs run.Store) func(*audit.Entry) bool {
 		}
 		return outcome.Credits(subject, e.ID)
 	}
-}
-
-// decisionOf reads an approval or rejection from a chain entry, returning the run id it decided
-// and the verdict, or empty strings for ordinary activity.
-//
-// Only the committed DECISION entry counts. The HTTP attempt the middleware records looks almost
-// identical, but it is written whether or not the decision took: a self-approval the separation
-// gate refused still logged the attempt, and the register then read "Approved by" the requester,
-// naming the wrong person in the one document built for an auditor. A later failed re-approve
-// likewise overwrote the true approver. The DECISION entry is written only when the decision
-// committed, carries the deciding actor, and its digest binds the exact spec decided on.
-func decisionOf(e *audit.Entry) (id, verdict string) {
-	if e.Method != audit.MethodDecision {
-		return "", ""
-	}
-	// A workflow approval step's decision is credited to the workflow it released or stopped, so a
-	// workflow that waited for a person mid-run does not read as one nobody decided on. Its request
-	// and its timeout are not decisions anybody made, so they are not credited.
-	if runID, _, verdict, ok := outcome.ParseStepDecisionPath(e.Path); ok {
-		switch verdict {
-		case outcome.StepApproved:
-			return runID, "Approved"
-		case outcome.StepRejected:
-			return runID, "Rejected"
-		}
-		return "", ""
-	}
-	runID, v, ok := strings.Cut(strings.TrimPrefix(e.Path, "/runs/"), "/decision/")
-	if !ok || runID == "" {
-		return "", ""
-	}
-	switch v {
-	case "approved":
-		return runID, "Approved"
-	case "rejected":
-		return runID, "Rejected"
-	}
-	return "", ""
 }
 
 // RegisterRow is one change in the register: one row of the document's table and one element of

@@ -31,7 +31,6 @@ func TestEveryReaderCreditsOnlyTheStoredWinner(t *testing.T) {
 	d := New(store, &commandRecorder{}, nil, WithNoJanitor(), WithAudits(audits),
 		WithDecisions(records), WithBindingKey(bndKey(t)))
 	defer d.Close()
-	start := time.Now().Add(-time.Minute)
 	creation := &audit.Entry{ID: audit.NewID(), At: time.Now(), Actor: "requester",
 		ActorType: "session", Method: "POST", Path: "/v1/runs"}
 	if err := audits.Append(ctx, creation); err != nil {
@@ -77,15 +76,9 @@ func TestEveryReaderCreditsOnlyTheStoredWinner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadIdentity() error = %v", err)
 	}
-	reg, err := dossier.CollectRegister(ctx, store, audits, id, start, time.Now().Add(time.Minute),
-		time.Now(), 0)
-	if err != nil {
-		t.Fatalf("CollectRegister() error = %v", err)
-	}
-	got := reg.Decisions[held.ID]
-	want := dossier.Decision{Verdict: "Approved", Actor: "approver-a"}
-	if diff := cmp.Diff(want, dossier.Decision{Verdict: got.Verdict, Actor: got.Actor}); diff != "" {
-		t.Errorf("the register's account of the run (-want +got):\n%s", diff)
+	if diff := cmp.Diff([]string{"Approved by approver-a"},
+		creditedDecisions(t, store, audits, held.ID, held.ID)); diff != "" {
+		t.Errorf("the decisions the chain credits for the run (-want +got):\n%s", diff)
 	}
 
 	res, err := receipt.Build(ctx, store, audits, id, "test", held.ID,
@@ -105,4 +98,27 @@ func TestEveryReaderCreditsOnlyTheStoredWinner(t *testing.T) {
 	if diff := cmp.Diff(wantDisclosed, disclosed); diff != "" {
 		t.Errorf("the decisions the verified receipt discloses (-want +got):\n%s", diff)
 	}
+}
+
+// creditedDecisions walks the chain and returns each decision entry on runID that subjectID, the run
+// or the approval step decided, credits, in chain order. It is how the register and the dossier read
+// a verdict, so a loser's entry appearing here is a document naming the wrong decider.
+func creditedDecisions(t *testing.T, store run.Store, audits audit.Store, runID,
+	subjectID string) []string {
+	t.Helper()
+	ctx := context.Background()
+	subject, err := store.Get(ctx, subjectID)
+	if err != nil {
+		t.Fatalf("Get(%s) error = %v", subjectID, err)
+	}
+	var got []string
+	if err := audits.ChainScan(ctx, 0, func(e *audit.Entry) error {
+		if id, verdict := dossier.DecisionOf(e); id == runID && outcome.Credits(subject, e.ID) {
+			got = append(got, verdict+" by "+e.Actor)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("ChainScan() error = %v", err)
+	}
+	return got
 }

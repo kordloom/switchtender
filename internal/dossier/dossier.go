@@ -243,6 +243,83 @@ func sealCheckOf(runID, kind, entryID string, err error) SealCheck {
 	return c
 }
 
+// ApprovalSeal holds the row a credited approval released to its seal and returns the Seal state
+// and, when it did not hold, what the check found. The row is the approval step stepID when it is
+// set, else the run id; r is the run as listed, nil to read it from runs. entryID is the approval's
+// DECISION entry. A nil verifier, an install with no binding key, marks the row unchecked, and so
+// does a run retention pruned: neither is a drift.
+func ApprovalSeal(ctx context.Context, v *binding.Verifier, runs run.Store, r *run.Run, id, stepID,
+	entryID string) (string, string) {
+	if v == nil {
+		return SealUnchecked, noKeyText
+	}
+	if r == nil {
+		got, err := runs.Get(ctx, id)
+		switch {
+		case errors.Is(err, run.ErrNotFound):
+			return SealUnchecked, "the run is no longer in the store, which retention prunes"
+		case err != nil:
+			return SealUnchecked, "the run could not be read: " + err.Error()
+		}
+		r = got
+	}
+	var err error
+	switch {
+	case stepID != "":
+		var node *run.Run
+		if node, err = runs.Get(ctx, stepID); err != nil {
+			return SealUnchecked, "the approval step could not be read: " + err.Error()
+		}
+		err = gateCheck(ctx, v, runs, r.ID, node)
+	case r.DecisionID == "":
+		if err = v.Sealed(ctx, r); err == nil {
+			err = fmt.Errorf("run %s: %w", r.ID, errNamesNoDecision)
+		}
+	default:
+		err = v.Sealed(ctx, r)
+	}
+	c := sealCheckOf(r.ID, "", entryID, err)
+	return c.Status, c.Text
+}
+
+// DecisionOf reads an approval or rejection from a chain entry, returning the run id it decided
+// and the verdict, or empty strings for ordinary activity.
+//
+// Only the committed DECISION entry counts. The HTTP attempt the middleware records looks almost
+// identical, but it is written whether or not the decision took: a self-approval the separation
+// gate refused still logged the attempt, and the register then read "Approved by" the requester,
+// naming the wrong person in the one document built for an auditor. A later failed re-approve
+// likewise overwrote the true approver. The DECISION entry is written only when the decision
+// committed, carries the deciding actor, and its digest binds the exact spec decided on.
+func DecisionOf(e *audit.Entry) (id, verdict string) {
+	if e.Method != audit.MethodDecision {
+		return "", ""
+	}
+	// A workflow approval step's decision is credited to the workflow it released or stopped, so a
+	// workflow that waited for a person mid-run does not read as one nobody decided on. Its request
+	// and its timeout are not decisions anybody made, so they are not credited.
+	if runID, _, verdict, ok := outcome.ParseStepDecisionPath(e.Path); ok {
+		switch verdict {
+		case outcome.StepApproved:
+			return runID, "Approved"
+		case outcome.StepRejected:
+			return runID, "Rejected"
+		}
+		return "", ""
+	}
+	runID, v, ok := strings.Cut(strings.TrimPrefix(e.Path, "/runs/"), "/decision/")
+	if !ok || runID == "" {
+		return "", ""
+	}
+	switch v {
+	case "approved":
+		return runID, "Approved"
+	case "rejected":
+		return runID, "Rejected"
+	}
+	return "", ""
+}
+
 // sealNote says what a seal check means for the name on the entry it covers, empty when the seal
 // held.
 func sealNote(status string) string {
@@ -393,11 +470,11 @@ func Collect(ctx context.Context, runs run.Store, audits audit.Store, producer a
 	if in.Launch != nil && in.Launch.Seq > cover {
 		cover = in.Launch.Seq
 	}
-	in.Covering, in.AnchorProblems = foldAnchors(anchorScan, cover)
+	in.Covering, in.AnchorProblems = FoldAnchors(anchorScan, cover)
 	return in, nil
 }
 
-// foldAnchors splits an anchor scan into the anchors that still hold at or above cover and the
+// FoldAnchors splits an anchor scan into the anchors that still hold at or above cover and the
 // problems the chain no longer satisfies. Both documents fold the same way, so the rule that a
 // disowned anchor is always reported cannot hold in one and be forgotten in the other.
 //
@@ -405,7 +482,7 @@ func Collect(ctx context.Context, runs run.Store, audits audit.Store, producer a
 // wholesale wipe behind the quietest case there is: a run the chain records nothing about, which is
 // exactly what a wipe leaves behind. Coverage does need a position to measure from, so a cover of
 // zero means nothing is covered, rather than every anchor in the install matching Seq >= 0.
-func foldAnchors(scan *audit.AnchorScanner, cover int64) (covering []*audit.Anchor, problems []string) {
+func FoldAnchors(scan *audit.AnchorScanner, cover int64) (covering []*audit.Anchor, problems []string) {
 	_, results := scan.Results()
 	for _, res := range results {
 		if !res.Reached {
@@ -698,7 +775,7 @@ func Render(in *Input) ([]byte, error) {
 	if in.Launch != nil {
 		launchRow := entryRow{
 			Seq: in.Launch.Seq, At: in.Launch.At.UTC().Format(time.RFC3339), Actor: in.Launch.Actor,
-			OnBehalfOf: onBehalfOf(in.Launch),
+			OnBehalfOf: OnBehalfOf(in.Launch),
 			Action:     in.Launch.Method + " " + in.Launch.Path, Role: "Launched",
 			Receipt: audit.Receipt(in.Launch),
 		}
@@ -716,7 +793,7 @@ func Render(in *Input) ([]byte, error) {
 	for _, e := range in.Entries {
 		row := entryRow{
 			Seq: e.Seq, At: e.At.UTC().Format(time.RFC3339), Actor: withNote(e.Actor, notes[e.ID]),
-			OnBehalfOf: onBehalfOf(e),
+			OnBehalfOf: OnBehalfOf(e),
 			Action:     e.Method + " " + e.Path,
 			Role:       entryRole(e),
 			Receipt:    fmt.Sprintf("%d:%s", e.Seq, e.Hash),
@@ -836,10 +913,10 @@ func Render(in *Input) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// onBehalfOf returns the account an entry's actor used, for showing beside the actor. It is empty
+// OnBehalfOf returns the account an entry's actor used, for showing beside the actor. It is empty
 // when the actor acted as itself, and when the account is the actor's own name, as it is for a
 // person's browser session, where saying it twice adds nothing.
-func onBehalfOf(e *audit.Entry) string {
+func OnBehalfOf(e *audit.Entry) string {
 	if e.OnBehalfOf == e.Actor {
 		return ""
 	}
@@ -870,9 +947,9 @@ func entryRole(e *audit.Entry) string {
 		// every committed decision that does not end in "/rejected" as an approval reported an
 		// approval nobody gave for any other verdict the chain carries, an expiry or a withdrawal,
 		// and disagreed with the register, which reads the same entries and names no verdict it
-		// does not recognize. Both documents read the decision through decisionOf now, so one run
+		// does not recognize. Both documents read the decision through DecisionOf now, so one run
 		// cannot be described two ways.
-		_, verdict := decisionOf(e)
+		_, verdict := DecisionOf(e)
 		return verdict
 	case strings.HasSuffix(e.Path, "/cancel"):
 		return "Canceled"

@@ -13,6 +13,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dossiertest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -105,9 +106,9 @@ func TestDecisionOfReadsOnlyACommittedDecision(t *testing.T) {
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			id, verdict := decisionOf(test.Entry)
+			id, verdict := DecisionOf(test.Entry)
 			if id != test.WantID || verdict != test.WantVerdict {
-				t.Errorf("decisionOf(%s) = (%q, %q), want (%q, %q)",
+				t.Errorf("DecisionOf(%s) = (%q, %q), want (%q, %q)",
 					test.Name, id, verdict, test.WantID, test.WantVerdict)
 			}
 		})
@@ -252,11 +253,11 @@ func TestCollectRegisterFailsRatherThanReportingAQuietPeriod(t *testing.T) {
 		},
 		{ // Test 1: A failed anchor read is not an unanchored install.
 			Name:   "anchor read fails",
-			Audits: func(s audit.Store) audit.Store { return failingAnchors{Store: s} },
+			Audits: func(s audit.Store) audit.Store { return dossiertest.FailingAnchors{Store: s} },
 		},
 		{ // Test 2: A failed chain walk is not a chain that verified.
 			Name:   "chain walk fails",
-			Audits: func(s audit.Store) audit.Store { return failingScan{Store: s} },
+			Audits: func(s audit.Store) audit.Store { return dossiertest.FailingScan{Store: s} },
 		},
 	}
 	for testNum, test := range tests {

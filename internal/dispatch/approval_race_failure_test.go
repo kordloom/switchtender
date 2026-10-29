@@ -15,7 +15,6 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/dispatchtest"
-	"github.com/kordloom/switchtender/internal/dossier"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/receipt"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -331,7 +330,6 @@ func TestApprovalStepRegisterCreditsTheDecisionThatTookEffect(t *testing.T) {
 		WithDecisions(gated), WithOwner("replica-b"))
 	defer replicaB.Close()
 
-	start := time.Now().Add(-time.Minute)
 	parent, err := replicaA.SubmitPipeline(ctx, "release", "", gatedWorkflow(0, true),
 		run.WithActor("requester"))
 	if err != nil {
@@ -361,19 +359,9 @@ func TestApprovalStepRegisterCreditsTheDecisionThatTookEffect(t *testing.T) {
 		t.Fatalf("the late denial returned %v, want ErrNotPendingApproval", derr)
 	}
 
-	id, err := audit.LoadIdentity(t.TempDir())
-	if err != nil {
-		t.Fatalf("LoadIdentity() error = %v", err)
-	}
-	reg, err := dossier.CollectRegister(ctx, store, audits, id, start, time.Now().Add(time.Minute),
-		time.Now(), 0)
-	if err != nil {
-		t.Fatalf("CollectRegister() error = %v", err)
-	}
-	got := reg.Decisions[parent.ID]
-	want := dossier.Decision{Verdict: "Approved", Actor: "approver-a"}
-	if diff := cmp.Diff(want, dossier.Decision{Verdict: got.Verdict, Actor: got.Actor}); diff != "" {
-		t.Errorf("the register's account of a workflow that shipped on an approval "+
+	if diff := cmp.Diff([]string{"Approved by approver-a"},
+		creditedDecisions(t, store, audits, parent.ID, node.ID)); diff != "" {
+		t.Errorf("the decisions the chain credits for a workflow that shipped on an approval "+
 			"(-want +got):\n%s", diff)
 	}
 }
