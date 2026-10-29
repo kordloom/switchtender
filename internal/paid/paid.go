@@ -329,47 +329,6 @@ type ChangeRegister interface {
 	Build(ctx context.Context, src RegisterSource, p RegisterPeriod) (any, error)
 }
 
-// WorkerConfig is what a worker daemon starts from: the flags the worker command took.
-type WorkerConfig struct {
-	// DB is the shared database the worker executes against.
-	DB string
-	// Server is the control node to dial over the relay instead of a database.
-	Server string
-	// Name is the worker's owner name on the runs it claims.
-	Name string
-	// Queues are the named queues the worker serves, the default queue when empty.
-	Queues []string
-	// Workers is how many runs execute at once.
-	Workers int
-	// PolicyFile is the policy file a relay worker enforces locally.
-	PolicyFile string
-	// DeliveryKeys are the private keys that open secrets a control node sealed to this worker.
-	DeliveryKeys []string
-	// PluginsDir is where tool plugins load from.
-	PluginsDir string
-	// AllowContainerEE allows containerized execution environments.
-	AllowContainerEE bool
-	// DefaultImage is the image a containerized run uses when it names none.
-	DefaultImage string
-	// RequireImageDigest refuses images not pinned by digest.
-	RequireImageDigest bool
-	// FactsInterval is how often facts are refreshed.
-	FactsInterval time.Duration
-	// RetainFacts is how many facts snapshots are kept per host.
-	RetainFacts int
-	// RunTimeout bounds one run, no bound when zero.
-	RunTimeout time.Duration
-	// Log records the daemon's activity.
-	Log *zap.Logger
-}
-
-// Worker is the distributed worker daemon. A Community build refuses naming Team before it touches
-// the database.
-type Worker interface {
-	// Run starts the daemon and returns when ctx is done.
-	Run(ctx context.Context, cfg WorkerConfig) error
-}
-
 // ReconcileRequest is what a reconcile proposal is built from: the drift check that observed the
 // drift, the drifted host, and the sealed plan a Terraform or OpenTofu check kept.
 type ReconcileRequest struct {
@@ -400,8 +359,6 @@ var (
 		license.FeaturePolicyFull)
 	changeRegisterSlot = NewSlot[ChangeRegister]("change register", stubChangeRegister{},
 		license.FeatureRegister)
-	workerSlot = NewSlot[Worker]("worker", stubWorker{},
-		license.FeatureWorkers)
 	reconcilerSlot = NewSlot[Reconciler]("reconciler", stubReconciler{},
 		license.FeatureReconcile)
 )
@@ -423,12 +380,6 @@ func RegisterChangeRegister(r ChangeRegister) { changeRegisterSlot.Set(r) }
 
 // CurrentChangeRegister returns the change register, the Community stub when none is registered.
 func CurrentChangeRegister() ChangeRegister { return changeRegisterSlot.Get() }
-
-// RegisterWorker installs the paid worker daemon. It panics on a second call.
-func RegisterWorker(w Worker) { workerSlot.Set(w) }
-
-// CurrentWorker returns the worker daemon, the Community stub when none is registered.
-func CurrentWorker() Worker { return workerSlot.Get() }
 
 // RegisterReconciler installs the paid reconciler. It panics on a second call.
 func RegisterReconciler(r Reconciler) { reconcilerSlot.Set(r) }

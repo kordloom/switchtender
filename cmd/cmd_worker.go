@@ -200,44 +200,26 @@ func runWorker(cmd *cobra.Command, _ []string) error {
 	}
 	defer closePlugins()
 
-	store, opts, closeStore, err := workerStore(log)
-	if err != nil {
-		return err
-	}
-	defer closeStore()
-
-	opts = append(opts, dispatch.WithRunFilesRoot(runFilesReport.Root))
-	if workerName != "" {
-		opts = append(opts, dispatch.WithOwner(workerName))
-	}
-	if len(workerQueues) > 0 {
-		opts = append(opts, dispatch.WithQueues(workerQueues))
-	}
-	// The license is read before every claim, not only here at startup. A worker exists to run
-	// distributed execution, which is the paid feature, and the process then sits on a signal for
-	// as long as the operator leaves it up, so the check it passed the morning it started says
-	// nothing about the term a year later. The register emitter has the same shape and reads its
-	// license on every tick.
-	//
-	// A lapse stops it taking new work and nothing else: runs already executing finish and the
-	// daemon stays up, because killing an operator's process mid-run is the bricking every other
-	// lapse path was fixed to avoid.
-	opts = append(opts, dispatch.WithClaimGate(func() error {
-		return license.Allow(license.FeatureWorkers)
-	}))
+	// The daemon is Team code a Community build does not carry, so there it refuses naming Team
+	// before Open runs, and the worker opens no database and dials no control node.
 	runner := newSelectiveRunnerFromFlags(workerAllowContainerEE, workerRequireImageDigest,
 		ansibleLocator(workerDB))
-	disp := dispatch.New(store, runner, log, opts...)
-	defer disp.Close()
-
-	log.Info("switchtender worker started",
-		zap.String("owner", disp.Owner()), zap.String("source", workerSource()))
-
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	<-ctx.Done()
-	log.Info("shutdown signal received: draining")
-	return nil
+	return dispatch.CurrentDaemon().Run(ctx, dispatch.DaemonConfig{
+		Open: func() (run.Store, []dispatch.Option, func(), error) {
+			store, opts, closeStore, err := workerStore(log)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			return store, append(opts, dispatch.WithRunFilesRoot(runFilesReport.Root)), closeStore, nil
+		},
+		Runner: runner,
+		Name:   workerName,
+		Queues: workerQueues,
+		Source: workerSource(),
+		Log:    log,
+	})
 }
 
 // workerStore selects the run store the worker executes against and the dispatch options that go

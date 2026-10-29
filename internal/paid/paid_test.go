@@ -53,10 +53,7 @@ func TestStubsRefuseNamingTheTier(t *testing.T) {
 			_, err := CurrentChangeRegister().Build(ctx, RegisterSource{}, RegisterPeriod{})
 			return err
 		},
-	}, { // Test 8: the worker is Team.
-		Name: "worker", WantTier: "Team", WantGate: "running distributed workers",
-		Call: func() error { return CurrentWorker().Run(ctx, WorkerConfig{}) },
-	}, { // Test 9: reconcile is Team.
+	}, { // Test 8: reconcile is Team.
 		Name: "reconcile", WantTier: "Team", WantGate: "one-click drift reconcile",
 		Call: func() error { _, err := CurrentReconciler().Propose(ctx, ReconcileRequest{}); return err },
 	}}
@@ -101,19 +98,19 @@ func TestRequiresMatchesLicenseAllow(t *testing.T) {
 // registered, and panics on a second registration.
 func TestSlotReturnsStubUntilRegistered(t *testing.T) {
 	t.Parallel()
-	s := NewSlot[Worker]("test worker", stubWorker{})
+	s := NewSlot[testCapability]("test capability", stubCapability{})
 	if s.Registered() {
 		t.Fatal("fresh slot reports registered")
 	}
-	if err := s.Get().Run(context.Background(), WorkerConfig{}); !errors.Is(err, license.ErrRequiresTier) {
+	if err := s.Get().Do(); !errors.Is(err, license.ErrRequiresTier) {
 		t.Fatalf("stub did not refuse: %v", err)
 	}
-	s.Set(testWorker{})
+	s.Set(acceptingCapability{})
 	if !s.Registered() {
 		t.Fatal("slot does not report registered after Set")
 	}
-	if err := s.Get().Run(context.Background(), WorkerConfig{}); err != nil {
-		t.Fatalf("registered worker refused: %v", err)
+	if err := s.Get().Do(); err != nil {
+		t.Fatalf("registered capability refused: %v", err)
 	}
 	// Negative control: a second registration panics rather than replacing the first.
 	defer func() {
@@ -121,7 +118,7 @@ func TestSlotReturnsStubUntilRegistered(t *testing.T) {
 			t.Fatal("second registration did not panic")
 		}
 	}()
-	s.Set(testWorker{})
+	s.Set(acceptingCapability{})
 }
 
 // TestNothingRegisteredInTheCommunityBuild checks that the public tree alone registers nothing,
@@ -133,22 +130,34 @@ func TestNothingRegisteredInTheCommunityBuild(t *testing.T) {
 	}
 }
 
-// testWorker is a worker that accepts.
-type testWorker struct{}
+// testCapability is a capability the slot tests register.
+type testCapability interface {
+	// Do answers nil when the capability is carried.
+	Do() error
+}
 
-// Run accepts.
-func (testWorker) Run(context.Context, WorkerConfig) error { return nil }
+// stubCapability is the Community side of testCapability: it refuses naming Team.
+type stubCapability struct{}
+
+// Do refuses.
+func (stubCapability) Do() error { return Requires(license.FeatureWorkers) }
+
+// acceptingCapability is a testCapability that accepts.
+type acceptingCapability struct{}
+
+// Do accepts.
+func (acceptingCapability) Do() error { return nil }
 
 // TestSlotDeclaresWhatItBacks checks that registering a slot is what marks its features carried, so
 // a build without the registration refuses them whatever license is installed.
 func TestSlotDeclaresWhatItBacks(t *testing.T) {
 	const f license.Feature = "test-slot-feature"
 	t.Cleanup(func() { license.Uncarry(f) })
-	s := NewSlot[Worker]("test carried worker", stubWorker{}, f)
+	s := NewSlot[testCapability]("test carried capability", stubCapability{}, f)
 	if license.Carried(f) {
 		t.Fatal("feature carried before the slot registered")
 	}
-	s.Set(testWorker{})
+	s.Set(acceptingCapability{})
 	if !license.Carried(f) {
 		t.Fatal("feature not carried after the slot registered")
 	}

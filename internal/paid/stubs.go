@@ -56,14 +56,6 @@ func (stubChangeRegister) Build(context.Context, RegisterSource, RegisterPeriod)
 	return nil, Requires(license.FeatureRegister)
 }
 
-// stubWorker is the Community worker: it refuses naming Team before touching anything.
-type stubWorker struct{}
-
-// Run refuses.
-func (stubWorker) Run(context.Context, WorkerConfig) error {
-	return Requires(license.FeatureWorkers)
-}
-
 // stubReconciler is the Community reconciler: it refuses naming Team.
 type stubReconciler struct{}
 
