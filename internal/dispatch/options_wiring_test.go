@@ -11,6 +11,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -69,7 +70,7 @@ func TestNewNormalizesItsOptions(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			opts := append([]Option{WithNoJanitor()}, test.Opts...)
-			d := New(run.NewMemStore(), okRunner(), nil, opts...)
+			d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, opts...)
 			defer d.Close()
 
 			if got := cap(d.sem); got != test.WantWorkers {
@@ -99,7 +100,7 @@ func TestNewNormalizesItsOptions(t *testing.T) {
 // output, so both are worth reading directly.
 func TestNewFillsTheRemainingDefaults(t *testing.T) {
 	t.Parallel()
-	d := New(run.NewMemStore(), okRunner(), nil, WithNoJanitor())
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithNoJanitor())
 	defer d.Close()
 
 	if _, ok := d.publisher.(noopPublisher); !ok {
@@ -134,7 +135,7 @@ func TestWithClockOverridesTheStampedTime(t *testing.T) {
 	t.Parallel()
 	parked := time.Date(2021, 3, 4, 5, 6, 7, 0, time.UTC)
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil, WithNoJanitor(), WithClock(func() time.Time { return parked }))
+	d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor(), WithClock(func() time.Time { return parked }))
 	defer d.Close()
 
 	created, err := d.Submit(context.Background(), "", "",
@@ -146,7 +147,7 @@ func TestWithClockOverridesTheStampedTime(t *testing.T) {
 		t.Errorf("CreatedAt = %v, want the parked clock %v", created.CreatedAt, parked)
 	}
 
-	back := New(run.NewMemStore(), okRunner(), nil, WithNoJanitor(), WithClock(nil))
+	back := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithNoJanitor(), WithClock(nil))
 	defer back.Close()
 	if back.now == nil {
 		t.Fatal("a nil clock was installed rather than restoring the real one")
@@ -209,7 +210,7 @@ func TestWithQueuesReachesTheClaim(t *testing.T) {
 			t.Parallel()
 			store := &queueRecorder{Store: run.NewMemStore()}
 			opts := append([]Option{WithNoJanitor(), WithClaimInterval(time.Millisecond)}, test.Opts...)
-			d := New(store, okRunner(), nil, opts...)
+			d := New(store, dispatchtest.OKRunner(), nil, opts...)
 
 			deadline := time.Now().Add(5 * time.Second)
 			for len(store.queues()) == 0 && time.Now().Before(deadline) {
@@ -238,7 +239,7 @@ func TestWithOwnerStampsTheLease(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil, WithNoJanitor(), WithOwner("worker-tokyo-7"),
+	d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor(), WithOwner("worker-tokyo-7"),
 		WithClaimInterval(time.Millisecond))
 	defer d.Close()
 
@@ -249,7 +250,7 @@ func TestWithOwnerStampsTheLease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	got := waitTerminal(t, store, created.ID)
+	got := dispatchtest.WaitTerminal(t, store, created.ID)
 	if got.ClaimedBy != "worker-tokyo-7" {
 		t.Errorf("ClaimedBy = %q, want worker-tokyo-7: the lease must name the process that took it",
 			got.ClaimedBy)
@@ -291,7 +292,7 @@ func TestWithNoJanitorInstallsNoSweep(t *testing.T) {
 		t.Parallel()
 		// Test 0: The default dispatcher sweeps once immediately, covering a restart.
 		store := &sweepCounter{Store: run.NewMemStore()}
-		d := New(store, okRunner(), nil, WithClaimInterval(time.Millisecond))
+		d := New(store, dispatchtest.OKRunner(), nil, WithClaimInterval(time.Millisecond))
 		deadline := time.Now().Add(5 * time.Second)
 		for store.count() == 0 && time.Now().Before(deadline) {
 			time.Sleep(time.Millisecond)
@@ -306,7 +307,7 @@ func TestWithNoJanitorInstallsNoSweep(t *testing.T) {
 		t.Parallel()
 		// Test 1: WithNoJanitor sweeps nothing at all, however long it is left running.
 		store := &sweepCounter{Store: run.NewMemStore()}
-		d := New(store, okRunner(), nil, WithNoJanitor(), WithClaimInterval(time.Millisecond))
+		d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor(), WithClaimInterval(time.Millisecond))
 		time.Sleep(250 * time.Millisecond)
 		d.Close()
 		if got := store.count(); got != 0 {
@@ -344,7 +345,7 @@ func TestNewPanicsWithAStatedReason(t *testing.T) {
 		WantMessage string
 	}{{ // Test 0: No store to persist runs into.
 		Name:        "no store",
-		Build:       func() { New(nil, okRunner(), nil) },
+		Build:       func() { New(nil, dispatchtest.OKRunner(), nil) },
 		WantMessage: "dispatch: Store required",
 	}, { // Test 1: No runner to execute with.
 		Name:        "no runner",

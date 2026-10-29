@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -35,7 +36,7 @@ func TestPlaybookRunWithNoRecapSaysSo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	got := waitTerminal(t, store, created.ID)
+	got := dispatchtest.WaitTerminal(t, store, created.ID)
 
 	if got.Status != run.StatusSucceeded {
 		t.Fatalf("status = %q, want succeeded", got.Status)
@@ -72,7 +73,7 @@ func TestRunThatRecordedHostsCarriesNoSuchWarning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	got := waitTerminal(t, store, created.ID)
+	got := dispatchtest.WaitTerminal(t, store, created.ID)
 
 	summaries, err := store.RunHostSummaries(ctx, created.ID)
 	if err != nil {

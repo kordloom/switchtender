@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -52,7 +53,7 @@ func TestApproveRefusesAnAgentDeciderOnItsOwn(t *testing.T) {
 			ctx := context.Background()
 			store := run.NewMemStore()
 			audits := audit.NewMemStore()
-			d := New(store, okRunner(), zap.NewNop(), WithAudits(audits), WithNoJanitor())
+			d := New(store, dispatchtest.OKRunner(), zap.NewNop(), WithAudits(audits), WithNoJanitor())
 			t.Cleanup(d.Close)
 			// The run is routed to a queue this dispatcher does not serve, so a released run stays
 			// pending, which is what lets the status say whether the approval took.

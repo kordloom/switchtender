@@ -12,6 +12,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -73,7 +74,7 @@ func TestASecretAnswerIsOpenedOnlyForTheExecution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	got := waitTerminal(t, store, created.ID)
+	got := dispatchtest.WaitTerminal(t, store, created.ID)
 	if got.Status != run.StatusSucceeded {
 		t.Fatalf("status = %s (%s), want succeeded", got.Status, got.Error)
 	}
@@ -156,7 +157,7 @@ func TestASecretAnswerThatCannotBeOpenedFailsTheRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	got := waitTerminal(t, store, created.ID)
+	got := dispatchtest.WaitTerminal(t, store, created.ID)
 	if got.Status != run.StatusFailed || !strings.Contains(got.Error, ErrSecretAnswer.Error()) {
 		t.Errorf("run = %s (%q), want failed naming the unavailable answer", got.Status, got.Error)
 	}
@@ -188,7 +189,7 @@ func TestEveryPipelineStepReceivesTheSecretAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
-	got := waitTerminal(t, store, parent.ID)
+	got := dispatchtest.WaitTerminal(t, store, parent.ID)
 	if got.Status != run.StatusSucceeded {
 		t.Fatalf("pipeline = %s (%s), want succeeded", got.Status, got.Error)
 	}

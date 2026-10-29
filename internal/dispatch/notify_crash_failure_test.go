@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	named "github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -66,7 +67,7 @@ func TestOutboxAnnouncesARunWhoseEndOutlivedACrash(t *testing.T) {
 	crash := &obxCrashAudits{Store: chain, entered: make(chan struct{}),
 		release: make(chan struct{})}
 
-	first := New(runs, okRunner(), nil, WithAudits(crash), WithNotificationOutbox(outbox()),
+	first := New(runs, dispatchtest.OKRunner(), nil, WithAudits(crash), WithNotificationOutbox(outbox()),
 		WithNotifyClient(http.DefaultClient))
 	t.Cleanup(func() {
 		close(crash.release)
@@ -88,7 +89,7 @@ func TestOutboxAnnouncesARunWhoseEndOutlivedACrash(t *testing.T) {
 	}
 
 	// The first process is gone from here on. A new one starts on the same database.
-	restarted := New(runs, okRunner(), nil, WithAudits(chain), WithNotificationOutbox(outbox()),
+	restarted := New(runs, dispatchtest.OKRunner(), nil, WithAudits(chain), WithNotificationOutbox(outbox()),
 		WithNotifyClient(http.DefaultClient))
 	t.Cleanup(restarted.Close)
 
@@ -149,7 +150,7 @@ func TestOutboxRecordsAnEventAfterATransientStoreError(t *testing.T) {
 	router := named.NewRouter(targets, plainSealer{}, named.SourceLineage(nil, nil, nil), nil)
 	outbox := named.NewOutbox(targets, router, plainSealer{}, nil,
 		named.WithPoll(10*time.Millisecond))
-	d := New(run.NewMemStore(), okRunner(), nil, WithAudits(audit.NewMemStore()),
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithAudits(audit.NewMemStore()),
 		WithNotificationOutbox(outbox), WithNotifyClient(http.DefaultClient))
 	t.Cleanup(d.Close)
 	created, err := d.Submit(ctx, "", "", run.WithTool(run.ToolBash),

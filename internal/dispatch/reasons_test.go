@@ -13,6 +13,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/decision"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -33,7 +34,7 @@ func newReasonHarness(t *testing.T) *reasonHarness {
 	t.Helper()
 	store := run.NewMemStore()
 	audits := audit.NewMemStore()
-	d := New(store, okRunner(), zap.NewNop(), WithAudits(audits), WithNoJanitor())
+	d := New(store, dispatchtest.OKRunner(), zap.NewNop(), WithAudits(audits), WithNoJanitor())
 	t.Cleanup(d.Close)
 	return &reasonHarness{d: d, store: store, audits: audits}
 }
@@ -500,7 +501,7 @@ func TestADecisionTheChainRefusesLeavesNoRecord(t *testing.T) {
 	ctx := context.Background()
 	store := run.NewMemStore()
 	audits := &failingAppends{Store: audit.NewMemStore(), method: audit.MethodDecision}
-	d := New(store, okRunner(), zap.NewNop(), WithAudits(audits), WithNoJanitor())
+	d := New(store, dispatchtest.OKRunner(), zap.NewNop(), WithAudits(audits), WithNoJanitor())
 	t.Cleanup(d.Close)
 	held := &run.Run{ID: run.NewID(), Tool: run.ToolBash, Command: "deploy", Queue: "served-by-nobody",
 		Status: run.StatusPendingApproval, CreatedAt: time.Now()}

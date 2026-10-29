@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -61,7 +62,7 @@ func TestStepRunInheritsThePipelineReceipt(t *testing.T) {
 func TestChildrenCarryTheirParentAuthorization(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
-	d := New(store, &fakeRunnerLister{hosts: []string{"a", "b", "c", "d"}}, nil)
+	d := New(store, &dispatchtest.FakeRunnerLister{HostNames: []string{"a", "b", "c", "d"}}, nil)
 	defer d.Close()
 
 	ctx := run.WithAuditReceipt(context.Background(), "88:splitlaunch")
@@ -115,7 +116,7 @@ func TestRetryShardsCarryTheRetryAuthorization(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
-	if got := waitTerminal(t, store, parent.ID); got.Status != run.StatusFailed {
+	if got := dispatchtest.WaitTerminal(t, store, parent.ID); got.Status != run.StatusFailed {
 		t.Fatalf("parent status = %q, want failed", got.Status)
 	}
 

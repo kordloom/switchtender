@@ -12,6 +12,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -179,7 +180,7 @@ func shapeSplit(t *testing.T, ci *childInstall) (*run.Run, *run.Run) {
 	if _, err := ci.d.Approve(ctx, held.ID, bndDecider()); err != nil {
 		t.Fatalf("Approve() error = %v", err)
 	}
-	parent := waitTerminal(t, ci.store.Store, held.ID)
+	parent := dispatchtest.WaitTerminal(t, ci.store.Store, held.ID)
 	shards, err := ci.store.Store.Shards(ctx, held.ID)
 	if err != nil {
 		t.Fatalf("Shards() error = %v", err)
@@ -299,7 +300,7 @@ func shapeGated(t *testing.T, ci *childInstall) (*run.Run, *run.Run) {
 // step was stored.
 func (ci *childInstall) finished(t *testing.T, id string) (*run.Run, *run.Run) {
 	t.Helper()
-	parent := waitTerminal(t, ci.store.Store, id)
+	parent := dispatchtest.WaitTerminal(t, ci.store.Store, id)
 	steps, err := ci.store.Store.Steps(context.Background(), id)
 	if err != nil {
 		t.Fatalf("Steps() error = %v", err)
@@ -563,7 +564,7 @@ func TestExecutorRefusesARewrittenSubmittedRow(t *testing.T) {
 			ctx := context.Background()
 			key := bndKey(t)
 			store, chain := newPickedRows(), &bndChain{Store: audit.NewMemStore()}
-			submitter := New(store, okRunner(), nil, WithNoJanitor(), WithAudits(chain),
+			submitter := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor(), WithAudits(chain),
 				WithBindingKey(key), WithQueues([]string{"decisions"}))
 			submit := func(command string, opts ...run.SubmitOption) *run.Run {
 				r, err := submitter.Submit(ctx, "", "", append([]run.SubmitOption{
@@ -593,7 +594,7 @@ func TestExecutorRefusesARewrittenSubmittedRow(t *testing.T) {
 				WithBindingKey(key), WithQueues([]string{"work"}),
 				WithClaimInterval(5*time.Millisecond))
 			defer executor.Close()
-			got := waitTerminal(t, store.Store, target.ID)
+			got := dispatchtest.WaitTerminal(t, store.Store, target.ID)
 			result := bndResult{Status: got.Status,
 				Ran:     runner.count("deploy") + runner.count(rewritten),
 				Refused: strings.HasPrefix(got.Error, "refused: ")}
@@ -639,7 +640,7 @@ func TestANeverHeldWorkflowsApprovalStepPassesGate(t *testing.T) {
 	}
 	release()
 	ci.d.sweepApprovalSteps()
-	if got := waitTerminal(t, ci.store.Store, parent.ID); got.Status != run.StatusSucceeded {
+	if got := dispatchtest.WaitTerminal(t, ci.store.Store, parent.ID); got.Status != run.StatusSucceeded {
 		t.Errorf("workflow = %s (%s), want succeeded", got.Status, got.Error)
 	}
 	if n := ci.runner.count("deploy"); n != 1 {

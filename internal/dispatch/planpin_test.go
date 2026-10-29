@@ -10,6 +10,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/plantest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
@@ -173,7 +174,7 @@ func TestThePlanGateAsksAStoreThatCannotCreateRuns(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save policy: %v", err)
 	}
-	d := New(store, planRunner("Plan: 0 to add, 0 to change, 3 to destroy"), nil, WithPolicies(policies))
+	d := New(store, dispatchtest.PlanRunner("Plan: 0 to add, 0 to change, 3 to destroy"), nil, WithPolicies(policies))
 	defer d.Close()
 
 	created, err := d.Submit(context.Background(), "", "",
@@ -181,7 +182,7 @@ func TestThePlanGateAsksAStoreThatCannotCreateRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	plan := waitTerminal(t, store, created.ID)
+	plan := dispatchtest.WaitTerminal(t, store, created.ID)
 	if plan.Status != run.StatusSucceeded {
 		t.Fatalf("plan run status = %q, want succeeded: %s", plan.Status, plan.Error)
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -117,7 +118,7 @@ func TestFailUnsealedTrustsNoRow(t *testing.T) {
 		t.Errorf("second FailUnsealed() = %+v, %v, want the earlier record", again, err)
 	}
 	in.keyed(t)
-	if r := waitTerminal(t, in.store, sealed.ID); r.Status != run.StatusFailed {
+	if r := dispatchtest.WaitTerminal(t, in.store, sealed.ID); r.Status != run.StatusFailed {
 		t.Errorf("the planted seal ended %s (%s), want refused", r.Status, r.Error)
 	}
 	if diff := cmp.Diff(ranBefore, in.runner.counts()); diff != "" {

@@ -2,19 +2,14 @@ package outcome_test
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
-	"github.com/kordloom/switchtender/internal/loomsealtest"
 	"github.com/kordloom/switchtender/internal/outcome"
+	"github.com/kordloom/switchtender/internal/outcometest"
 	"github.com/kordloom/switchtender/internal/receipt"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -36,7 +31,7 @@ import (
 // It does not run in parallel: it pins the audit key environment for the identity it signs with,
 // and t.Setenv and t.Parallel cannot both apply to one test.
 func TestAReceiptDisclosingAFailureReasonVerifiesInLoomSeal(t *testing.T) {
-	repo := loomsealRepo(t)
+	repo := outcometest.LoomsealRepo(t)
 	ctx := context.Background()
 	runs := run.NewMemStore()
 	audits := audit.NewMemStore()
@@ -86,75 +81,8 @@ func TestAReceiptDisclosingAFailureReasonVerifiesInLoomSeal(t *testing.T) {
 			"would prove nothing about the reason")
 	}
 
-	report := verifyWithLoomSeal(t, repo, res.Signed)
+	report := outcometest.VerifyWithLoomSeal(t, repo, res.Signed)
 	if !report.OK {
 		t.Fatalf("loomseal refused a receipt disclosing a run's failure reason: %v", report.Problems)
 	}
-}
-
-// loomsealReport is the part of the format verifier's report this test asserts on.
-type loomsealReport struct {
-	// OK reports whether every check passed.
-	OK bool `json:"ok"`
-	// Problems lists why it did not.
-	Problems []string `json:"problems"`
-}
-
-// verifyWithLoomSeal runs the format's own verifier over a signed bundle and returns its report.
-func verifyWithLoomSeal(t *testing.T, repo string, signed []byte) loomsealReport {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "receipt.loomseal.json")
-	if err := os.WriteFile(path, signed, 0o600); err != nil {
-		t.Fatalf("write bundle: %v", err)
-	}
-	cmd := exec.Command("go", "run", ".", "verify", "--json", path)
-	cmd.Dir = repo
-	out, err := cmd.Output()
-	if err != nil && len(out) == 0 {
-		var stderr string
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			stderr = string(ee.Stderr)
-		}
-		// A refusal is a verdict and still reports on stdout, so only an empty result is a failure
-		// to run at all.
-		t.Fatalf("run loomseal verify: %v\n%s", err, stderr)
-	}
-	var rep loomsealReport
-	if err := json.Unmarshal(out, &rep); err != nil {
-		t.Fatalf("loomseal report is not JSON: %v\n%s", err, out)
-	}
-	// The format has two independent implementations, and this product's output has to satisfy the
-	// format, not one implementation of it, so the reference verifier reads the same bytes.
-	loomsealtest.RequireReferenceAgreement(t, repo, path, out)
-	return rep
-}
-
-// loomsealRepo locates the pinned loomseal checkout the cross-check runs the verifier from,
-// skipping when there is none so the suite still runs for someone who cloned only this repository.
-//
-// It reads the one variable internal/audit's cross-check reads, which is also where the contract
-// that the checkout sit at the exact version go.mod names is enforced. That check fails loudly
-// rather than skipping, so a mismatched checkout is caught by the run that owns the pin instead of
-// being restated here.
-func loomsealRepo(t *testing.T) string {
-	t.Helper()
-	repo := os.Getenv("SWITCHTENDER_LOOMSEAL_REPO")
-	if repo == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			t.Fatalf("getwd: %v", err)
-		}
-		repo = filepath.Join(wd, "..", "..", "..", "loomseal")
-	}
-	if _, err := os.Stat(filepath.Join(repo, "go.mod")); err != nil {
-		if os.Getenv("SWITCHTENDER_REQUIRE_FULL_SUITE") == "1" {
-			t.Fatal("SWITCHTENDER_REQUIRE_FULL_SUITE is set and no loomseal checkout was found, so " +
-				"the disclosed outcome record goes unchecked against the reference verifier; set " +
-				"SWITCHTENDER_LOOMSEAL_REPO")
-		}
-		t.Skip("loomseal checkout not found beside this repository; set SWITCHTENDER_LOOMSEAL_REPO " +
-			"to point at one")
-	}
-	return repo
 }

@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -73,7 +74,7 @@ func TestAShardThatFailsToReleaseDoesNotStrandTheSplit(t *testing.T) {
 		}
 	}
 
-	d := New(store, okRunner(), zap.NewNop(), WithNoJanitor())
+	d := New(store, dispatchtest.OKRunner(), zap.NewNop(), WithNoJanitor())
 	defer d.Close()
 	d.startSplit(ctx, parent.Clone())
 
@@ -164,7 +165,7 @@ func TestAShardThatCanNeverBeReleasedIsSettled(t *testing.T) {
 		}
 	}
 
-	d := New(store, okRunner(), zap.NewNop(), WithNoJanitor())
+	d := New(store, dispatchtest.OKRunner(), zap.NewNop(), WithNoJanitor())
 	defer d.Close()
 	d.startSplit(ctx, parent.Clone())
 

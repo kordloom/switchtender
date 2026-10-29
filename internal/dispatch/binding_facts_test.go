@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/plantest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -98,7 +99,7 @@ func TestARowWriterCannotSkipThePlanFirst(t *testing.T) {
 			ctx := context.Background()
 			key := bndKey(t)
 			store, chain := newBndRows(), &bndChain{Store: audit.NewMemStore()}
-			submitter := New(store, okRunner(), nil, WithNoJanitor(), WithAudits(chain),
+			submitter := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor(), WithAudits(chain),
 				WithBindingKey(key), WithQueues([]string{"decisions"}))
 			opts := []run.SubmitOption{run.WithTool(run.ToolTerraform),
 				run.WithCommand("infra/prod"), run.WithQueue("work")}
@@ -134,7 +135,7 @@ func TestARowWriterCannotSkipThePlanFirst(t *testing.T) {
 				WithBindingKey(key), WithQueues([]string{"work"}),
 				WithClaimInterval(5*time.Millisecond))
 			defer executor.Close()
-			got := waitTerminal(t, store.Store, r.ID)
+			got := dispatchtest.WaitTerminal(t, store.Store, r.ID)
 			executor.Close()
 			runner.mu.Lock()
 			defer runner.mu.Unlock()
@@ -227,7 +228,7 @@ func TestAForgedTimeoutIsNotTimedOut(t *testing.T) {
 					t.Fatalf("Get() error = %v", err)
 				}
 			} else {
-				got = waitTerminal(t, store, parent.ID)
+				got = dispatchtest.WaitTerminal(t, store, parent.ID)
 			}
 			if got.Status != test.WantWorkflow || !strings.Contains(got.Error, test.WantError) {
 				t.Errorf("the workflow ended %s (%s), want %s with %q", got.Status, got.Error,

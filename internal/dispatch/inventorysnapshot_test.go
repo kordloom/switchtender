@@ -17,6 +17,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/handoff"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -144,7 +145,7 @@ func TestAnUnheldRunExecutesTheInventoryItWasSubmittedWith(t *testing.T) {
 	}
 	f.saveInventory(t, "[web]\nprod1\nprod2\n")
 	f.dispatcher(t)
-	final := waitTerminal(t, f.Store, submitted.ID)
+	final := dispatchtest.WaitTerminal(t, f.Store, submitted.ID)
 	if final.Status != run.StatusSucceeded {
 		t.Fatalf("status = %q (%s), want succeeded", final.Status, final.Error)
 	}
@@ -221,7 +222,7 @@ func TestARunWhoseSnapshotCannotBeTrustedIsRefused(t *testing.T) {
 				t.Fatalf("Save() error = %v", err)
 			}
 			f.dispatcher(t)
-			final := waitTerminal(t, f.Store, stored.ID)
+			final := dispatchtest.WaitTerminal(t, f.Store, stored.ID)
 			if final.Status != run.StatusFailed || !strings.Contains(final.Error, test.WantError) {
 				t.Errorf("run ended %q (%q), want failed saying %q", final.Status, final.Error,
 					test.WantError)
@@ -286,7 +287,7 @@ func TestTheSnapshotIsSealedAtRestAndWipedWhenTheRunEnds(t *testing.T) {
 			if err != nil {
 				t.Fatalf("decision error = %v", err)
 			}
-			final := waitTerminal(t, f.Store, held.ID)
+			final := dispatchtest.WaitTerminal(t, f.Store, held.ID)
 			if final.Status != test.WantStatus {
 				t.Fatalf("status = %q (%s), want %q", final.Status, final.Error, test.WantStatus)
 			}
@@ -323,7 +324,7 @@ func TestADynamicSourceRecordsTheHostsItResolvedTo(t *testing.T) {
 		t.Fatalf("snapshot record = %+v, want a dynamic source with no hosts bound",
 			submitted.InventorySnapshot)
 	}
-	final := waitTerminal(t, f.Store, submitted.ID)
+	final := dispatchtest.WaitTerminal(t, f.Store, submitted.ID)
 	if final.Status != run.StatusSucceeded {
 		t.Fatalf("status = %q (%s), want succeeded", final.Status, final.Error)
 	}
@@ -363,7 +364,7 @@ func TestACredentialAttachedToTheInventoryAfterSubmissionIsNotApplied(t *testing
 	}
 	f.saveInventory(t, "[web]\ncanary\n", "cred_late")
 	f.dispatcher(t)
-	final := waitTerminal(t, f.Store, submitted.ID)
+	final := dispatchtest.WaitTerminal(t, f.Store, submitted.ID)
 	if final.Status != run.StatusSucceeded {
 		t.Fatalf("status = %q (%s), want succeeded", final.Status, final.Error)
 	}

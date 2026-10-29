@@ -75,7 +75,7 @@ func TestAPolicyFileLoadsRegoBesideItsYAML(t *testing.T) {
 	if len(all) != 2 || all[0].Rego != nil || all[1].Rego == nil {
 		t.Fatalf("List() = %+v, want the YAML rule then the Rego policy", all)
 	}
-	if all[1].ID != filePolicyID("guardrails") || all[1].MaxDestroy != DisabledMaxDestroy {
+	if all[1].ID != FilePolicyID("guardrails") || all[1].MaxDestroy != DisabledMaxDestroy {
 		t.Errorf("Rego policy = %+v, want a stable id and no destroy threshold", all[1])
 	}
 	agent := &run.Run{ID: "r", Tool: "python", Command: "x", ActorType: "agent",
@@ -87,7 +87,7 @@ func TestAPolicyFileLoadsRegoBesideItsYAML(t *testing.T) {
 	if Denying(all, agent) != nil {
 		t.Error("the Rego policy refused an agent's development run")
 	}
-	got, err := store.Get(context.Background(), filePolicyID("guardrails"))
+	got, err := store.Get(context.Background(), FilePolicyID("guardrails"))
 	if err != nil || got.Rego == nil {
 		t.Errorf("Get(rego) = %+v, %v, want the Rego policy", got, err)
 	}

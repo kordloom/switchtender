@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -55,7 +56,7 @@ func TestFinalizeCommitsNoOutcomeWhenTerminalWriteFails(t *testing.T) {
 	mem := run.NewMemStore()
 	store := &failTerminalStore{Store: mem}
 	audits := audit.NewMemStore()
-	d := New(store, okRunner(), nil, WithAudits(audits))
+	d := New(store, dispatchtest.OKRunner(), nil, WithAudits(audits))
 
 	started := time.Now()
 	r := &run.Run{
@@ -129,7 +130,7 @@ func TestFinalizeStoresWhatTheOutcomeDigestCommits(t *testing.T) {
 	ctx := context.Background()
 	store := run.NewMemStore()
 	audits := audit.NewMemStore()
-	d := New(store, okRunner(), nil, WithAudits(audits))
+	d := New(store, dispatchtest.OKRunner(), nil, WithAudits(audits))
 
 	started := time.Now()
 	r := &run.Run{

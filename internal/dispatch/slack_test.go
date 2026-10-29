@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -82,7 +83,7 @@ func TestDispatcherNotifiesSlack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	waitTerminal(t, store, created.ID)
+	dispatchtest.WaitTerminal(t, store, created.ID)
 
 	select {
 	case got := <-received:

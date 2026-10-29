@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/inventorytest"
 	"github.com/kordloom/switchtender/internal/run"
@@ -211,7 +212,7 @@ func TestSnapshotOfUnreadableContentSaysSo(t *testing.T) {
 		ContentSource: credential.SourceCommand, ContentConfig: failing}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	d := New(run.NewMemStore(), okRunner(), zap.NewNop(), WithInventories(invs),
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithInventories(invs),
 		WithCredentials(credential.NewMemStore(), sealer))
 	t.Cleanup(d.Close)
 	err = d.snapshotInventory(ctx, &run.Run{ID: "run_1", InventoryID: "inv_src"})

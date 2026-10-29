@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -102,7 +103,7 @@ func runEntries(t *testing.T, chain audit.Store, id, method string) []*audit.Ent
 // after the run's terminal write, so a run read as finished may not have one yet.
 func waitOutcome(t *testing.T, chain audit.Store, id string) {
 	t.Helper()
-	deadline := time.Now().Add(waitBudget)
+	deadline := time.Now().Add(dispatchtest.WaitBudget)
 	for len(runEntries(t, chain, id, audit.MethodRun)) == 0 {
 		if time.Now().After(deadline) {
 			t.Fatalf("run %s never committed its outcome", id)
@@ -164,14 +165,14 @@ func TestAResetFinishedApprovedRunIsRefusedAndRunsNothing(t *testing.T) {
 			if _, err := d.Approve(ctx, held.ID, bndDecider()); err != nil {
 				t.Fatalf("Approve() error = %v", err)
 			}
-			got := waitTerminal(t, store, held.ID)
+			got := dispatchtest.WaitTerminal(t, store, held.ID)
 			if got.Status != run.StatusSucceeded {
 				t.Fatalf("the approved run ended %s (%s), want succeeded", got.Status, got.Error)
 			}
 			waitOutcome(t, chain, held.ID)
 			if test.Reset {
 				resetToPending(t, store, held.ID)
-				got = waitTerminal(t, store, held.ID)
+				got = dispatchtest.WaitTerminal(t, store, held.ID)
 			}
 			if n := runner.count("deploy"); n != 1 {
 				t.Errorf("deploy ran %d times, want 1", n)
@@ -212,7 +213,7 @@ func TestAnHonestRetryGetsANewAttemptAndRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
-	if got := waitTerminal(t, store, parent.ID); got.Status != run.StatusSucceeded {
+	if got := dispatchtest.WaitTerminal(t, store, parent.ID); got.Status != run.StatusSucceeded {
 		t.Fatalf("workflow ended %s (%s), want succeeded on the retry", got.Status, got.Error)
 	}
 	if n := runner.count("deploy"); n != 2 {
@@ -278,7 +279,7 @@ func TestAStartTheChainCouldNotRecordRunsNothing(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
-			got := waitTerminal(t, store, r.ID)
+			got := dispatchtest.WaitTerminal(t, store, r.ID)
 			if got.Status != test.WantStatus {
 				t.Errorf("run ended %s (%s), want %s", got.Status, got.Error, test.WantStatus)
 			}
@@ -321,7 +322,7 @@ func TestAReleasedCoordinatorRestartAppendsNoSecondStart(t *testing.T) {
 	if _, err := d2.DecideStep(ctx, node.ID, StepDecision{Approve: true, By: bndDecider()}); err != nil {
 		t.Fatalf("DecideStep() error = %v", err)
 	}
-	if got := waitTerminal(t, store, parent.ID); got.Status != run.StatusSucceeded {
+	if got := dispatchtest.WaitTerminal(t, store, parent.ID); got.Status != run.StatusSucceeded {
 		t.Fatalf("workflow ended %s (%s), want succeeded", got.Status, got.Error)
 	}
 	if first.count("build") != 1 || second.count("build") != 0 || second.count("deploy") != 1 {

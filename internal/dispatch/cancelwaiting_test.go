@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -51,7 +52,7 @@ func TestCancelingAWaitingRunSettlesIt(t *testing.T) {
 			audits := audit.NewMemStore()
 			store := run.NewMemStore()
 			// The claim loop is closed, so the queued run is still waiting when the cancel arrives.
-			d := New(store, okRunner(), nil, WithNoJanitor(), WithAudits(audits),
+			d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor(), WithAudits(audits),
 				WithWebhooks([]string{hookURL}), WithNotifyClient(http.DefaultClient),
 				WithClaimGate(func() error { return errors.New("closed for this test") }))
 			defer d.Close()

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -53,7 +54,7 @@ func TestApprovedParentWithNothingToRunFailsWithAReason(t *testing.T) {
 				t.Fatalf("Approve() error = %v", err)
 			}
 
-			got := waitTerminal(t, store, parent.ID)
+			got := dispatchtest.WaitTerminal(t, store, parent.ID)
 			if got.Status != run.StatusFailed {
 				t.Errorf("status = %q, want failed: nothing will ever run this parent, and no claim "+
 					"loop picks up a coordinator", got.Status)
@@ -124,7 +125,7 @@ func TestRejectWithoutAReasonRecordsADefault(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil, WithNoJanitor())
+	d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor())
 	defer d.Close()
 
 	created, err := d.Submit(ctx, "play.yml", "inv", run.WithRequireApproval(true))
@@ -154,7 +155,7 @@ func TestRejectWithoutAReasonRecordsADefault(t *testing.T) {
 func TestApproveAndRejectOnAMissingRun(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	d := New(run.NewMemStore(), okRunner(), nil, WithNoJanitor())
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithNoJanitor())
 	defer d.Close()
 
 	if _, err := d.Approve(ctx, "run_absent",
@@ -250,7 +251,7 @@ func TestApprovedPlainRunIsReleasedUnleased(t *testing.T) {
 	// writes, and this dispatcher's own claim loop is entitled to lease the run the instant approval
 	// makes it pending, which is the loop working rather than a defect. Without this the test reads
 	// the row in a window the loop is racing it for, and loses that race under load.
-	d := New(store, okRunner(), nil, WithNoJanitor(),
+	d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor(),
 		WithClaimGate(func() error { return errNoClaimingInThisTest }))
 	defer d.Close()
 
@@ -287,7 +288,7 @@ func TestApproveIsNotAppliedTwice(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil, WithNoJanitor())
+	d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor())
 	defer d.Close()
 
 	held := &run.Run{

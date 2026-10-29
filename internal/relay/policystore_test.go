@@ -8,17 +8,9 @@ import (
 
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/relay"
+	"github.com/kordloom/switchtender/internal/relaytest"
 	"github.com/kordloom/switchtender/internal/run"
 )
-
-// newPolicyRelay stands up a relay server over the given policy store and returns a PolicyClient
-// dialing it, so a test reads policies the way a relay worker does.
-func newPolicyRelay(t *testing.T, policies policy.Store) *relay.PolicyClient {
-	t.Helper()
-	ts := httptest.NewServer(relay.NewHandler(run.NewMemStore(), relay.SinglePool(testWorkerToken), nil, policies, nil))
-	t.Cleanup(ts.Close)
-	return relay.NewPolicyClient(relay.NewHTTPTransport(ts.URL, testWorkerToken, ts.Client()))
-}
 
 // TestRelayWorkerReadsTheRealPolicies checks that a worker across the relay evaluates the
 // plan-content gate against the policies actually in force.
@@ -42,7 +34,7 @@ func TestRelayWorkerReadsTheRealPolicies(t *testing.T) {
 	if err := backing.Save(ctx, p); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	got, err := newPolicyRelay(t, backing).List(ctx)
+	got, err := relaytest.NewPolicyRelay(t, backing).List(ctx)
 	if err != nil {
 		t.Fatalf("List() across the relay error = %v", err)
 	}
@@ -52,7 +44,7 @@ func TestRelayWorkerReadsTheRealPolicies(t *testing.T) {
 
 	// An install with no policies configured answers empty rather than erroring. Nothing is gated,
 	// which is a different answer from being unable to tell, and the worker must not confuse them.
-	none, err := newPolicyRelay(t, nil).List(ctx)
+	none, err := relaytest.NewPolicyRelay(t, nil).List(ctx)
 	if err != nil {
 		t.Fatalf("List() with no policy store error = %v: an install that gates nothing would "+
 			"refuse every terraform run", err)
@@ -84,7 +76,7 @@ func TestRelayPolicyClientFailsClosedWhenItCannotAsk(t *testing.T) {
 // TestRelayPolicyClientRefusesWrites checks a worker cannot author the policies that gate it.
 func TestRelayPolicyClientRefusesWrites(t *testing.T) {
 	t.Parallel()
-	c := newPolicyRelay(t, policy.NewMemStore())
+	c := relaytest.NewPolicyRelay(t, policy.NewMemStore())
 	if err := c.Save(context.Background(), &policy.Policy{ID: "pol_x"}); !errors.Is(err, policy.ErrReadOnly) {
 		t.Errorf("Save() error = %v, want ErrReadOnly", err)
 	}

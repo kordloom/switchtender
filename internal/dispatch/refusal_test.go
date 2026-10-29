@@ -11,6 +11,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
@@ -76,7 +77,7 @@ func TestADenyPolicyRecordsItsRefusalInTheChain(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			audits := audit.NewMemStore()
-			d := New(run.NewMemStore(), &fakeRunnerLister{hosts: []string{"a"}}, nil,
+			d := New(run.NewMemStore(), &dispatchtest.FakeRunnerLister{HostNames: []string{"a"}}, nil,
 				WithPolicies(test.Policies), WithAudits(audits))
 			defer d.Close()
 			var err error

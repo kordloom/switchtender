@@ -13,6 +13,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/decision"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -89,7 +90,7 @@ func audDecisionPaths(t *testing.T, audits audit.Store, id string) []string {
 // audWaitOutcome waits until the chain holds the outcome entry of run id.
 func audWaitOutcome(t *testing.T, audits audit.Store, id string) {
 	t.Helper()
-	deadline := time.Now().Add(waitBudget)
+	deadline := time.Now().Add(dispatchtest.WaitBudget)
 	for time.Now().Before(deadline) {
 		chain, err := audits.Chain(context.Background())
 		if err != nil {
@@ -181,10 +182,10 @@ func TestChainHoldsNoDecisionThatLostTheRaceToAFinishedRun(t *testing.T) {
 			paused := &audPausedRuns{Store: runs, read: make(chan struct{}),
 				release: make(chan struct{})}
 
-			replicaA := New(runs, okRunner(), nil, WithAudits(audits), WithDecisions(decisions),
+			replicaA := New(runs, dispatchtest.OKRunner(), nil, WithAudits(audits), WithDecisions(decisions),
 				WithClock(clock.now), WithNoJanitor(), WithOwner("replica-a"))
 			defer replicaA.Close()
-			replicaB := New(paused, okRunner(), nil, WithAudits(audits), WithDecisions(decisions),
+			replicaB := New(paused, dispatchtest.OKRunner(), nil, WithAudits(audits), WithDecisions(decisions),
 				WithClock(clock.now), WithNoJanitor(), WithOwner("replica-b"))
 			defer replicaB.Close()
 
@@ -202,14 +203,14 @@ func TestChainHoldsNoDecisionThatLostTheRaceToAFinishedRun(t *testing.T) {
 			}()
 			select {
 			case <-paused.read:
-			case <-time.After(waitBudget):
+			case <-time.After(dispatchtest.WaitBudget):
 				t.Fatal("replica B never read the run")
 			}
 
 			if _, err := replicaA.Approve(ctx, id, decider("approver-a", "session")); err != nil {
 				t.Fatalf("replica A Approve() error = %v", err)
 			}
-			if done := waitTerminal(t, runs, id); done.Status != run.StatusSucceeded {
+			if done := dispatchtest.WaitTerminal(t, runs, id); done.Status != run.StatusSucceeded {
 				t.Fatalf("the approved run ended %s, want succeeded", done.Status)
 			}
 			audWaitOutcome(t, audits, id)
@@ -221,7 +222,7 @@ func TestChainHoldsNoDecisionThatLostTheRaceToAFinishedRun(t *testing.T) {
 			var err error
 			select {
 			case err = <-lateErr:
-			case <-time.After(waitBudget):
+			case <-time.After(dispatchtest.WaitBudget):
 				t.Fatal("replica B's decision never returned")
 			}
 			if !errors.Is(err, ErrNotPendingApproval) {

@@ -16,6 +16,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -433,7 +434,7 @@ func TestAStoredInventorySurvivesAGitBackedProject(t *testing.T) {
 	if err := projects.Save(context.Background(), p); err != nil {
 		t.Fatalf("Save(project) error = %v", err)
 	}
-	d := New(run.NewMemStore(), okRunner(), zap.NewNop(), WithProjects(projects, syncer),
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithProjects(projects, syncer),
 		WithNoJanitor())
 	defer d.Close()
 

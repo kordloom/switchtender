@@ -11,6 +11,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -75,7 +76,7 @@ func planFirstMove(t *testing.T, agent bool, edit func(r, decided *run.Run) func
 	store.rewrite(r.ID, edit(r, decided))
 	runner := &phaseRunner{}
 	executor := keyedAt(t, store, chain, runner, "work")
-	got := waitTerminal(t, store.Store, r.ID)
+	got := dispatchtest.WaitTerminal(t, store.Store, r.ID)
 	executor.Close()
 	runner.mu.Lock()
 	defer runner.mu.Unlock()
@@ -107,7 +108,7 @@ func heldFlipMove(t *testing.T, approve bool, opts ...run.SubmitOption) attackOu
 	submitter.Close()
 	runner := &phaseRunner{}
 	executor := keyedAt(t, store, chain, runner, "work")
-	got := waitTerminal(t, store, r.ID)
+	got := dispatchtest.WaitTerminal(t, store, r.ID)
 	executor.Close()
 	runner.mu.Lock()
 	defer runner.mu.Unlock()
@@ -136,7 +137,7 @@ func proposalFlipMove(t *testing.T) attackOutcome {
 	saveEdited(t, store, proposal.ID, func(row *run.Run) { row.Status = run.StatusPending })
 	runner := &phaseRunner{}
 	executor := keyedAt(t, store, chain, runner, "work")
-	got := waitTerminal(t, store, proposal.ID)
+	got := dispatchtest.WaitTerminal(t, store, proposal.ID)
 	executor.Close()
 	runner.mu.Lock()
 	defer runner.mu.Unlock()
@@ -159,7 +160,7 @@ func finishedApproved(t *testing.T) (run.Store, audit.Store, *commandRecorder, *
 	if _, err := d.Approve(ctx, held.ID, bndDecider()); err != nil {
 		t.Fatalf("Approve() error = %v", err)
 	}
-	return store, chain, runner, waitTerminal(t, store, held.ID)
+	return store, chain, runner, dispatchtest.WaitTerminal(t, store, held.ID)
 }
 
 // approvedSplitMove approves a two-host split on a keyed install, lets the writer add a row under
@@ -179,7 +180,7 @@ func approvedSplitMove(t *testing.T, add func(split, first *run.Run) *run.Run) a
 		t.Fatalf("Approve() error = %v", err)
 	}
 	var first *run.Run
-	deadline := time.Now().Add(waitBudget)
+	deadline := time.Now().Add(dispatchtest.WaitBudget)
 	for first == nil && time.Now().Before(deadline) {
 		shards, err := store.Shards(ctx, split.ID)
 		if err != nil {
@@ -201,7 +202,7 @@ func approvedSplitMove(t *testing.T, add func(split, first *run.Run) *run.Run) a
 	}
 	e := keyedAt(t, store, chain, runner, "work")
 	defer e.Close()
-	got := waitTerminal(t, store, row.ID)
+	got := dispatchtest.WaitTerminal(t, store, row.ID)
 	return attackOutcome{Error: got.Error, Ran: runner.count("limit:" + rewritten)}
 }
 
@@ -225,7 +226,7 @@ func parkedMove(t *testing.T, timeout int, edit func(t *testing.T, store run.Sto
 	if err := act(d, node); err != nil {
 		return attackOutcome{Error: err.Error(), Ran: runner.count(rewritten) + runner.count("notify")}
 	}
-	got := waitTerminal(t, store, parent.ID)
+	got := dispatchtest.WaitTerminal(t, store, parent.ID)
 	return attackOutcome{Error: got.Error,
 		Ran: runner.count(rewritten) + runner.count("notify") + runner.count("build") - 1}
 }
@@ -269,11 +270,11 @@ func approveStep(d *Dispatcher, node *run.Run) error {
 // workflow has let it go. A sweep that finds the workflow still coordinated leaves it to the next
 // pass, and production sweeps on every janitor pass while this sweeps once.
 func sweepSteps(d *Dispatcher, node *run.Run) error {
-	deadline := time.Now().Add(waitBudget)
+	deadline := time.Now().Add(dispatchtest.WaitBudget)
 	for d.coordinating(*node.ParentID) {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("workflow %s was still coordinated after %s, so the sweep never ran",
-				*node.ParentID, waitBudget)
+				*node.ParentID, dispatchtest.WaitBudget)
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
@@ -333,7 +334,7 @@ func TestADatabaseWriterIsRefusedByAKeyedDispatcher(t *testing.T) {
 		Move: func(t *testing.T) attackOutcome {
 			store, _, runner, done := finishedApproved(t)
 			resetToPending(t, store, done.ID)
-			got := waitTerminal(t, store, done.ID)
+			got := dispatchtest.WaitTerminal(t, store, done.ID)
 			return attackOutcome{Error: got.Error, Ran: runner.count("deploy") - 1}
 		},
 		WantError: "already started once",
@@ -358,7 +359,7 @@ func TestADatabaseWriterIsRefusedByAKeyedDispatcher(t *testing.T) {
 			if ok, err := store.SettleDecision(ctx, copied.ID, done.DecisionID, settle); err != nil || !ok {
 				t.Fatalf("SettleDecision() = %t, %v, want it settled", ok, err)
 			}
-			got := waitTerminal(t, store, copied.ID)
+			got := dispatchtest.WaitTerminal(t, store, copied.ID)
 			return attackOutcome{Error: got.Error, Ran: runner.count("deploy") - 1}
 		},
 		WantError: "is not the decision this row names",
@@ -378,7 +379,7 @@ func TestADatabaseWriterIsRefusedByAKeyedDispatcher(t *testing.T) {
 			})
 			_, aerr := d.Approve(ctx, p.ID, bndDecider())
 			if aerr == nil {
-				got := waitTerminal(t, store.Store, p.ID)
+				got := dispatchtest.WaitTerminal(t, store.Store, p.ID)
 				return attackOutcome{Error: got.Error, Ran: runner.count(rewritten)}
 			}
 			return attackOutcome{Error: aerr.Error(), Ran: runner.count(rewritten)}
@@ -419,7 +420,7 @@ func TestADatabaseWriterIsRefusedByAKeyedDispatcher(t *testing.T) {
 				}
 				rows, stepID = store, step.ID
 			}, approveStep)
-			step := waitTerminal(t, rows, stepID)
+			step := dispatchtest.WaitTerminal(t, rows, stepID)
 			return attackOutcome{Error: step.Error, Ran: got.Ran}
 		},
 		// The first is refused before the walk writes the RELEASE entry for index 2, the second after.
@@ -462,7 +463,7 @@ func TestADatabaseWriterIsRefusedByAKeyedDispatcher(t *testing.T) {
 			if err != nil {
 				t.Fatalf("SubmitPipeline() error = %v", err)
 			}
-			got := waitTerminal(t, store.Store, parent.ID)
+			got := dispatchtest.WaitTerminal(t, store.Store, parent.ID)
 			_, ran := runner.input("deploy.yml")
 			bought := 0
 			if ran {
@@ -489,7 +490,7 @@ func TestADatabaseWriterIsRefusedByAKeyedDispatcher(t *testing.T) {
 			})
 			executor := keyedAt(t, store, chain, runner, "work")
 			defer executor.Close()
-			got := waitTerminal(t, store.Store, r.ID)
+			got := dispatchtest.WaitTerminal(t, store.Store, r.ID)
 			return attackOutcome{Error: got.Error, Ran: runner.count("deploy")}
 		},
 		WantError: "changed after it was submitted",

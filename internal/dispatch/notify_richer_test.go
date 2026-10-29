@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -42,7 +43,7 @@ func TestPerTemplatePagerDutyUsesTargetKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	if got := waitTerminal(t, store, created.ID); got.Status != run.StatusFailed {
+	if got := dispatchtest.WaitTerminal(t, store, created.ID); got.Status != run.StatusFailed {
 		t.Fatalf("status = %q, want failed", got.Status)
 	}
 	select {
@@ -81,7 +82,7 @@ func TestPerTemplatePagerDutySilentOnSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	waitTerminal(t, store, created.ID)
+	dispatchtest.WaitTerminal(t, store, created.ID)
 	select {
 	case e := <-received:
 		t.Errorf("a succeeded run paged %+v, want silence", e)
@@ -119,7 +120,7 @@ func TestPerTemplateGrafanaUsesTargetURLAndToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	waitTerminal(t, store, created.ID)
+	dispatchtest.WaitTerminal(t, store, created.ID)
 	select {
 	case got := <-received:
 		if got.path != "/api/annotations" {
@@ -167,7 +168,7 @@ func TestPerTemplateTwilioTextsTargetRecipient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	waitTerminal(t, store, created.ID)
+	dispatchtest.WaitTerminal(t, store, created.ID)
 	select {
 	case got := <-received:
 		if got.to != "+15559999" {
@@ -206,7 +207,7 @@ func TestPerTemplateTwilioSkippedWithoutAccount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	if got := waitTerminal(t, store, created.ID); got.Status != run.StatusFailed {
+	if got := dispatchtest.WaitTerminal(t, store, created.ID); got.Status != run.StatusFailed {
 		t.Fatalf("status = %q, want the run to finish regardless of an unsendable target", got.Status)
 	}
 }
@@ -231,7 +232,7 @@ func TestPerTemplateEmailReachesTargetRecipient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	waitTerminal(t, store, created.ID)
+	dispatchtest.WaitTerminal(t, store, created.ID)
 	// The server-wide Send and the per-template SendTo feed the same channel, and only SendTo
 	// records recipients, so the first receive proves nothing about which call arrived. Poll the
 	// recorded recipients until they match or the deadline passes.

@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -160,7 +161,7 @@ func TestAnnouncedSkipTakesTheNamedPathAndSkipsPagers(t *testing.T) {
 		CreatedAt: time.Now()}); err != nil {
 		t.Fatalf("Save(inventory) error = %v", err)
 	}
-	d := New(run.NewMemStore(), okRunner(), nil, WithNotifyClient(http.DefaultClient),
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithNotifyClient(http.DefaultClient),
 		WithNotificationRouter(router), WithInventories(invs), WithEmail(emailer, false),
 		WithTwilio("AC0000", "twilio-token", "+15550000000", nil))
 	d.pagerDutyEndpoint = pagerURL

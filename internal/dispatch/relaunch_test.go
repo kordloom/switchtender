@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -18,7 +19,7 @@ func TestRelaunchFailedHosts(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil, WithNoJanitor())
+	d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor())
 	defer d.Close()
 
 	// Host summaries are written while a run executes, before it terminalizes, so the run is saved

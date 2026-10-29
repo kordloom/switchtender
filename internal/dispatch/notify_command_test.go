@@ -11,6 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -115,7 +116,7 @@ func TestAPerRunWebhookRedactsWhatTheServerWideOneDoes(t *testing.T) {
 	defer sink.Close()
 	r.Notifications[0].URL = sink.URL
 
-	d := New(run.NewMemStore(), okRunner(), zap.NewNop(), WithNoJanitor(), WithNotifyClient(http.DefaultClient))
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithNoJanitor(), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 	d.notifyRunTargets(r)
 	d.notifyWG.Wait()

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -68,7 +69,7 @@ func TestAPathInventorysSecretsAreMasked(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
-			waitTerminal(t, store, r.ID)
+			dispatchtest.WaitTerminal(t, store, r.ID)
 			body, err := store.Log(ctx, r.ID)
 			if err != nil {
 				t.Fatalf("Log() error = %v", err)

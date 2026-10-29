@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -39,7 +40,7 @@ func TestASweptRunLeavesEvidence(t *testing.T) {
 	}
 
 	// A dispatcher with an audit store sweeps once as it starts, which is the restart case too.
-	d := New(store, okRunner(), zap.NewNop(), WithAudits(audits))
+	d := New(store, dispatchtest.OKRunner(), zap.NewNop(), WithAudits(audits))
 	defer d.Close()
 
 	deadline := time.Now().Add(15 * time.Second)

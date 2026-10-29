@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -82,7 +83,7 @@ func TestPlanGateMasksSecretInStoredError(t *testing.T) {
 		WantContains: "terraform plan:",
 	}, { // Test 1: The plan succeeds but the proposed apply cannot be written.
 		Name:         "proposal fails",
-		Runner:       planRunner("Plan: 0 to add, 0 to change, 3 to destroy"),
+		Runner:       dispatchtest.PlanRunner("Plan: 0 to add, 0 to change, 3 to destroy"),
 		WrapStore:    true,
 		WantContains: "propose apply:",
 	}}
@@ -105,7 +106,7 @@ func TestPlanGateMasksSecretInStoredError(t *testing.T) {
 				t.Fatalf("test %d: Submit() error = %v", testNum, err)
 			}
 
-			got := waitTerminal(t, mem, created.ID)
+			got := dispatchtest.WaitTerminal(t, mem, created.ID)
 			if got.Status != run.StatusFailed {
 				t.Fatalf("test %d: run status = %q, want failed", testNum, got.Status)
 			}
@@ -116,9 +117,9 @@ func TestPlanGateMasksSecretInStoredError(t *testing.T) {
 			if strings.Contains(got.Error, planGateSecret) {
 				t.Errorf("test %d: secret leaked into the stored run error: %q", testNum, got.Error)
 			}
-			if !strings.Contains(got.Error, maskToken) {
+			if !strings.Contains(got.Error, MaskToken) {
 				t.Errorf("test %d: stored error = %q, want the secret replaced by %q",
-					testNum, got.Error, maskToken)
+					testNum, got.Error, MaskToken)
 			}
 		})
 	}

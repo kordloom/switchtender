@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/factcache"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/run"
@@ -62,7 +63,7 @@ func TestFactCacheServesTheHostsALimitReaches(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
-			waitTerminal(t, store, r.ID)
+			dispatchtest.WaitTerminal(t, store, r.ID)
 			served, _ := play.last()
 			if diff := cmp.Diff(test.WantServed, hostsOf(served)); diff != "" {
 				t.Errorf("served hosts for limit %q mismatch (-want +got):\n%s", test.Limit, diff)

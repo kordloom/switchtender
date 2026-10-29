@@ -11,6 +11,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -124,7 +125,7 @@ func TestPlanGateHoldsHeredocPlan(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("policies.Save() error = %v", err)
 	}
-	runner := &planGateRunner{summary: planOut}
+	runner := &dispatchtest.PlanGateRunner{Summary: planOut}
 	d := New(store, runner, nil, WithPolicies(policies))
 	defer d.Close()
 
@@ -133,11 +134,11 @@ func TestPlanGateHoldsHeredocPlan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	if plan := waitTerminal(t, store, created.ID); plan.Status != run.StatusSucceeded {
+	if plan := dispatchtest.WaitTerminal(t, store, created.ID); plan.Status != run.StatusSucceeded {
 		t.Fatalf("plan run status = %q, want succeeded", plan.Status)
 	}
 
-	proposal := waitProposal(t, store, created.ID)
+	proposal := dispatchtest.WaitProposal(t, store, created.ID)
 	stored, err := store.Get(ctx, proposal.ID)
 	if err != nil {
 		t.Fatalf("Get(proposal) error = %v", err)
@@ -167,7 +168,7 @@ func TestPlanGateHoldsHeredocPlan(t *testing.T) {
 
 	// A held apply must not have touched the infrastructure while it waits for a person.
 	time.Sleep(200 * time.Millisecond)
-	if n := runner.applies.Load(); n != 0 {
+	if n := runner.Applies(); n != 0 {
 		t.Errorf("%d applies executed on a plan held for approval", n)
 	}
 }

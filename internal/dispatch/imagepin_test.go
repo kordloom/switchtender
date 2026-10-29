@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/imageref"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -120,7 +121,7 @@ func TestSubmitPinsTheImageInForce(t *testing.T) {
 				t.Fatalf("Save(project) error = %v", err)
 			}
 			resolver := &fakeImageResolver{Down: test.Down}
-			d := New(run.NewMemStore(), okRunner(), nil, WithProjects(f.D.projects, f.D.syncer),
+			d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithProjects(f.D.projects, f.D.syncer),
 				WithDefaultImage(test.DefaultImage), WithImageResolver(resolver), WithNoJanitor(),
 				WithClaimGate(func() error { return errNoClaim }))
 			t.Cleanup(d.Close)
@@ -167,7 +168,7 @@ func TestAnApprovedRunExecutesInTheImageItWasApprovedWith(t *testing.T) {
 	if _, err := d.Approve(ctx, held.ID, decider("approver-1", "session")); err != nil {
 		t.Fatalf("Approve() error = %v", err)
 	}
-	final := waitTerminal(t, store, held.ID)
+	final := dispatchtest.WaitTerminal(t, store, held.ID)
 	if final.Status != run.StatusSucceeded {
 		t.Fatalf("status = %q (%s), want succeeded", final.Status, final.Error)
 	}
@@ -237,7 +238,7 @@ func TestAnApprovedRunWhoseImageChangedIsRefused(t *testing.T) {
 			}
 			executor := New(store, runner, nil, WithDefaultImage(test.ExecutorDefault), WithNoJanitor())
 			t.Cleanup(executor.Close)
-			final := waitTerminal(t, store, held.ID)
+			final := dispatchtest.WaitTerminal(t, store, held.ID)
 			if final.Status != run.StatusFailed || !strings.Contains(final.Error, test.WantError) {
 				t.Errorf("run ended %q (%q), want failed saying %q", final.Status, final.Error,
 					test.WantError)
@@ -266,7 +267,7 @@ func TestAnUnapprovedRunMayTakeTheExecutorsDefaultImage(t *testing.T) {
 	executor := New(store, runner, nil, WithDefaultImage("reg.example.com/worker-default:1"),
 		WithNoJanitor())
 	t.Cleanup(executor.Close)
-	final := waitTerminal(t, store, r.ID)
+	final := dispatchtest.WaitTerminal(t, store, r.ID)
 	if final.Status != run.StatusSucceeded {
 		t.Fatalf("status = %q (%s), want succeeded", final.Status, final.Error)
 	}
@@ -283,7 +284,7 @@ func TestAnUnapprovedRunMayTakeTheExecutorsDefaultImage(t *testing.T) {
 func TestASubmissionStopsWhenItsRequestEndsDuringTheImageLookup(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil, WithImageResolver(&fakeImageResolver{Hang: true}),
+	d := New(store, dispatchtest.OKRunner(), nil, WithImageResolver(&fakeImageResolver{Hang: true}),
 		WithDefaultImage("reg.example.com/runner:2"), WithNoJanitor(),
 		WithClaimGate(func() error { return errNoClaim }))
 	t.Cleanup(d.Close)

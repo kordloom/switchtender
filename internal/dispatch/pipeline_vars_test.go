@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -91,7 +92,7 @@ func TestPipelineStepsReceiveParentExtraVars(t *testing.T) {
 		if err != nil {
 			t.Fatalf("SubmitPipeline(%s) error = %v", tc.Name, err)
 		}
-		waitTerminal(t, store, parent.ID)
+		dispatchtest.WaitTerminal(t, store, parent.ID)
 
 		rec.mu.Lock()
 		specs := append([]roundhouse.Spec(nil), rec.specs...)

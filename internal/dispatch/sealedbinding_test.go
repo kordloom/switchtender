@@ -11,6 +11,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -153,7 +154,7 @@ func TestAnApprovedRunExecutesOnlyTheSealedAnswerItWasApprovedWith(t *testing.T)
 			d := New(store, runner, nil, WithCredentials(credential.NewMemStore(), sealer))
 			defer d.Close()
 
-			got := waitTerminal(t, store, r.ID)
+			got := dispatchtest.WaitTerminal(t, store, r.ID)
 			if got.Status != test.WantStatus {
 				t.Fatalf("status = %s (%s), want %s", got.Status, got.Error, test.WantStatus)
 			}

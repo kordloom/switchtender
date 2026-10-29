@@ -319,7 +319,7 @@ func TestTailEventsRedactsBeforeItStores(t *testing.T) {
 		t.Errorf("stored stdout = %q, want the secret replaced before it reached the store",
 			got[0].Stdout)
 	}
-	if want := "token=" + maskToken + " done"; got[0].Stdout != want {
+	if want := "token=" + MaskToken + " done"; got[0].Stdout != want {
 		t.Errorf("stored stdout = %q, want %q", got[0].Stdout, want)
 	}
 }

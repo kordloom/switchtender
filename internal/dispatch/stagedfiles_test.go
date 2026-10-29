@@ -11,6 +11,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/factcache"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -67,7 +68,7 @@ func TestRunFilesGoneBeforeASetupFailureIsRecorded(t *testing.T) {
 				t.Fatalf("Save() error = %v", err)
 			}
 			d.wake()
-			done := waitTerminal(t, store, r.ID)
+			done := dispatchtest.WaitTerminal(t, store, r.ID)
 			if done.Status != test.WantStatus || !strings.Contains(done.Error, test.WantError) {
 				t.Fatalf("run = %s (%s), want %s naming %q", done.Status, done.Error,
 					test.WantStatus, test.WantError)

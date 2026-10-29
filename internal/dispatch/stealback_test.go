@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -87,7 +88,7 @@ func TestAStaleCancelCannotStompARequeuedRun(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil, WithOwner("worker-A"))
+	d := New(store, dispatchtest.OKRunner(), nil, WithOwner("worker-A"))
 	defer d.Close()
 
 	// The requeued state: pending, claim cleared by the janitor.

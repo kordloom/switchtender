@@ -14,6 +14,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/binding"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -179,7 +180,7 @@ func newBndHeld(t *testing.T) *bndHeld {
 	ctx := context.Background()
 	h := &bndHeld{store: newBndRows(), chain: &bndChain{Store: audit.NewMemStore()}, key: bndKey(t),
 		runner: &commandRecorder{}}
-	d := New(h.store, okRunner(), nil, WithNoJanitor(), WithAudits(h.chain), WithBindingKey(h.key),
+	d := New(h.store, dispatchtest.OKRunner(), nil, WithNoJanitor(), WithAudits(h.chain), WithBindingKey(h.key),
 		WithQueues([]string{"decisions"}))
 	defer d.Close()
 	for _, spec := range []struct{ command, queue string }{{"deploy", "work"}, {"other", "parked"}} {
@@ -217,7 +218,7 @@ func (h *bndHeld) execute(t *testing.T) *run.Run {
 	d := New(h.store, h.runner, nil, WithNoJanitor(), WithAudits(h.chain), WithBindingKey(h.key),
 		WithQueues([]string{"work"}), WithClaimInterval(5*time.Millisecond))
 	defer d.Close()
-	return waitTerminal(t, h.store, h.run.ID)
+	return dispatchtest.WaitTerminal(t, h.store, h.run.ID)
 }
 
 // bndResult is how a run or a workflow under test ended and what executed.
@@ -474,7 +475,7 @@ func (g *bndGated) resume(t *testing.T) *run.Run {
 	t.Helper()
 	g.release()
 	g.d.sweepApprovalSteps()
-	return waitTerminal(t, g.store, g.parent.ID)
+	return dispatchtest.WaitTerminal(t, g.store, g.parent.ID)
 }
 
 // rewriteBuild makes the finished build step read as having published another artifact, and with

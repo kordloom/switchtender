@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -35,7 +36,7 @@ func TestExecuteLeavesRunOpenWhenCancelCheckErrors(t *testing.T) {
 	backing := run.NewMemStore()
 	store := &getFailStore{Store: backing, err: errStoreDown}
 	pub := newCapturingPublisher()
-	d := New(store, okRunner(), nil, WithPublisher(pub), WithNoJanitor(), WithOwner("w-cancelcheck"))
+	d := New(store, dispatchtest.OKRunner(), nil, WithPublisher(pub), WithNoJanitor(), WithOwner("w-cancelcheck"))
 	defer d.Close()
 
 	// Claimed by this test's own owner, so the dispatcher's claim loop cannot race the direct

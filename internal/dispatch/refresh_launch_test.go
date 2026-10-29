@@ -12,6 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -238,7 +239,7 @@ func TestRefreshOnLaunchOnlyFiresForItsOwnStaleSource(t *testing.T) {
 // reading a nil source store there would panic on every launch.
 func TestRefreshOnLaunchWithTheFeatureOffDoesNothing(t *testing.T) {
 	t.Parallel()
-	d := New(run.NewMemStore(), okRunner(), zap.NewNop(), WithNoJanitor())
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithNoJanitor())
 	defer d.Close()
 
 	d.refreshOnLaunch(context.Background(), &run.Run{ID: "run_x", InventoryID: "inv_dyn"})
@@ -327,7 +328,7 @@ func TestWithSourceSyncStartsTheScheduledLoop(t *testing.T) {
 			t.Parallel()
 			opts := append([]Option{WithNoJanitor(),
 				WithInventorySources(invsource.NewMemStore())}, test.Opts...)
-			d := New(run.NewMemStore(), okRunner(), zap.NewNop(), opts...)
+			d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), opts...)
 			defer d.Close()
 
 			if d.syncSources != test.WantSyncing {
@@ -340,7 +341,7 @@ func TestWithSourceSyncStartsTheScheduledLoop(t *testing.T) {
 	// cannot leave a loop polling a nil store.
 	t.Run("test 2", func(t *testing.T) {
 		t.Parallel()
-		d := New(run.NewMemStore(), okRunner(), zap.NewNop(), WithNoJanitor(), WithSourceSync())
+		d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithNoJanitor(), WithSourceSync())
 		defer d.Close()
 		if d.invSources != nil {
 			t.Error("a source store appeared without one being configured")
@@ -375,7 +376,7 @@ func TestRefreshSourceWithTheFeatureOffIsNotFound(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			opts := append([]Option{WithNoJanitor()}, test.Opts...)
-			d := New(run.NewMemStore(), okRunner(), zap.NewNop(), opts...)
+			d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), opts...)
 			defer d.Close()
 
 			if _, err := d.RefreshSource(ctx, "src_1"); err == nil {

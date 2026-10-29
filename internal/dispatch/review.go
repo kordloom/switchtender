@@ -155,7 +155,7 @@ func (d *Dispatcher) RedactRunText(ctx context.Context, r *run.Run, text string)
 	m := &masker{}
 	m.set(values)
 	masked := m.redactString(text)
-	masked, _ = util.RedactAssignments(masked, maskToken)
+	masked, _ = util.RedactAssignments(masked, MaskToken)
 	return masked
 }
 

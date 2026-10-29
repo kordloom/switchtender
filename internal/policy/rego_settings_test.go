@@ -41,7 +41,7 @@ func settingsPolicy(t *testing.T, name, body string, opts ...RegoOption) *Policy
 	if err != nil {
 		t.Fatalf("CompileRego() error = %v", err)
 	}
-	return &Policy{ID: filePolicyID(name), Name: name, MaxDestroy: DisabledMaxDestroy, Rego: prog}
+	return &Policy{ID: FilePolicyID(name), Name: name, MaxDestroy: DisabledMaxDestroy, Rego: prog}
 }
 
 // noteOf is the note a policy named advice records with the given messages.

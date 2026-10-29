@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -50,7 +51,7 @@ func TestAFloorRuleDecidesADestroyingApplyFromItsPlan(t *testing.T) {
 				t.Fatalf("policies.Save() error = %v", err)
 			}
 			store := run.NewMemStore()
-			runner := &planGateRunner{summary: test.Summary}
+			runner := &dispatchtest.PlanGateRunner{Summary: test.Summary}
 			d := New(store, runner, nil, WithPolicies(policies), WithNoJanitor())
 			defer d.Close()
 
@@ -70,7 +71,7 @@ func TestAFloorRuleDecidesADestroyingApplyFromItsPlan(t *testing.T) {
 			if apply.PlanDestroys == nil || *apply.PlanDestroys != test.WantDestroys {
 				t.Errorf("PlanDestroys = %v, want %d", apply.PlanDestroys, test.WantDestroys)
 			}
-			if got := runner.applies.Load(); got != test.WantApplies {
+			if got := runner.Applies(); got != test.WantApplies {
 				t.Errorf("the runner applied %d times, want %d", got, test.WantApplies)
 			}
 		})

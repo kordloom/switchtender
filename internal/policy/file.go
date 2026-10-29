@@ -18,12 +18,12 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 )
 
-// filePolicyID derives a stable identifier from a policy's name.
+// FilePolicyID derives a stable identifier from a policy's name.
 //
 // It is a hash rather than a counter so it survives reordering the file, and so two installs reading
 // the same file agree on it. A recorded approval names the policy that held the run, and that name
 // has to still resolve after the file is edited.
-func filePolicyID(name string) string {
+func FilePolicyID(name string) string {
 	sum := sha256.Sum256([]byte(name))
 	return "pol_file_" + hex.EncodeToString(sum[:6])
 }
@@ -209,7 +209,7 @@ func (s *FileStore) load() ([]*Policy, error) {
 		p := &Policy{
 			// The id is derived from the name so it is stable across reloads and across installs
 			// reading the same file, and so an approval recorded against a policy still resolves.
-			ID:                      filePolicyID(fp.Name),
+			ID:                      FilePolicyID(fp.Name),
 			Name:                    fp.Name,
 			Tool:                    fp.Tool,
 			CommandContains:         fp.CommandContains,
@@ -331,7 +331,7 @@ func (s *FileStore) loadRego(doc fileDoc, created time.Time) ([]*Policy, map[str
 			return nil, nil, fmt.Errorf("policy file %s: rego policy %q: %w", s.path, fr.Name, err)
 		}
 		p := &Policy{
-			ID:            filePolicyID(fr.Name),
+			ID:            FilePolicyID(fr.Name),
 			Name:          fr.Name,
 			MaxDestroy:    DisabledMaxDestroy,
 			Rego:          prog,

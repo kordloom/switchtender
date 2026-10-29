@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -64,7 +65,7 @@ func TestJanitorAnnouncesWhatItSettles(t *testing.T) {
 			if err := runs.Save(context.Background(), orphan); err != nil {
 				t.Fatalf("Save() error = %v", err)
 			}
-			d := New(runs, okRunner(), nil, WithWebhooks([]string{hook.URL}),
+			d := New(runs, dispatchtest.OKRunner(), nil, WithWebhooks([]string{hook.URL}),
 				WithNotifyClient(http.DefaultClient))
 			t.Cleanup(d.Close)
 			want := "run.finished " + orphan.ID + " " + string(test.WantStatus)

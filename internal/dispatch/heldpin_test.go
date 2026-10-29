@@ -11,6 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -172,7 +173,7 @@ func TestAnApprovedPipelineRunsOnlyTheCommitItWasHeldAt(t *testing.T) {
 			if _, err := f.D.Approve(ctx, held.ID, decider("reviewer", "session")); err != nil {
 				t.Fatalf("Approve() error = %v", err)
 			}
-			waitForStatus(t, f.Store, held.ID, test.WantStatus)
+			dispatchtest.WaitForStatus(t, f.Store, held.ID, test.WantStatus)
 
 			steps, err := f.Store.Steps(ctx, held.ID)
 			if err != nil {

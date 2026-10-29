@@ -13,6 +13,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -177,10 +178,10 @@ func TestAGatedApplyCarriesOutTheApprovedPlan(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
-			if done := waitTerminal(t, store, plan.ID); done.Status != run.StatusSucceeded {
+			if done := dispatchtest.WaitTerminal(t, store, plan.ID); done.Status != run.StatusSucceeded {
 				t.Fatalf("plan status = %q (%s), want succeeded", done.Status, done.Error)
 			}
-			proposal := waitProposal(t, store, plan.ID)
+			proposal := dispatchtest.WaitProposal(t, store, plan.ID)
 			held, err := store.Get(ctx, proposal.ID)
 			if err != nil {
 				t.Fatalf("Get(proposal) error = %v", err)
@@ -203,7 +204,7 @@ func TestAGatedApplyCarriesOutTheApprovedPlan(t *testing.T) {
 			if _, err := d.Approve(ctx, held.ID, decider("approver-1", "session")); err != nil {
 				t.Fatalf("Approve() error = %v", err)
 			}
-			final := waitTerminal(t, store, held.ID)
+			final := dispatchtest.WaitTerminal(t, store, held.ID)
 			if final.Status != test.WantStatus {
 				log, _ := store.Log(ctx, held.ID)
 				t.Fatalf("apply ended %q (%s), want %q:\n%s", final.Status, final.Error, test.WantStatus, log)
@@ -284,7 +285,7 @@ func TestAReconcileCarriesOutThePlanItsCheckSaved(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit(check) error = %v", err)
 			}
-			if done := waitTerminal(t, store, check.ID); done.Status != run.StatusSucceeded {
+			if done := dispatchtest.WaitTerminal(t, store, check.ID); done.Status != run.StatusSucceeded {
 				t.Fatalf("check status = %q (%s), want succeeded", done.Status, done.Error)
 			}
 			sealed, err := store.DriftPlan(ctx, check.ID)
@@ -312,7 +313,7 @@ func TestAReconcileCarriesOutThePlanItsCheckSaved(t *testing.T) {
 			if _, err := d.Approve(ctx, reconcile.ID, decider("approver-1", "session")); err != nil {
 				t.Fatalf("Approve() error = %v", err)
 			}
-			final := waitTerminal(t, store, reconcile.ID)
+			final := dispatchtest.WaitTerminal(t, store, reconcile.ID)
 			if final.Status != test.WantStatus {
 				log, _ := store.Log(ctx, reconcile.ID)
 				t.Fatalf("reconcile ended %q (%s), want %q:\n%s", final.Status, final.Error,
@@ -338,7 +339,7 @@ func TestAReconcileCarriesOutThePlanItsCheckSaved(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit(check again) error = %v", err)
 			}
-			if done := waitTerminal(t, store, again.ID); done.Status != run.StatusSucceeded {
+			if done := dispatchtest.WaitTerminal(t, store, again.ID); done.Status != run.StatusSucceeded {
 				t.Fatalf("second check status = %q (%s), want succeeded", done.Status, done.Error)
 			}
 			rows, err := store.DriftStatus(ctx)

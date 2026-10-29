@@ -11,6 +11,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/relaytest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -48,7 +49,7 @@ func TestRelayWorkerReceivesTheRegoSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
-	remote, err := newPolicyRelay(t, backing).List(context.Background())
+	remote, err := relaytest.NewPolicyRelay(t, backing).List(context.Background())
 	if err != nil {
 		t.Fatalf("List() across the relay error = %v", err)
 	}

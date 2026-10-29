@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -32,7 +33,7 @@ func accountRules(t *testing.T, more ...*policy.Policy) policy.Store {
 	t.Helper()
 	exempt := &policy.Policy{ID: "pol_release", Name: releaseOnDevLead, Actor: "release-agent",
 		Account: "dev-lead", Effect: policy.EffectExempt, MaxDestroy: policy.DisabledMaxDestroy}
-	return rulesHolding(t, append([]*policy.Policy{exempt}, more...)...)
+	return dispatchtest.RulesHolding(t, append([]*policy.Policy{exempt}, more...)...)
 }
 
 // exemptOnDevLead is the note a run the dev-lead exemption let through carries.
@@ -96,11 +97,11 @@ func TestAnExemptionCoversOneAccountsAgentAndItsDerivedRuns(t *testing.T) {
 			t.Cleanup(d.Close)
 			// A person's split fails, which is what makes a retry available.
 			parent, err := d.SubmitSplit(context.Background(), "site.yml", "inv", 2,
-				personOpts()...)
+				dispatchtest.PersonOpts()...)
 			if err != nil {
 				t.Fatalf("SubmitSplit() error = %v", err)
 			}
-			waitForStatus(t, store, parent.ID, run.StatusFailed)
+			dispatchtest.WaitForStatus(t, store, parent.ID, run.StatusFailed)
 			ctx, opts := boundAgent(test.Account)
 			retry, err := d.RetryFailedShards(ctx, parent.ID, opts...)
 			if err != nil {
@@ -120,13 +121,13 @@ func TestAnExemptionCoversOneAccountsAgentAndItsDerivedRuns(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d apply", testNum), func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			writeFiles(t, dir, map[string]string{"main.tf": cleanConfig})
+			dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": dispatchtest.CleanConfig})
 			store := run.NewMemStore()
 			// A plan-content rule plans every apply first, the exempt one included, so the apply
 			// its plan proposes faces the rules on its own.
 			planned := &policy.Policy{ID: "pol_teardown", Name: "large teardown",
 				Tool: run.ToolTerraform, MaxDestroy: 5}
-			d := New(store, planRunner("Plan: 0 to add, 0 to change, 1 to destroy"), zap.NewNop(),
+			d := New(store, dispatchtest.PlanRunner("Plan: 0 to add, 0 to change, 1 to destroy"), zap.NewNop(),
 				WithNoJanitor(), WithPolicies(accountRules(t, planned)))
 			t.Cleanup(d.Close)
 			ctx, opts := boundAgent(test.Account)
@@ -142,10 +143,10 @@ func TestAnExemptionCoversOneAccountsAgentAndItsDerivedRuns(t *testing.T) {
 					t.Fatalf("Approve() error = %v", err)
 				}
 			}
-			if final := waitTerminal(t, store, created.ID); final.Status != run.StatusSucceeded {
+			if final := dispatchtest.WaitTerminal(t, store, created.ID); final.Status != run.StatusSucceeded {
 				t.Fatalf("plan status = %q, want succeeded", final.Status)
 			}
-			proposal := waitProposal(t, store, created.ID)
+			proposal := dispatchtest.WaitProposal(t, store, created.ID)
 			judge(t, "the proposed apply", proposal, test.Account, test.WantHeld)
 		})
 	}
@@ -208,7 +209,7 @@ func TestAWorkflowsStepsCarryItsAccount(t *testing.T) {
 	if got.Status == run.StatusPendingApproval || got.Account != "dev-lead" {
 		t.Fatalf("workflow = %s on %q, want it exempt on dev-lead", got.Status, got.Account)
 	}
-	if final := waitTerminal(t, store, got.ID); final.Status != run.StatusSucceeded {
+	if final := dispatchtest.WaitTerminal(t, store, got.ID); final.Status != run.StatusSucceeded {
 		t.Fatalf("workflow status = %q, want succeeded", final.Status)
 	}
 	steps, err := store.Shards(context.Background(), got.ID)

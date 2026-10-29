@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -53,7 +54,7 @@ func TestANotificationTargetCannotReachTheServerItself(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	waitTerminal(t, store, created.ID)
+	dispatchtest.WaitTerminal(t, store, created.ID)
 
 	// The delivery is attempted in the background, so give it longer than it would need to succeed.
 	select {
@@ -89,7 +90,7 @@ func TestAnOffHostNotificationTargetStillArrives(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	waitTerminal(t, store, created.ID)
+	dispatchtest.WaitTerminal(t, store, created.ID)
 
 	select {
 	case <-arrived:

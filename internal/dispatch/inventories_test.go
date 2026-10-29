@@ -11,6 +11,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -156,7 +157,7 @@ func TestRunResolvesInventoryContentSource(t *testing.T) {
 		t.Fatalf("Submit() error = %v", err)
 	}
 
-	got := waitTerminal(t, store, created.ID)
+	got := dispatchtest.WaitTerminal(t, store, created.ID)
 	if got.Status != run.StatusSucceeded {
 		t.Fatalf("run status = %q, want succeeded", got.Status)
 	}

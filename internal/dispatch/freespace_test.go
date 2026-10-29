@@ -12,6 +12,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -95,7 +96,7 @@ func TestFloorRefusesNewRuns(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%s at the floor: error = %v, want admitted", test.Kind, err)
 				}
-				waitTerminal(t, store, r.ID)
+				dispatchtest.WaitTerminal(t, store, r.ID)
 				return
 			}
 			if !errors.Is(err, ErrLowSpace) {
@@ -138,7 +139,7 @@ func TestFloorReturnsAnAdmittedRunOnRetry(t *testing.T) {
 		ErrLowSpace) {
 		t.Errorf("Submit(new key) under the floor error = %v, want ErrLowSpace", err)
 	}
-	waitTerminal(t, store, first.ID)
+	dispatchtest.WaitTerminal(t, store, first.ID)
 }
 
 // TestFloorRefusesShardRetry pins the floor on a retry of failed shards: under it the retry is
@@ -173,7 +174,7 @@ func TestFloorRefusesShardRetry(t *testing.T) {
 			if err != nil {
 				t.Fatalf("SubmitSplit() error = %v", err)
 			}
-			if got := waitTerminal(t, store, parent.ID); got.Status != run.StatusFailed {
+			if got := dispatchtest.WaitTerminal(t, store, parent.ID); got.Status != run.StatusFailed {
 				t.Fatalf("parent status = %q, want failed", got.Status)
 			}
 			runner.fixed.Store(true)
@@ -182,7 +183,7 @@ func TestFloorRefusesShardRetry(t *testing.T) {
 				if first, err = d.RetryFailedShards(ctx, parent.ID); err != nil {
 					t.Fatalf("RetryFailedShards(first) error = %v", err)
 				}
-				waitTerminal(t, store, first.ID)
+				dispatchtest.WaitTerminal(t, store, first.ID)
 			}
 			before := storedRuns(t, store)
 			f.free.Store(test.Free)
@@ -196,7 +197,7 @@ func TestFloorRefusesShardRetry(t *testing.T) {
 				}
 			}
 			if retry != nil && first == nil {
-				if got := waitTerminal(t, store, retry.ID); got.Status != run.StatusSucceeded {
+				if got := dispatchtest.WaitTerminal(t, store, retry.ID); got.Status != run.StatusSucceeded {
 					t.Errorf("retry status = %q, want succeeded", got.Status)
 				}
 			}
@@ -286,7 +287,7 @@ func TestFloorFailsALocalPlanGateProposal(t *testing.T) {
 			}
 			f := &testFree{}
 			f.free.Store(testFloor)
-			inner := &planGateRunner{summary: "Plan: 0 to add, 0 to change, 3 to destroy.\n"}
+			inner := &dispatchtest.PlanGateRunner{Summary: "Plan: 0 to add, 0 to change, 3 to destroy.\n"}
 			runner := roundhouse.RunnerFunc(func(ctx context.Context, spec roundhouse.Spec,
 				out io.Writer) (roundhouse.Result, error) {
 				if spec.DryRun && test.Drop {
@@ -303,7 +304,7 @@ func TestFloorFailsALocalPlanGateProposal(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
-			got := waitTerminal(t, store, plan.ID)
+			got := dispatchtest.WaitTerminal(t, store, plan.ID)
 			if diff := cmp.Diff(test.WantStatus, got.Status); diff != "" {
 				t.Errorf("plan status mismatch (-want +got):\n%s", diff)
 			}
@@ -341,7 +342,7 @@ func TestFloorAdmitsWhenSpaceCannotBeRead(t *testing.T) {
 	if f.calls.Load() == 0 {
 		t.Error("the floor was never read")
 	}
-	waitTerminal(t, store, r.ID)
+	dispatchtest.WaitTerminal(t, store, r.ID)
 }
 
 // TestPipelineAdmittedIsNotStoppedByTheFloor pins that the floor is checked once, when the pipeline
@@ -361,7 +362,7 @@ func TestPipelineAdmittedIsNotStoppedByTheFloor(t *testing.T) {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
 	f.free.Store(0)
-	if got := waitTerminal(t, store, parent.ID); got.Status != run.StatusSucceeded {
+	if got := dispatchtest.WaitTerminal(t, store, parent.ID); got.Status != run.StatusSucceeded {
 		t.Errorf("pipeline = %s (%s), want succeeded: an admitted pipeline's steps are not refused",
 			got.Status, got.Error)
 	}
@@ -402,7 +403,7 @@ func TestNoFloorReadsNothing(t *testing.T) {
 	t.Parallel()
 	f := &testFree{}
 	store := run.NewMemStore()
-	d := New(store, okRunner(), zap.NewNop(), WithNoJanitor(), WithFreeSpaceFloor(0, "/data"),
+	d := New(store, dispatchtest.OKRunner(), zap.NewNop(), WithNoJanitor(), WithFreeSpaceFloor(0, "/data"),
 		func(c *config) { c.freeBytes = f.read })
 	t.Cleanup(d.Close)
 	r, err := d.Submit(context.Background(), "play.yml", "inv")
@@ -415,5 +416,5 @@ func TestNoFloorReadsNothing(t *testing.T) {
 	if n := f.calls.Load(); n != 0 {
 		t.Errorf("free space read %d times with no floor, want 0", n)
 	}
-	waitTerminal(t, store, r.ID)
+	dispatchtest.WaitTerminal(t, store, r.ID)
 }

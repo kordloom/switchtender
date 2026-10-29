@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -103,7 +104,7 @@ func TestApprovedRunIsPinnedToTheInventoryItWasApprovedWith(t *testing.T) {
 	}
 
 	// The claim loop takes the approved run and executes it.
-	final := waitTerminal(t, store, held.ID)
+	final := dispatchtest.WaitTerminal(t, store, held.ID)
 
 	switch final.Status {
 	case run.StatusFailed:

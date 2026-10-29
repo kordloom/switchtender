@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -50,7 +51,7 @@ func TestDispatcherNotifiesSlackCompat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	waitTerminal(t, store, created.ID)
+	dispatchtest.WaitTerminal(t, store, created.ID)
 
 	for name, ch := range map[string]chan string{"mattermost": mm, "rocketchat": rc} {
 		select {

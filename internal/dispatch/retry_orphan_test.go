@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -65,7 +66,7 @@ func TestRetryFailedShardsRecoversOrphans(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
 			store := run.NewMemStore()
-			d := New(store, &fakeRunnerLister{hosts: []string{"host-a", "host-b"}}, nil)
+			d := New(store, &dispatchtest.FakeRunnerLister{HostNames: []string{"host-a", "host-b"}}, nil)
 			defer d.Close()
 
 			parentID := fmt.Sprintf("parent_%d", testNum)

@@ -23,6 +23,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -219,7 +220,7 @@ func (p *finalizeProbe) leftAtFinalize() []string {
 // without the tool ever starting, rather than hanging until the test binary times out.
 func waitStarted(t *testing.T, store run.Store, id string, started <-chan struct{}) {
 	t.Helper()
-	deadline := time.Now().Add(waitBudget)
+	deadline := time.Now().Add(dispatchtest.WaitBudget)
 	for {
 		select {
 		case <-started:
@@ -312,7 +313,7 @@ func TestFileInjectorEveryExitPath(t *testing.T) {
 			if test.Mode == "cancel" && !d.Cancel(r.ID) {
 				t.Fatal("Cancel() returned false for a running run")
 			}
-			got := waitTerminal(t, store, r.ID)
+			got := dispatchtest.WaitTerminal(t, store, r.ID)
 			if got.Status != test.WantStatus {
 				t.Errorf("status = %q, want %q", got.Status, test.WantStatus)
 			}
@@ -364,7 +365,7 @@ func assertNoFileSecret(t *testing.T, store run.Store, audits audit.Store, logs 
 	if strings.Contains(string(body), fileSecret) {
 		t.Errorf("the file's secret reached the run log: %q", body)
 	}
-	if !strings.Contains(string(body), maskToken) {
+	if !strings.Contains(string(body), MaskToken) {
 		t.Errorf("the run log does not show the secret masked: %q", body)
 	}
 	r, err := store.Get(ctx, id)
@@ -470,7 +471,7 @@ func TestDispatcherStartSweepsACrashedRun(t *testing.T) {
 	var livePath string
 	select {
 	case livePath = <-started:
-	case <-time.After(waitBudget):
+	case <-time.After(dispatchtest.WaitBudget):
 		t.Fatal("the live run never started its tool")
 	}
 	if livePath == "" {
@@ -498,7 +499,7 @@ func TestDispatcherStartSweepsACrashedRun(t *testing.T) {
 	}
 	restarted := New(run.NewMemStore(), quietRunner{}, nil, fx.options()...)
 	defer restarted.Close()
-	deadline := time.Now().Add(waitBudget)
+	deadline := time.Now().Add(dispatchtest.WaitBudget)
 	for {
 		if _, err := os.Stat(sweepLock); err == nil {
 			break
@@ -516,7 +517,7 @@ func TestDispatcherStartSweepsACrashedRun(t *testing.T) {
 		t.Errorf("a dispatcher start removed a live run's credential file: %v", err)
 	}
 	close(release)
-	waitTerminal(t, store, r.ID)
+	dispatchtest.WaitTerminal(t, store, r.ID)
 	if diff := cmp.Diff([]string{"run-run_dead-123"}, fx.runDirs(t)); diff != "" {
 		t.Errorf("run directories left after the live run finished (-want +got):\n%s", diff)
 	}
@@ -564,7 +565,7 @@ func TestKubeconfigKindReachesTheTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	if got := waitTerminal(t, store, r.ID); got.Status != run.StatusSucceeded {
+	if got := dispatchtest.WaitTerminal(t, store, r.ID); got.Status != run.StatusSucceeded {
 		t.Fatalf("status = %q (%s), want succeeded", got.Status, got.Error)
 	}
 	mu.Lock()

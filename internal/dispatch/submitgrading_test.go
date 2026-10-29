@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -54,7 +55,7 @@ func TestSubmitHoldsADestructivePlaybook(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save policy: %v", err)
 	}
-	d := New(run.NewMemStore(), okRunner(), zap.NewNop(), WithPolicies(policies))
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithPolicies(policies))
 	t.Cleanup(d.Close)
 
 	held, err := d.Submit(ctx, wipe, "hosts.ini", run.WithTool(run.ToolAnsible))

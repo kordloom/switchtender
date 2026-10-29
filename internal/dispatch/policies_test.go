@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kordloom/switchtender/internal/plantest"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -61,44 +61,9 @@ func TestPolicyHoldsMatchingRun(t *testing.T) {
 	if free.Status == run.StatusPendingApproval {
 		t.Fatal("non-matching run should not be held")
 	}
-	final := waitTerminal(t, store, free.ID)
+	final := dispatchtest.WaitTerminal(t, store, free.ID)
 	if final.Status != run.StatusSucceeded {
 		t.Errorf("non-matching run status = %q, want succeeded", final.Status)
-	}
-}
-
-// planRunner returns a runner that emits destroyLine for a plan (dry run), returning the saved plan it
-// describes, and a plain apply line for a real run, so a plan-content gate test controls the destroy
-// count its plan reports.
-func planRunner(destroyLine string) roundhouse.Runner {
-	return roundhouse.RunnerFunc(
-		func(_ context.Context, spec roundhouse.Spec, out io.Writer) (roundhouse.Result, error) {
-			if spec.DryRun {
-				_, _ = io.WriteString(out, destroyLine+"\n")
-				return plantest.Result(destroyLine), nil
-			}
-			_, _ = io.WriteString(out, "Apply complete!\n")
-			return roundhouse.Result{ExitCode: 0}, nil
-		})
-}
-
-// waitProposal polls the store until a run proposed from parentID appears, or the deadline passes.
-func waitProposal(t *testing.T, store run.Store, parentID string) *run.Run {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		runs, err := store.List(context.Background())
-		if err == nil {
-			for _, r := range runs {
-				if r.ProposedFrom == parentID {
-					return r
-				}
-			}
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("no apply proposed from %s", parentID)
-		}
-		time.Sleep(2 * time.Millisecond)
 	}
 }
 
@@ -130,7 +95,7 @@ func TestPlanGateHeldWhenPlanDestroysTooMuch(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	d := New(store, planRunner("Plan: 0 to add, 0 to change, 3 to destroy"), nil, WithPolicies(policies))
+	d := New(store, dispatchtest.PlanRunner("Plan: 0 to add, 0 to change, 3 to destroy"), nil, WithPolicies(policies))
 	defer d.Close()
 
 	created, err := d.Submit(context.Background(), "", "",
@@ -143,12 +108,12 @@ func TestPlanGateHeldWhenPlanDestroysTooMuch(t *testing.T) {
 	}
 
 	// The plan run itself succeeds: it ran a plan and proposed an apply rather than applying.
-	plan := waitTerminal(t, store, created.ID)
+	plan := dispatchtest.WaitTerminal(t, store, created.ID)
 	if plan.Status != run.StatusSucceeded {
 		t.Fatalf("plan run status = %q, want succeeded", plan.Status)
 	}
 
-	proposal := waitProposal(t, store, created.ID)
+	proposal := dispatchtest.WaitProposal(t, store, created.ID)
 	if proposal.Status != run.StatusPendingApproval {
 		t.Errorf("proposed apply status = %q, want pending_approval (held)", proposal.Status)
 	}
@@ -175,7 +140,7 @@ func TestPlanGateQueuesApplyWithinThreshold(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	d := New(store, planRunner("Plan: 1 to add, 0 to change, 2 to destroy"), nil, WithPolicies(policies))
+	d := New(store, dispatchtest.PlanRunner("Plan: 1 to add, 0 to change, 2 to destroy"), nil, WithPolicies(policies))
 	defer d.Close()
 
 	created, err := d.Submit(context.Background(), "", "",
@@ -183,12 +148,12 @@ func TestPlanGateQueuesApplyWithinThreshold(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	if plan := waitTerminal(t, store, created.ID); plan.Status != run.StatusSucceeded {
+	if plan := dispatchtest.WaitTerminal(t, store, created.ID); plan.Status != run.StatusSucceeded {
 		t.Fatalf("plan run status = %q, want succeeded", plan.Status)
 	}
 
-	proposal := waitProposal(t, store, created.ID)
-	applied := waitTerminal(t, store, proposal.ID)
+	proposal := dispatchtest.WaitProposal(t, store, created.ID)
+	applied := dispatchtest.WaitTerminal(t, store, proposal.ID)
 	if applied.Status != run.StatusSucceeded {
 		t.Errorf("proposed apply status = %q, want succeeded (applied)", applied.Status)
 	}
@@ -212,7 +177,7 @@ func TestPlanGateLeavesUngatedRuns(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	d := New(store, planRunner("Plan: 0 to add, 0 to change, 9 to destroy"), nil, WithPolicies(policies))
+	d := New(store, dispatchtest.PlanRunner("Plan: 0 to add, 0 to change, 9 to destroy"), nil, WithPolicies(policies))
 	defer d.Close()
 
 	// A dry run is a preview and is never plan-gated.
@@ -221,7 +186,7 @@ func TestPlanGateLeavesUngatedRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() dry run error = %v", err)
 	}
-	if done := waitTerminal(t, store, dry.ID); done.Status != run.StatusSucceeded {
+	if done := dispatchtest.WaitTerminal(t, store, dry.ID); done.Status != run.StatusSucceeded {
 		t.Errorf("dry run status = %q, want succeeded", done.Status)
 	}
 
@@ -231,7 +196,7 @@ func TestPlanGateLeavesUngatedRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() bash error = %v", err)
 	}
-	if done := waitTerminal(t, store, bash.ID); done.Status != run.StatusSucceeded {
+	if done := dispatchtest.WaitTerminal(t, store, bash.ID); done.Status != run.StatusSucceeded {
 		t.Errorf("bash run status = %q, want succeeded", done.Status)
 	}
 
@@ -323,7 +288,7 @@ func TestPlanGateCarriesDistinctApproverOntoTheApply(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	d := New(store, planRunner("Plan: 0 to add, 0 to change, 9 to destroy"), nil,
+	d := New(store, dispatchtest.PlanRunner("Plan: 0 to add, 0 to change, 9 to destroy"), nil,
 		WithPolicies(policies))
 	defer d.Close()
 
@@ -332,9 +297,9 @@ func TestPlanGateCarriesDistinctApproverOntoTheApply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	waitTerminal(t, store, created.ID)
+	dispatchtest.WaitTerminal(t, store, created.ID)
 
-	proposal := waitProposal(t, store, created.ID)
+	proposal := dispatchtest.WaitProposal(t, store, created.ID)
 	if proposal.Status != run.StatusPendingApproval {
 		t.Fatalf("proposed apply status = %q, want pending_approval", proposal.Status)
 	}

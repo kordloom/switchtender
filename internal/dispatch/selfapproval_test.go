@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -33,7 +34,7 @@ func TestDistinctApproverIsEnforced(t *testing.T) {
 		t.Fatalf("Save policy: %v", err)
 	}
 	store := run.NewMemStore()
-	d := New(store, okRunner(), zap.NewNop(), WithPolicies(policies))
+	d := New(store, dispatchtest.OKRunner(), zap.NewNop(), WithPolicies(policies))
 
 	submit := func(actor string) *run.Run {
 		r, err := d.Submit(ctx, "", "", run.WithTool(run.ToolBash), run.WithCommand("deploy"),
@@ -116,7 +117,7 @@ func TestEveryRunRecordsTheRulesInForce(t *testing.T) {
 	ctx := context.Background()
 	policies := policy.NewMemStore()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), zap.NewNop(), WithPolicies(policies))
+	d := New(store, dispatchtest.OKRunner(), zap.NewNop(), WithPolicies(policies))
 
 	submit := func() *run.Run {
 		r, err := d.Submit(ctx, "", "", run.WithTool(run.ToolBash), run.WithCommand("echo hi"),
@@ -191,7 +192,7 @@ func TestDistinctApproverBindsARunBornHeld(t *testing.T) {
 		t.Fatalf("Save policy: %v", err)
 	}
 	store := run.NewMemStore()
-	d := New(store, okRunner(), zap.NewNop(), WithPolicies(policies))
+	d := New(store, dispatchtest.OKRunner(), zap.NewNop(), WithPolicies(policies))
 
 	r, err := d.Submit(ctx, "", "", run.WithTool(run.ToolBash), run.WithCommand("terraform destroy"),
 		run.WithActor("casey"), run.WithActorType("session"),
@@ -228,7 +229,7 @@ func TestRequestedHoldStillNamesItselfWithNoRule(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), zap.NewNop(), WithPolicies(policy.NewMemStore()))
+	d := New(store, dispatchtest.OKRunner(), zap.NewNop(), WithPolicies(policy.NewMemStore()))
 
 	r, err := d.Submit(ctx, "", "", run.WithTool(run.ToolBash), run.WithCommand("deploy"),
 		run.WithActor("casey"), run.WithActorType("session"), run.WithRequireApproval(true))

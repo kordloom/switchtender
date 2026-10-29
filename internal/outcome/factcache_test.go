@@ -11,6 +11,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/outcome"
+	"github.com/kordloom/switchtender/internal/outcometest"
 	"github.com/kordloom/switchtender/internal/receipt"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -96,7 +97,7 @@ func TestTheFactCacheIsBoundOnlyWhenItIsOn(t *testing.T) {
 //
 // It does not run in parallel: it pins the audit key environment for the identity it signs with.
 func TestAReceiptDisclosingTheFactCacheVerifiesInLoomSeal(t *testing.T) {
-	repo := loomsealRepo(t)
+	repo := outcometest.LoomsealRepo(t)
 	ctx := context.Background()
 	runs := run.NewMemStore()
 	audits := audit.NewMemStore()
@@ -136,7 +137,7 @@ func TestAReceiptDisclosingTheFactCacheVerifiesInLoomSeal(t *testing.T) {
 		!strings.Contains(string(res.Signed), "timeout_seconds") {
 		t.Fatal("the signed receipt does not state that the run served cached facts")
 	}
-	report := verifyWithLoomSeal(t, repo, res.Signed)
+	report := outcometest.VerifyWithLoomSeal(t, repo, res.Signed)
 	if !report.OK {
 		t.Fatalf("loomseal refused a receipt stating the fact cache: %v", report.Problems)
 	}

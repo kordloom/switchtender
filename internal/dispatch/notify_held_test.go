@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -215,7 +216,7 @@ func TestAHeldRunIsAnnouncedOnceWhereFinishedRunsGo(t *testing.T) {
 	pagerURL, pages := captureHits(t)
 
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil, WithPolicies(holdEverything(t)),
+	d := New(store, dispatchtest.OKRunner(), nil, WithPolicies(holdEverything(t)),
 		WithWebhooks([]string{hookURL}), WithSlack([]string{slackSrv.URL}),
 		WithPagerDuty([]string{"team-rk"}), WithNotifyClient(http.DefaultClient))
 	d.pagerDutyEndpoint = pagerURL
@@ -275,7 +276,7 @@ func TestAHeldRunIsAnnouncedOnceWhereFinishedRunsGo(t *testing.T) {
 func TestAHeldPipelineIsAnnouncedOnceForTheWholeGraph(t *testing.T) {
 	t.Parallel()
 	hookURL, events := captureEvents(t)
-	d := New(run.NewMemStore(), okRunner(), nil, WithPolicies(holdEverything(t)),
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithPolicies(holdEverything(t)),
 		WithWebhooks([]string{hookURL}), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
@@ -310,7 +311,7 @@ func TestHeldRunTargetsSkipPagersAndFailureOnlyTargets(t *testing.T) {
 	emailer := &captureEmailer{sent: make(chan string, 4)}
 	// The account a text target sends through. It names no server-wide recipient, so any text
 	// here came from the run's own target.
-	d := New(run.NewMemStore(), okRunner(), nil, WithNotifyClient(http.DefaultClient),
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithNotifyClient(http.DefaultClient),
 		WithEmail(emailer, false), WithTwilio("AC0000", "twilio-token", "+15550000000", nil))
 	d.pagerDutyEndpoint = pagerURL
 	d.twilioBaseURL = twilioURL
@@ -386,7 +387,7 @@ func TestEmailOnFailureOnlyLeavesAHeldRunUnsent(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
 			t.Parallel()
 			emailer := &captureEmailer{sent: make(chan string, 4)}
-			d := New(run.NewMemStore(), okRunner(), nil, WithEmail(emailer, test.OnFailureOnly))
+			d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithEmail(emailer, test.OnFailureOnly))
 			defer d.Close()
 			d.notifyHeld(heldRun())
 			d.notifyWG.Wait()
@@ -435,7 +436,7 @@ func TestARacedSubmissionDoesNotAnnounceTheWinnersHold(t *testing.T) {
 	if err := store.Save(ctx, winner); err != nil {
 		t.Fatalf("Save(winner) error = %v", err)
 	}
-	d := New(store, okRunner(), nil, WithPolicies(holdEverything(t)),
+	d := New(store, dispatchtest.OKRunner(), nil, WithPolicies(holdEverything(t)),
 		WithWebhooks([]string{hookURL}), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
@@ -487,7 +488,7 @@ func TestAHeldSplitAndAHeldRetryAreAnnouncedForTheParentAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
-	if got := waitTerminal(t, retryStore, failed.ID); got.Status != run.StatusFailed {
+	if got := dispatchtest.WaitTerminal(t, retryStore, failed.ID); got.Status != run.StatusFailed {
 		t.Fatalf("split status = %q, want failed", got.Status)
 	}
 	if e := nextEvent(t, retryEvents); e.Event != "run.finished" || e.Run.ID != failed.ID {
@@ -521,7 +522,7 @@ func TestAnApplyThePlanGateHoldsIsAnnounced(t *testing.T) {
 		t.Fatalf("policies.Save() error = %v", err)
 	}
 	store := run.NewMemStore()
-	d := New(store, &planGateRunner{summary: "Plan: 0 to add, 0 to change, 3 to destroy.\n"}, nil,
+	d := New(store, &dispatchtest.PlanGateRunner{Summary: "Plan: 0 to add, 0 to change, 3 to destroy.\n"}, nil,
 		WithPolicies(policies), WithWebhooks([]string{hookURL}), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
@@ -584,7 +585,7 @@ func TestAHoldReachesEveryChannelFinishedRunsReach(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
 			t.Parallel()
 			url, hits := captureHits(t)
-			d := New(run.NewMemStore(), okRunner(), nil, WithNoJanitor(),
+			d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithNoJanitor(),
 				WithNotifyClient(http.DefaultClient), test.Option(url))
 			defer d.Close()
 
@@ -611,7 +612,7 @@ func TestAHoldNeverPagesTextsOrAnnotates(t *testing.T) {
 	pagerURL, pages := captureHits(t)
 	twilioURL, texts := captureHits(t)
 	grafanaURL, annotations := captureHits(t)
-	d := New(run.NewMemStore(), okRunner(), nil, WithNoJanitor(),
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithNoJanitor(),
 		WithNotifyClient(http.DefaultClient), WithPagerDuty([]string{"team-rk"}),
 		WithTwilio("AC0000", "twilio-token", "+15550000000", []string{"+15551111111"}),
 		WithGrafana([]string{grafanaURL}, "grafana-token"))

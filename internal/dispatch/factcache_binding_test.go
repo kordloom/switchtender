@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -41,7 +42,7 @@ func TestAnApprovedRunIsHeldToItsFactCacheSetting(t *testing.T) {
 			store := run.NewMemStore()
 			// The claim loop stays out of it: the executor is called directly on the tampered row.
 			// The audit store is what makes an approval stamp the binding at all.
-			d := New(store, okRunner(), nil, WithAudits(audit.NewMemStore()), WithNoJanitor(),
+			d := New(store, dispatchtest.OKRunner(), nil, WithAudits(audit.NewMemStore()), WithNoJanitor(),
 				WithClaimGate(func() error { return errNoClaimingInThisTest }))
 			defer d.Close()
 			held := &run.Run{

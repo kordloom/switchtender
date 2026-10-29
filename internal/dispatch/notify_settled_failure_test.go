@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	named "github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -72,7 +73,7 @@ func TestOutboxHearsARunTheJanitorSettled(t *testing.T) {
 			}
 			audits := audit.NewMemStore()
 			// The janitor sweeps once as the dispatcher starts, which is the restart case too.
-			d := New(runs, okRunner(), nil, WithAudits(audits), WithNotificationOutbox(outbox),
+			d := New(runs, dispatchtest.OKRunner(), nil, WithAudits(audits), WithNotificationOutbox(outbox),
 				WithNotifyClient(http.DefaultClient))
 			t.Cleanup(d.Close)
 

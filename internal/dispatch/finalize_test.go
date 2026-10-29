@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -15,7 +16,7 @@ func TestFinalizeDoesNotResurrectInterrupted(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil)
+	d := New(store, dispatchtest.OKRunner(), nil)
 
 	ended := time.Now()
 	interrupted := &run.Run{
@@ -54,7 +55,7 @@ func TestFinalizeFromRunningSucceeds(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil)
+	d := New(store, dispatchtest.OKRunner(), nil)
 
 	started := time.Now()
 	r := &run.Run{
@@ -89,7 +90,7 @@ func TestFinalizeRejectFromPendingApproval(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil)
+	d := New(store, dispatchtest.OKRunner(), nil)
 
 	// Reject transitions pending_approval to rejected in the store, then finalizes to record the
 	// reason. finalize sees the stored status already equal to the target, so it is not fenced.
@@ -128,7 +129,7 @@ func TestALostWorkerCannotTerminalizeARunAnotherWorkerReclaimed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil)
+	d := New(store, dispatchtest.OKRunner(), nil)
 
 	started := time.Now()
 	reclaimed := &run.Run{

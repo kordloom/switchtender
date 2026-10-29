@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -48,7 +49,7 @@ func TestDispatcherRecordsTerraformDrift(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	got := waitTerminal(t, store, created.ID)
+	got := dispatchtest.WaitTerminal(t, store, created.ID)
 	if got.Status != run.StatusSucceeded {
 		t.Errorf("status = %q, want succeeded since drift is not a failure", got.Status)
 	}

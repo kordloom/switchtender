@@ -17,6 +17,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -68,7 +69,7 @@ func gatedWorkflow(timeout int, withDenyPath bool) []run.PipelineStep {
 // waitParked waits until the workflow is parked at its approval step and returns the step's record.
 func waitParked(t *testing.T, store run.Store, parentID string) *run.Run {
 	t.Helper()
-	deadline := time.Now().Add(waitBudget)
+	deadline := time.Now().Add(dispatchtest.WaitBudget)
 	for time.Now().Before(deadline) {
 		parent, err := store.Get(context.Background(), parentID)
 		if err != nil {
@@ -170,7 +171,7 @@ func TestApprovalStepPausesAndTakesAPath(t *testing.T) {
 			if err != nil {
 				t.Fatalf("decide error = %v", err)
 			}
-			got := waitTerminal(t, store, parent.ID)
+			got := dispatchtest.WaitTerminal(t, store, parent.ID)
 			if got.Status != test.WantStatus {
 				t.Errorf("workflow status = %q (%s), want %q", got.Status, got.Error, test.WantStatus)
 			}
@@ -216,7 +217,7 @@ func TestAnUnrecordedRequestFailsTheWorkflow(t *testing.T) {
 			if err != nil {
 				t.Fatalf("SubmitPipeline() error = %v", err)
 			}
-			got := waitTerminal(t, store, parent.ID)
+			got := dispatchtest.WaitTerminal(t, store, parent.ID)
 			if got.Status != run.StatusFailed ||
 				!strings.Contains(got.Error, `approval step "gate" could not record its request`) {
 				t.Errorf("workflow = %s (%s), want failed because the request was not recorded",
@@ -258,7 +259,7 @@ func TestApprovalStepSurvivesARestart(t *testing.T) {
 		By: outcome.Decider{Name: "approver", Type: "session"}}); err != nil {
 		t.Fatalf("DecideStep() error = %v", err)
 	}
-	got := waitTerminal(t, store, parent.ID)
+	got := dispatchtest.WaitTerminal(t, store, parent.ID)
 	if got.Status != run.StatusSucceeded {
 		t.Errorf("workflow status = %q (%s), want succeeded", got.Status, got.Error)
 	}
@@ -328,7 +329,7 @@ func TestApprovalStepResumesExactlyOnce(t *testing.T) {
 		}
 	}
 	wg.Wait()
-	got := waitTerminal(t, store, parent.ID)
+	got := dispatchtest.WaitTerminal(t, store, parent.ID)
 	if got.Status != run.StatusSucceeded {
 		t.Errorf("workflow status = %q (%s), want succeeded", got.Status, got.Error)
 	}
@@ -511,7 +512,7 @@ func TestApprovalStepBindsTheStateItWasGivenFor(t *testing.T) {
 			d2 := New(store, runner, nil, WithNoJanitor(), WithOwner("replica-two"))
 			defer d2.Close()
 			d2.sweepApprovalSteps()
-			got := waitTerminal(t, store, parent.ID)
+			got := dispatchtest.WaitTerminal(t, store, parent.ID)
 			if got.Status != test.WantStatus {
 				t.Errorf("workflow status = %q (%s), want %q", got.Status, got.Error, test.WantStatus)
 			}
@@ -578,7 +579,7 @@ func TestApprovalStepRefusesAParentPinChangedAfterApproval(t *testing.T) {
 	d2 := New(store, runner, nil, WithNoJanitor(), WithOwner("replica-two"))
 	defer d2.Close()
 	d2.sweepApprovalSteps()
-	got := waitTerminal(t, store, parent.ID)
+	got := dispatchtest.WaitTerminal(t, store, parent.ID)
 	if got.Status != run.StatusFailed {
 		t.Fatalf("workflow status = %q (%s), want failed: the approval was for aaa111 and the "+
 			"workflow is now pinned to bbb222", got.Status, got.Error)
@@ -763,7 +764,7 @@ func TestApprovalStepNotifiesItsOwnEvent(t *testing.T) {
 		if diff := cmp.Diff(want, got); diff != "" {
 			t.Errorf("notification mismatch (-want +got):\n%s", diff)
 		}
-	case <-time.After(waitBudget):
+	case <-time.After(dispatchtest.WaitBudget):
 		t.Fatal("no notification arrived for the waiting approval step")
 	}
 }
@@ -815,7 +816,7 @@ func TestApprovalStepNotifiesNamedTargets(t *testing.T) {
 	waitParked(t, store, parent.ID)
 	want := asked{ID: parent.ID, Status: run.StatusPendingApproval,
 		HeldByPolicy: `approval step "gate"`}
-	deadline := time.After(waitBudget)
+	deadline := time.After(dispatchtest.WaitBudget)
 	for found := false; !found; {
 		select {
 		case got := <-seen:
@@ -829,7 +830,7 @@ func TestApprovalStepNotifiesNamedTargets(t *testing.T) {
 		if diff := cmp.Diff("workflow.step_awaiting_approval", got); diff != "" {
 			t.Errorf("delivered event mismatch (-want +got):\n%s", diff)
 		}
-	case <-time.After(waitBudget):
+	case <-time.After(dispatchtest.WaitBudget):
 		t.Fatal("the named target returned for the approval event received nothing")
 	}
 }

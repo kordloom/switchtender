@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -79,7 +80,7 @@ func TestChainEventuallyHoldsTheOutcomeOfEveryFinishedRun(t *testing.T) {
 	runs := run.NewMemStore()
 	audits := &audDroppedOutcome{Store: audit.NewMemStore()}
 
-	first := New(runs, okRunner(), nil, WithAudits(audits), WithNoJanitor(),
+	first := New(runs, dispatchtest.OKRunner(), nil, WithAudits(audits), WithNoJanitor(),
 		WithOwner("replica-a"))
 	const id = "run_outcome_dropped"
 	if err := runs.Save(ctx, &run.Run{
@@ -88,7 +89,7 @@ func TestChainEventuallyHoldsTheOutcomeOfEveryFinishedRun(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	if done := waitTerminal(t, runs, id); done.Status != run.StatusSucceeded {
+	if done := dispatchtest.WaitTerminal(t, runs, id); done.Status != run.StatusSucceeded {
 		t.Fatalf("the run ended %s, want succeeded", done.Status)
 	}
 	first.Close()
@@ -97,7 +98,7 @@ func TestChainEventuallyHoldsTheOutcomeOfEveryFinishedRun(t *testing.T) {
 	}
 
 	// The process that comes next, with its janitor sweeping on start and every period after.
-	next := New(runs, okRunner(), nil, WithAudits(audits), WithOwner("replica-b"))
+	next := New(runs, dispatchtest.OKRunner(), nil, WithAudits(audits), WithOwner("replica-b"))
 	defer next.Close()
 	deadline := time.Now().Add(janitorInterval*2 + janitorInterval/2)
 	for time.Now().Before(deadline) {

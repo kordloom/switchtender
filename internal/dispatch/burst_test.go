@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -61,7 +62,7 @@ func TestDispatcherBurstAcrossDefaultWorkers(t *testing.T) {
 		if id == "" {
 			t.Fatalf("run %d was never submitted", i)
 		}
-		if got := waitTerminal(t, store, id); got.Status != run.StatusSucceeded {
+		if got := dispatchtest.WaitTerminal(t, store, id); got.Status != run.StatusSucceeded {
 			t.Errorf("run %s ended %s, want succeeded", id, got.Status)
 		}
 	}

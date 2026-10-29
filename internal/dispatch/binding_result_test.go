@@ -17,6 +17,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/binding"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -100,7 +101,7 @@ func sealedStep(t *testing.T, d *Dispatcher, store run.Store) *run.Run {
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
-	waitTerminal(t, store, parent.ID)
+	dispatchtest.WaitTerminal(t, store, parent.ID)
 	steps, err := store.Steps(ctx, parent.ID)
 	if err != nil || len(steps) != 1 {
 		t.Fatalf("Steps() = %d steps, error %v, want one step", len(steps), err)
@@ -116,7 +117,7 @@ func sealedShard(t *testing.T, d *Dispatcher, store run.Store) *run.Run {
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
-	waitTerminal(t, store, parent.ID)
+	dispatchtest.WaitTerminal(t, store, parent.ID)
 	shards, err := store.Shards(ctx, parent.ID)
 	if err != nil {
 		t.Fatalf("Shards() error = %v", err)
@@ -137,7 +138,7 @@ func sealedTop(t *testing.T, d *Dispatcher, store run.Store) *run.Run {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	return waitTerminal(t, store, r.ID)
+	return dispatchtest.WaitTerminal(t, store, r.ID)
 }
 
 // TestOnlyASucceededChildIsResultSealed pins which terminal writes carry a result seal: a shard or
@@ -299,7 +300,7 @@ func driveResultWalk(t *testing.T, shape resultShape, fail bool, rewrite func(r 
 		release()
 		second.sweepApprovalSteps()
 	}
-	got := waitTerminal(t, store.Store, parent.ID)
+	got := dispatchtest.WaitTerminal(t, store.Store, parent.ID)
 	received, ran := runner.input("deploy.yml")
 	return walkResult{Status: got.Status, Ran: ran, Received: received,
 		Refused: strings.HasPrefix(got.Error, "refused: ")}
@@ -479,7 +480,7 @@ func TestStepOutputsHoldsTheRecordReadBack(t *testing.T) {
 			if test.Keyed {
 				opts = append(opts, WithBindingKey(bndKey(t)))
 			}
-			d := New(store, okRunner(), nil, opts...)
+			d := New(store, dispatchtest.OKRunner(), nil, opts...)
 			defer d.Close()
 			parentID, idx := "run_parent", 0
 			step := &run.Run{ID: "run_step", ParentID: &parentID, StepIndex: &idx, StepName: "build",
@@ -564,7 +565,7 @@ func TestResultSealCoversTheStoredOutputs(t *testing.T) {
 			if test.Saved {
 				store = &savingFinalizes{Store: store}
 			}
-			d := New(store, okRunner(), nil, WithNoJanitor(), WithAudits(audit.NewMemStore()),
+			d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor(), WithAudits(audit.NewMemStore()),
 				WithBindingKey(bndKey(t)), WithQueues([]string{"nobody"}))
 			defer d.Close()
 			parentID, idx := "run_parent", 0

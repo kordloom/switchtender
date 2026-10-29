@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -54,7 +55,7 @@ require_distinct_approver if input.run.tool == "python"`)
 	}
 	digest := listed[0].Rego.Digest()
 	store := run.NewMemStore()
-	d := New(store, &fakeRunnerLister{hosts: []string{"a"}}, nil, WithPolicies(policies))
+	d := New(store, &dispatchtest.FakeRunnerLister{HostNames: []string{"a"}}, nil, WithPolicies(policies))
 	defer d.Close()
 	ctx := context.Background()
 
@@ -100,7 +101,7 @@ require_distinct_approver if input.run.tool == "python"`)
 func TestARegoPolicyThatCannotDecideRefusesTheSubmission(t *testing.T) {
 	t.Parallel()
 	policies := regoStore(t, `hold contains x if { x := to_number(input.run.command) }`)
-	d := New(run.NewMemStore(), &fakeRunnerLister{hosts: []string{"a"}}, nil,
+	d := New(run.NewMemStore(), &dispatchtest.FakeRunnerLister{HostNames: []string{"a"}}, nil,
 		WithPolicies(policies))
 	defer d.Close()
 	_, err := d.Submit(context.Background(), "", "", run.WithTool("bash"),
@@ -163,7 +164,7 @@ func planGateOutcome(t *testing.T, policies policy.Store, summary string) bool {
 	t.Helper()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	runner := &planGateRunner{summary: summary}
+	runner := &dispatchtest.PlanGateRunner{Summary: summary}
 	d := New(store, runner, nil, WithPolicies(policies))
 	defer d.Close()
 	created, err := d.Submit(ctx, "", "", run.WithTool(run.ToolTerraform),
@@ -171,22 +172,22 @@ func planGateOutcome(t *testing.T, policies policy.Store, summary string) bool {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	if plan := waitTerminal(t, store, created.ID); plan.Status != run.StatusSucceeded {
+	if plan := dispatchtest.WaitTerminal(t, store, created.ID); plan.Status != run.StatusSucceeded {
 		t.Fatalf("plan run status = %q, want succeeded", plan.Status)
 	}
-	proposal := waitProposal(t, store, created.ID)
+	proposal := dispatchtest.WaitProposal(t, store, created.ID)
 	stored, err := store.Get(ctx, proposal.ID)
 	if err != nil {
 		t.Fatalf("Get(proposal) error = %v", err)
 	}
 	if stored.Status == run.StatusPendingApproval {
 		time.Sleep(100 * time.Millisecond)
-		if n := runner.applies.Load(); n != 0 {
+		if n := runner.Applies(); n != 0 {
 			t.Errorf("%d applies ran while the apply was held", n)
 		}
 		return true
 	}
-	if applied := waitTerminal(t, store, stored.ID); applied.Status != run.StatusSucceeded {
+	if applied := dispatchtest.WaitTerminal(t, store, stored.ID); applied.Status != run.StatusSucceeded {
 		t.Fatalf("proposed apply status = %q, want succeeded", applied.Status)
 	}
 	return false

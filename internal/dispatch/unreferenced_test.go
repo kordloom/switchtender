@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/handoff"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -122,7 +123,7 @@ func TestUnreferencedFileWarnsOnTheRun(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
-			got := waitTerminal(t, store, r.ID)
+			got := dispatchtest.WaitTerminal(t, store, r.ID)
 			if got.Status != run.StatusSucceeded {
 				t.Fatalf("status = %q (%s), want succeeded", got.Status, got.Error)
 			}

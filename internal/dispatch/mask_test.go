@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -235,7 +236,7 @@ func TestRunMasksSecretInLog(t *testing.T) {
 		t.Fatalf("Submit() error = %v", err)
 	}
 
-	got := waitTerminal(t, store, created.ID)
+	got := dispatchtest.WaitTerminal(t, store, created.ID)
 	if got.Status != run.StatusSucceeded {
 		t.Fatalf("run status = %q, want succeeded", got.Status)
 	}
@@ -247,7 +248,7 @@ func TestRunMasksSecretInLog(t *testing.T) {
 	if strings.Contains(logStr, "supersecretvalue") {
 		t.Errorf("secret leaked into stored log: %q", logStr)
 	}
-	if !strings.Contains(logStr, maskToken) {
+	if !strings.Contains(logStr, MaskToken) {
 		t.Errorf("expected mask token in log, got %q", logStr)
 	}
 }
@@ -284,14 +285,14 @@ func TestRunMasksSecretInError(t *testing.T) {
 		t.Fatalf("Submit() error = %v", err)
 	}
 
-	got := waitTerminal(t, store, created.ID)
+	got := dispatchtest.WaitTerminal(t, store, created.ID)
 	if got.Status != run.StatusFailed {
 		t.Fatalf("run status = %q, want failed", got.Status)
 	}
 	if strings.Contains(got.Error, "supersecretvalue") {
 		t.Errorf("secret leaked into run error: %q", got.Error)
 	}
-	if !strings.Contains(got.Error, maskToken) {
+	if !strings.Contains(got.Error, MaskToken) {
 		t.Errorf("expected mask token in run error, got %q", got.Error)
 	}
 }
@@ -340,7 +341,7 @@ func TestStreamMaskerSplitSecret(t *testing.T) {
 			if strings.Contains(got.String(), secret) {
 				t.Errorf("secret survived the stream: %q", got.String())
 			}
-			if want := "before " + maskToken + " after"; got.String() != want {
+			if want := "before " + MaskToken + " after"; got.String() != want {
 				t.Errorf("stream = %q, want %q", got.String(), want)
 			}
 		})
@@ -429,8 +430,8 @@ func TestStreamMaskerDrainSplitSecret(t *testing.T) {
 	if strings.Contains(got.String(), "SECRET") {
 		t.Fatalf("drain split the secret and leaked it across the release boundary: %q", got.String())
 	}
-	if got.String() != maskToken {
-		t.Errorf("drain+flush = %q, want the fully masked %q", got.String(), maskToken)
+	if got.String() != MaskToken {
+		t.Errorf("drain+flush = %q, want the fully masked %q", got.String(), MaskToken)
 	}
 }
 
@@ -504,7 +505,7 @@ func TestRunMasksSecretPassedAsExtraVar(t *testing.T) {
 		t.Fatalf("Submit() error = %v", err)
 	}
 
-	got := waitTerminal(t, store, created.ID)
+	got := dispatchtest.WaitTerminal(t, store, created.ID)
 	if got.Status != run.StatusSucceeded {
 		t.Fatalf("run status = %q, want succeeded", got.Status)
 	}
@@ -573,7 +574,7 @@ func TestStreamMaskerReleasesASelfOverlappingSecretAsItGoes(t *testing.T) {
 	}
 	// Nothing lost either: every four characters became one mask token, and the last one is short of
 	// a match and stays as it is.
-	if want := (1<<20)/len(secret)*len(maskToken) + (1<<20)%len(secret); got.Len() != want {
+	if want := (1<<20)/len(secret)*len(MaskToken) + (1<<20)%len(secret); got.Len() != want {
 		t.Errorf("emitted %d bytes, want %d: output was dropped or duplicated", got.Len(), want)
 	}
 }

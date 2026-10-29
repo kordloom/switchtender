@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -71,7 +72,7 @@ func TestAShutdownAsTheStepOpensLeavesTheWorkflowParked(t *testing.T) {
 	}
 	select {
 	case <-stopped:
-	case <-time.After(waitBudget):
+	case <-time.After(dispatchtest.WaitBudget):
 		t.Fatal("the walk never saved its approval step")
 	}
 	// Close waits for the walk, which the stop reached between saving the step and parking.
@@ -95,7 +96,7 @@ func TestAShutdownAsTheStepOpensLeavesTheWorkflowParked(t *testing.T) {
 		By: outcome.Decider{Name: "approver", Type: "session"}}); err != nil {
 		t.Fatalf("DecideStep() error = %v", err)
 	}
-	if got := waitTerminal(t, store.Store, parent.ID); got.Status != run.StatusSucceeded {
+	if got := dispatchtest.WaitTerminal(t, store.Store, parent.ID); got.Status != run.StatusSucceeded {
 		t.Errorf("the approved workflow = %s (%s), want succeeded", got.Status, got.Error)
 	}
 	if first.count("build") != 1 || second.count("build") != 0 || second.count("deploy") != 1 {

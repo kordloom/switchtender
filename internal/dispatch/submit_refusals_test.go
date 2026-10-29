@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -71,7 +72,7 @@ func TestSubmitRefusesARunItCannotExecute(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			store := run.NewMemStore()
-			d := New(store, okRunner(), nil, WithNoJanitor())
+			d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor())
 			defer d.Close()
 
 			got, err := d.Submit(context.Background(), test.Playbook, "inv", test.Opts...)
@@ -126,7 +127,7 @@ func TestSubmitSplitRefusesWhatSubmitRefuses(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			store := run.NewMemStore()
-			d := New(store, &fakeRunnerLister{hosts: []string{"web01", "web02"}}, nil, WithNoJanitor())
+			d := New(store, &dispatchtest.FakeRunnerLister{HostNames: []string{"web01", "web02"}}, nil, WithNoJanitor())
 			defer d.Close()
 
 			got, err := d.SubmitSplit(context.Background(), test.Playbook, "inv", test.Shards,
@@ -147,8 +148,8 @@ func TestSubmitSplitRefusesWhatSubmitRefuses(t *testing.T) {
 func TestSubmitSplitWithoutAHostListerIsRefused(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
-	// okRunner is a plain runner with no Hosts method, which is exactly the case.
-	d := New(store, okRunner(), nil, WithNoJanitor())
+	// dispatchtest.OKRunner is a plain runner with no Hosts method, which is exactly the case.
+	d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor())
 	defer d.Close()
 
 	got, err := d.SubmitSplit(context.Background(), "site.yml", "inv", 4)
@@ -185,7 +186,7 @@ func TestSubmitSplitFallsBackToOneRunForASmallInventory(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			store := run.NewMemStore()
-			d := New(store, &fakeRunnerLister{hosts: test.Hosts}, nil, WithNoJanitor(),
+			d := New(store, &dispatchtest.FakeRunnerLister{HostNames: test.Hosts}, nil, WithNoJanitor(),
 				WithClaimInterval(time.Millisecond))
 			defer d.Close()
 
@@ -305,7 +306,7 @@ func TestConcurrentSubmitsAllReachTheStore(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil, WithNoJanitor(), WithWorkers(4),
+	d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor(), WithWorkers(4),
 		WithClaimInterval(time.Millisecond))
 	defer d.Close()
 
@@ -345,7 +346,7 @@ func TestConcurrentSubmitsAllReachTheStore(t *testing.T) {
 		t.Errorf("%d distinct runs from %d submissions", len(unique), submissions)
 	}
 	for _, id := range ids {
-		waitTerminal(t, store, id)
+		dispatchtest.WaitTerminal(t, store, id)
 	}
 }
 

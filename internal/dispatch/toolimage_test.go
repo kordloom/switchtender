@@ -6,6 +6,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -38,7 +39,7 @@ func TestAHostToolNeverRecordsAnImageItDidNotEnter(t *testing.T) {
 
 	// A request that names an image for a tool that cannot enter one is refused, by name.
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil, WithNoJanitor(),
+	d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor(),
 		WithClaimGate(func() error { return errNoClaimingInThisTest }))
 	defer d.Close()
 	_, err := d.Submit(ctx, "", "inv", run.WithTool(hostTool), run.WithCommand("id"),
@@ -50,7 +51,7 @@ func TestAHostToolNeverRecordsAnImageItDidNotEnter(t *testing.T) {
 
 	// And a server-wide default image, which the request never asked for, is not recorded on one.
 	defaulted := run.NewMemStore()
-	dd := New(defaulted, okRunner(), nil, WithNoJanitor(),
+	dd := New(defaulted, dispatchtest.OKRunner(), nil, WithNoJanitor(),
 		WithDefaultImage("alpine@sha256:deadbeef"))
 	defer dd.Close()
 	created, err := dd.Submit(ctx, "", "inv", run.WithTool(hostTool), run.WithCommand("id"))

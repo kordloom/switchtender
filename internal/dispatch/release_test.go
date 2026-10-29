@@ -12,6 +12,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/binding"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -107,7 +108,7 @@ func TestAReleaseIsRecordedOnceUnderAFixedID(t *testing.T) {
 			ctx := context.Background()
 			key := bndKey(t)
 			store, chain := run.NewMemStore(), &lossyChain{Store: audit.NewMemStore()}
-			d := New(store, okRunner(), nil, WithNoJanitor(), WithAudits(chain), WithBindingKey(key),
+			d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor(), WithAudits(chain), WithBindingKey(key),
 				WithQueues([]string{"decisions"}))
 			t.Cleanup(d.Close)
 			steps := []run.PipelineStep{

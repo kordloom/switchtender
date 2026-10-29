@@ -13,6 +13,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -113,7 +114,7 @@ func newClaimInstall(t *testing.T, keyed bool) *claimInstall {
 	if keyed {
 		opts = append(opts, WithBindingKey(bndKey(t)))
 	}
-	in.d = New(in.store, okRunner(), nil, opts...)
+	in.d = New(in.store, dispatchtest.OKRunner(), nil, opts...)
 	t.Cleanup(in.d.Close)
 	return in
 }

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -45,7 +46,7 @@ func (h *stallHold) wait(t *testing.T) {
 	t.Helper()
 	select {
 	case <-h.reached:
-	case <-time.After(waitBudget):
+	case <-time.After(dispatchtest.WaitBudget):
 		t.Fatal("the workflow never reached its park")
 	}
 }
@@ -79,7 +80,7 @@ func stallAgeLease(t *testing.T, store run.Store, id string) {
 // and returns it.
 func listedStep(t *testing.T, store run.Store, id, name string) *run.Run {
 	t.Helper()
-	deadline := time.Now().Add(waitBudget)
+	deadline := time.Now().Add(dispatchtest.WaitBudget)
 	for time.Now().Before(deadline) {
 		pending, err := run.PendingApprovalSteps(context.Background(), store, id)
 		if err != nil {
@@ -168,7 +169,7 @@ func TestStalledCoordinatorLeavesAWorkflowAnotherReplicaResumed(t *testing.T) {
 	t.Cleanup(runner.free)
 	select {
 	case <-runner.started:
-	case <-time.After(waitBudget):
+	case <-time.After(dispatchtest.WaitBudget):
 		t.Fatal("the second replica never resumed the workflow")
 	}
 	signoff := listedStep(t, store, parent.ID, "signoff")
@@ -185,7 +186,7 @@ func TestStalledCoordinatorLeavesAWorkflowAnotherReplicaResumed(t *testing.T) {
 	if _, err := second.DecideStep(ctx, signoff.ID, stallApproval()); err != nil {
 		t.Fatalf("DecideStep(signoff) error = %v", err)
 	}
-	if got := waitTerminal(t, store, parent.ID); got.Status != run.StatusSucceeded {
+	if got := dispatchtest.WaitTerminal(t, store, parent.ID); got.Status != run.StatusSucceeded {
 		t.Errorf("workflow = %q (%s), want succeeded", got.Status, got.Error)
 	}
 	for _, command := range []string{"build", "deploy", "finish"} {
@@ -234,7 +235,7 @@ func TestSweepDoesNotResumeUnderAHeldCoordinator(t *testing.T) {
 	}
 
 	hold.free()
-	if got := waitTerminal(t, store, parent.ID); got.Status != run.StatusSucceeded {
+	if got := dispatchtest.WaitTerminal(t, store, parent.ID); got.Status != run.StatusSucceeded {
 		t.Errorf("workflow = %q (%s), want succeeded", got.Status, got.Error)
 	}
 	if rec.count("deploy") != 1 || rec.count("notify") != 0 {

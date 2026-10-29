@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -93,7 +94,7 @@ func TestFinishedRunsLeaveNoCancelEntries(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Submit() error = %v", err)
 		}
-		waitTerminal(t, store, r.ID)
+		dispatchtest.WaitTerminal(t, store, r.ID)
 	}
 
 	deadline := time.Now().Add(5 * time.Second)

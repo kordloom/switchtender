@@ -10,6 +10,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -67,7 +68,7 @@ func TestLimitHostsIsAnsiblesOwnReading(t *testing.T) {
 // limit.
 func TestLimitHostsNeedsAnsibleInventory(t *testing.T) {
 	t.Parallel()
-	d := New(run.NewMemStore(), okRunner(), zap.NewNop())
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop())
 	t.Cleanup(d.Close)
 	if _, err := d.LimitHosts(context.Background(), limitInventory, "web"); !errors.Is(err,
 		inventory.ErrResolve) {

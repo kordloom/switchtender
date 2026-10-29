@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -75,17 +76,17 @@ func TestRedTeamAgentDryRunExecutesChangeFreeGap(t *testing.T) {
 		// WantHeld is whether the dry run waits for a person.
 		WantHeld bool
 	}{{ // Test 0: An agent's pipe-lookup dry run is held.
-		Tool: run.ToolAnsible, Playbook: pipeLookupPlaybook, Opts: agentOpts(), WantHeld: true,
+		Tool: run.ToolAnsible, Playbook: pipeLookupPlaybook, Opts: dispatchtest.AgentOpts(), WantHeld: true,
 	}, { // Test 1: The same dry run from a person goes ahead, the control for test 0.
-		Tool: run.ToolAnsible, Playbook: pipeLookupPlaybook, Opts: personOpts(), WantHeld: false,
+		Tool: run.ToolAnsible, Playbook: pipeLookupPlaybook, Opts: dispatchtest.PersonOpts(), WantHeld: false,
 	}, { // Test 2: An agent's Lambda-invoking plan is held.
-		Tool: run.ToolTerraform, Config: lambdaConfig, Opts: agentOpts(), WantHeld: true,
+		Tool: run.ToolTerraform, Config: lambdaConfig, Opts: dispatchtest.AgentOpts(), WantHeld: true,
 	}, { // Test 3: An agent's http POST plan is held.
-		Tool: run.ToolTerraform, Config: httpPostConfig, Opts: agentOpts(), WantHeld: true,
+		Tool: run.ToolTerraform, Config: httpPostConfig, Opts: dispatchtest.AgentOpts(), WantHeld: true,
 	}, { // Test 4: An agent's plugin-tool dry run is held, since the gate cannot scan it.
-		Tool: redteamPluginTool, Command: "do-stuff", Opts: agentOpts(), WantHeld: true,
+		Tool: redteamPluginTool, Command: "do-stuff", Opts: dispatchtest.AgentOpts(), WantHeld: true,
 	}, { // Test 5: The person's plugin-tool dry run goes ahead, the control for test 4.
-		Tool: redteamPluginTool, Command: "do-stuff", Opts: personOpts(), WantHeld: false,
+		Tool: redteamPluginTool, Command: "do-stuff", Opts: dispatchtest.PersonOpts(), WantHeld: false,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -99,11 +100,11 @@ func TestRedTeamAgentDryRunExecutesChangeFreeGap(t *testing.T) {
 			switch test.Tool {
 			case run.ToolAnsible:
 				dir := t.TempDir()
-				writeFiles(t, dir, map[string]string{"site.yml": test.Playbook})
+				dispatchtest.WriteFiles(t, dir, map[string]string{"site.yml": test.Playbook})
 				playbook = filepath.Join(dir, "site.yml")
 			case run.ToolTerraform:
 				dir := t.TempDir()
-				writeFiles(t, dir, map[string]string{"main.tf": test.Config})
+				dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": test.Config})
 				opts = append(opts, run.WithCommand(dir))
 			default:
 				opts = append(opts, run.WithCommand(test.Command))
@@ -121,7 +122,7 @@ func TestRedTeamAgentDryRunExecutesChangeFreeGap(t *testing.T) {
 				t.Errorf("held by %q, want the built-in agent hold", got.HeldByPolicy)
 			}
 			if !test.WantHeld {
-				if final := waitTerminal(t, store, got.ID); final.Status != run.StatusSucceeded {
+				if final := dispatchtest.WaitTerminal(t, store, got.ID); final.Status != run.StatusSucceeded {
 					t.Errorf("status = %q, want the control run to have gone ahead", final.Status)
 				}
 			}

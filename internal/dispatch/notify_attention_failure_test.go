@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	named "github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -81,7 +82,7 @@ func TestOutboxPagesANamedTargetAttachedForAttention(t *testing.T) {
 				nil)
 			outbox := named.NewOutbox(targets, router, plainSealer{}, nil,
 				named.WithPoll(10*time.Millisecond))
-			d := New(run.NewMemStore(), okRunner(), nil, WithNoJanitor(),
+			d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithNoJanitor(),
 				WithNotificationOutbox(outbox), WithNotifyClient(http.DefaultClient))
 			d.pagerDutyEndpoint = pager.URL
 			t.Cleanup(d.Close)

@@ -14,6 +14,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/inventorytest"
 	"github.com/kordloom/switchtender/internal/outcome"
@@ -249,7 +250,7 @@ func TestComposedRunRecordsAndIsHeldToItsHosts(t *testing.T) {
 	}
 	close(gate)
 	d.wake()
-	done := waitTerminal(t, store, created.ID)
+	done := dispatchtest.WaitTerminal(t, store, created.ID)
 	if done.Status != run.StatusSucceeded {
 		t.Fatalf("run status = %q (%s), want succeeded", done.Status, done.Error)
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -46,7 +47,7 @@ func TestAHoldCarriesTheRulesReasonRequirement(t *testing.T) {
 					t.Fatalf("Save() error = %v", err)
 				}
 			}
-			d := New(run.NewMemStore(), okRunner(), zap.NewNop(), WithPolicies(policies),
+			d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithPolicies(policies),
 				WithNoJanitor())
 			t.Cleanup(d.Close)
 			held, err := d.Submit(ctx, "", "", run.WithTool(run.ToolBash), run.WithCommand("deploy"),

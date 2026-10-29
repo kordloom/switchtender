@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -33,25 +34,25 @@ func TestADestroyLimitReleasesNoOtherRun(t *testing.T) {
 		// WantHeldBy names what holds the run.
 		WantHeldBy string
 	}{{ // Test 0: A person's bash run under a rule holding everything stays held.
-		Rules: []*policy.Policy{holdAll, limit}, Opts: append(personOpts(), bash...),
+		Rules: []*policy.Policy{holdAll, limit}, Opts: append(dispatchtest.PersonOpts(), bash...),
 		WantHeldBy: "hold everything",
 	}, { // Test 1: The apply a plan proposed stays held beside a Terraform destroy limit.
-		Rules: []*policy.Policy{holdAll, terraformLimit}, Opts: append(personOpts(), proposed...),
+		Rules: []*policy.Policy{holdAll, terraformLimit}, Opts: append(dispatchtest.PersonOpts(), proposed...),
 		WantHeldBy: "hold everything",
 	}, { // Test 2: An agent's run stays held by default.
-		Rules: []*policy.Policy{limit}, Opts: append(agentOpts(), bash...),
+		Rules: []*policy.Policy{limit}, Opts: append(dispatchtest.AgentOpts(), bash...),
 		WantHeldBy: policy.AgentDefaultName,
 	}, { // Test 3: With no destroy limit in force the person's run is held, the control.
-		Rules: []*policy.Policy{holdAll}, Opts: append(personOpts(), bash...),
+		Rules: []*policy.Policy{holdAll}, Opts: append(dispatchtest.PersonOpts(), bash...),
 		WantHeldBy: "hold everything",
 	}, { // Test 4: So is the proposed apply, the control.
-		Rules: []*policy.Policy{holdAll}, Opts: append(personOpts(), proposed...),
+		Rules: []*policy.Policy{holdAll}, Opts: append(dispatchtest.PersonOpts(), proposed...),
 		WantHeldBy: "hold everything",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			d := newAgentHoldDispatcher(t, run.NewMemStore(), rulesHolding(t, test.Rules...))
+			d := newAgentHoldDispatcher(t, run.NewMemStore(), dispatchtest.RulesHolding(t, test.Rules...))
 			got, err := d.Submit(context.Background(), "", "", test.Opts...)
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)

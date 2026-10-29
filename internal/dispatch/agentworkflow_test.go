@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -84,12 +85,12 @@ func TestAnAgentsWorkflowCannotApply(t *testing.T) {
 			t.Parallel()
 			store := run.NewMemStore()
 			audits := audit.NewMemStore()
-			d := New(store, okRunner(), zap.NewNop(), WithNoJanitor(), WithAudits(audits),
-				WithPolicies(rulesHolding(t, test.Rules...)))
+			d := New(store, dispatchtest.OKRunner(), zap.NewNop(), WithNoJanitor(), WithAudits(audits),
+				WithPolicies(dispatchtest.RulesHolding(t, test.Rules...)))
 			t.Cleanup(d.Close)
 			ctx, opts := boundAgent("dev-lead")
 			if test.Person {
-				ctx, opts = context.Background(), personOpts()
+				ctx, opts = context.Background(), dispatchtest.PersonOpts()
 			}
 			if test.DryRun {
 				opts = append(opts, run.WithDryRun(true))

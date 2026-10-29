@@ -9,6 +9,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/outcome"
+	"github.com/kordloom/switchtender/internal/outcometest"
 	"github.com/kordloom/switchtender/internal/receipt"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -81,7 +82,7 @@ func TestAReceiptForASecretAnswerVerifiesAndDisclosesOnlyTheName(t *testing.T) {
 			"would prove nothing about which answer was approved", r.SealedDigests)
 	}
 
-	report := verifyWithLoomSeal(t, loomsealRepo(t), res.Signed)
+	report := outcometest.VerifyWithLoomSeal(t, outcometest.LoomsealRepo(t), res.Signed)
 	if !report.OK {
 		t.Fatalf("loomseal refused a receipt for a run with a secret answer: %v", report.Problems)
 	}

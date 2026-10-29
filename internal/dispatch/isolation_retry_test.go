@@ -14,6 +14,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -75,7 +76,7 @@ func TestAFailingShardDoesNotStopItsSiblings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
-	gotParent := waitTerminal(t, store, parent.ID)
+	gotParent := dispatchtest.WaitTerminal(t, store, parent.ID)
 	if gotParent.Status != run.StatusFailed {
 		t.Errorf("split status = %q, want failed: one shard failed", gotParent.Status)
 	}
@@ -146,7 +147,7 @@ func TestOneShardFailureLeavesTheOthersOwnEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
-	waitTerminal(t, store, parent.ID)
+	dispatchtest.WaitTerminal(t, store, parent.ID)
 
 	shards, err := store.Shards(ctx, parent.ID)
 	if err != nil {
@@ -183,7 +184,7 @@ func TestRetryFailedShardsRetriesAnOrphanUnderAHealthyParent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, &fakeRunnerLister{hosts: []string{"web01", "web02", "web03"}}, nil,
+	d := New(store, &dispatchtest.FakeRunnerLister{HostNames: []string{"web01", "web02", "web03"}}, nil,
 		WithNoJanitor())
 	defer d.Close()
 
@@ -283,7 +284,7 @@ func TestRetryFailedShardsRefusals(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
 			store := run.NewMemStore()
-			d := New(store, &fakeRunnerLister{hosts: []string{"web01"}}, nil, WithNoJanitor())
+			d := New(store, &dispatchtest.FakeRunnerLister{HostNames: []string{"web01"}}, nil, WithNoJanitor())
 			defer d.Close()
 
 			parentID := fmt.Sprintf("run_parent_%d", testNum)
@@ -378,7 +379,7 @@ func TestRelaunchFailedHostsRefusals(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
 			store := run.NewMemStore()
-			d := New(store, okRunner(), nil, WithNoJanitor())
+			d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor())
 			defer d.Close()
 
 			id := fmt.Sprintf("run_src_%d", testNum)
@@ -401,7 +402,7 @@ func TestRelaunchFailedHostsRefusals(t *testing.T) {
 	t.Run("test 5", func(t *testing.T) {
 		t.Parallel()
 		store := run.NewMemStore()
-		d := New(store, okRunner(), nil, WithNoJanitor())
+		d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor())
 		defer d.Close()
 		if _, err := d.RelaunchFailedHosts(context.Background(), "run_absent", run.WithActor("casey"), run.WithActorType("session")); !errors.Is(err, run.ErrNotFound) {
 			t.Errorf("RelaunchFailedHosts() error = %v, want %v", err, run.ErrNotFound)
@@ -417,7 +418,7 @@ func TestRelaunchFailedHostsTargetsOnlyTheHostsThatBroke(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil, WithNoJanitor(), WithClaimInterval(time.Millisecond))
+	d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor(), WithClaimInterval(time.Millisecond))
 	defer d.Close()
 
 	src := &run.Run{
@@ -465,7 +466,7 @@ func TestRelaunchFailedHostsDedupesADoubleClick(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil, WithNoJanitor(), WithClaimInterval(time.Millisecond))
+	d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor(), WithClaimInterval(time.Millisecond))
 	defer d.Close()
 
 	src := &run.Run{
@@ -495,7 +496,7 @@ func TestRetryFailedShardsDedupesConcurrentClicks(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, &fakeRunnerLister{hosts: []string{"web01"}}, nil, WithNoJanitor(),
+	d := New(store, &dispatchtest.FakeRunnerLister{HostNames: []string{"web01"}}, nil, WithNoJanitor(),
 		WithClaimInterval(time.Millisecond))
 	defer d.Close()
 

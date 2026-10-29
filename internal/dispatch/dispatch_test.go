@@ -19,42 +19,18 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
-
-// waitBudget bounds how long the polling helpers below wait for a run to settle.
-//
-// A fixed wall-clock budget has to cover the slowest machine the suite runs on, not this one. Ten
-// seconds was enough locally and not enough for the largest plan buffer under -race on a loaded
-// two-core runner, so the release gate failed on timing rather than on behavior. The budget only
-// bounds how long a genuinely stuck run takes to report, so setting it well clear of the slow case
-// costs nothing.
-const waitBudget = 60 * time.Second
-
-// waitTerminal polls the store until the run reaches a terminal state or the deadline passes.
-func waitTerminal(t *testing.T, store run.Store, id string) *run.Run {
-	t.Helper()
-	deadline := time.Now().Add(waitBudget)
-	for {
-		r, err := store.Get(context.Background(), id)
-		if err == nil && r.Status.Terminal() {
-			return r
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("run %s did not reach a terminal state", id)
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-}
 
 // waitPublished polls until the publisher holds want events under id, or fails at the deadline. The
 // coordinator echoes child events on its own tick, so a terminal parent does not yet mean the last
 // echo has landed; asserting immediately made this a flaky check under runner load.
 func waitPublished(t *testing.T, pub *capturingPublisher, id string, want int) {
 	t.Helper()
-	deadline := time.Now().Add(waitBudget)
+	deadline := time.Now().Add(dispatchtest.WaitBudget)
 	for {
 		if pub.eventCount(id) >= want {
 			return
@@ -107,7 +83,7 @@ func TestDispatcherExecute(t *testing.T) {
 				t.Fatalf("Submit() error = %v", err)
 			}
 
-			got := waitTerminal(t, store, created.ID)
+			got := dispatchtest.WaitTerminal(t, store, created.ID)
 			if got.Status != test.WantStatus {
 				t.Errorf("Status = %q, want %q", got.Status, test.WantStatus)
 			}
@@ -131,16 +107,6 @@ func TestDispatcherExecute(t *testing.T) {
 	}
 }
 
-// okRunner reports success without doing anything, for tests that exercise submission rather than
-// execution output.
-func okRunner() roundhouse.Runner {
-	return roundhouse.RunnerFunc(
-		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
-			return roundhouse.Result{ExitCode: 0}, nil
-		},
-	)
-}
-
 // TestSubmitStampsSubmitterOrg proves an objectless run is stamped with the submitting actor's org
 // from the request context, so the run-scoped authorizer has something to confine it by. Without the
 // stamp an inline script, which names no project, inventory, or credential, would be an objectless
@@ -153,7 +119,7 @@ func TestSubmitStampsSubmitterOrg(t *testing.T) {
 	t.Run("single inline run", func(t *testing.T) {
 		t.Parallel()
 		store := run.NewMemStore()
-		d := New(store, okRunner(), nil, WithNotifyClient(http.DefaultClient))
+		d := New(store, dispatchtest.OKRunner(), nil, WithNotifyClient(http.DefaultClient))
 		defer d.Close()
 		created, err := d.Submit(ctx, "", "", run.WithTool(run.ToolBash), run.WithCommand("echo hi"))
 		if err != nil {
@@ -172,7 +138,7 @@ func TestSubmitStampsSubmitterOrg(t *testing.T) {
 	t.Run("explicit org wins over context", func(t *testing.T) {
 		t.Parallel()
 		store := run.NewMemStore()
-		d := New(store, okRunner(), nil, WithNotifyClient(http.DefaultClient))
+		d := New(store, dispatchtest.OKRunner(), nil, WithNotifyClient(http.DefaultClient))
 		defer d.Close()
 		created, err := d.Submit(ctx, "", "", run.WithTool(run.ToolBash), run.WithCommand("echo hi"),
 			run.WithOrgID("org_explicit"))
@@ -195,7 +161,7 @@ func TestSubmitStampsSubmitterOrg(t *testing.T) {
 func TestSubmitIdempotency(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil, WithNotifyClient(http.DefaultClient))
+	d := New(store, dispatchtest.OKRunner(), nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 	ctx := context.Background()
 
@@ -246,7 +212,7 @@ func TestSubmitIdempotency(t *testing.T) {
 func TestSubmitIdempotencyConcurrent(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil, WithNotifyClient(http.DefaultClient))
+	d := New(store, dispatchtest.OKRunner(), nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	const n = 8
@@ -291,7 +257,7 @@ func TestSubmitIdempotencyConcurrent(t *testing.T) {
 func TestSubmitPipelineIdempotency(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil, WithNotifyClient(http.DefaultClient))
+	d := New(store, dispatchtest.OKRunner(), nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 	ctx := context.Background()
 	steps := []run.PipelineStep{{Name: "s1", Playbook: "step.yml"}}
@@ -337,7 +303,7 @@ func TestDispatcherStoresEvents(t *testing.T) {
 		t.Fatalf("Submit() error = %v", err)
 	}
 
-	waitTerminal(t, store, created.ID)
+	dispatchtest.WaitTerminal(t, store, created.ID)
 	events, err := store.Events(context.Background(), created.ID)
 	if err != nil {
 		t.Fatalf("Events() error = %v", err)
@@ -372,7 +338,7 @@ func TestDispatcherBashRun(t *testing.T) {
 		t.Fatalf("Submit() error = %v", err)
 	}
 
-	got := waitTerminal(t, store, created.ID)
+	got := dispatchtest.WaitTerminal(t, store, created.ID)
 	if got.Status != run.StatusSucceeded {
 		t.Errorf("Status = %q, want succeeded", got.Status)
 	}
@@ -485,22 +451,6 @@ func TestWaitChildrenReturnsPromptlyOnCancel(t *testing.T) {
 	}
 }
 
-// fakeRunnerLister is a Runner that also lists a fixed set of hosts for split tests.
-type fakeRunnerLister struct {
-	// hosts is returned by Hosts.
-	hosts []string
-}
-
-// Run reports success without doing anything.
-func (f *fakeRunnerLister) Run(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
-	return roundhouse.Result{ExitCode: 0}, nil
-}
-
-// Hosts returns the fixed host set.
-func (f *fakeRunnerLister) Hosts(context.Context, string, string) ([]string, error) {
-	return f.hosts, nil
-}
-
 func TestPartition(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -556,7 +506,7 @@ func TestPartition(t *testing.T) {
 func TestDispatcherSubmitSplit(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
-	d := New(store, &fakeRunnerLister{hosts: []string{"a", "b", "c", "d"}}, nil, WithNotifyClient(http.DefaultClient))
+	d := New(store, &dispatchtest.FakeRunnerLister{HostNames: []string{"a", "b", "c", "d"}}, nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	parent, err := d.SubmitSplit(context.Background(), "play.yml", "inv", 2)
@@ -567,7 +517,7 @@ func TestDispatcherSubmitSplit(t *testing.T) {
 		t.Fatalf("parent ShardCount = %v, want 2", parent.ShardCount)
 	}
 
-	got := waitTerminal(t, store, parent.ID)
+	got := dispatchtest.WaitTerminal(t, store, parent.ID)
 	if got.Status != run.StatusSucceeded {
 		t.Errorf("parent status = %q, want succeeded", got.Status)
 	}
@@ -605,7 +555,7 @@ func TestDispatcherSubmitSplit(t *testing.T) {
 func TestDispatcherSplitClampsToMaxShards(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
-	d := New(store, &fakeRunnerLister{hosts: []string{"a", "b", "c", "d"}}, nil, WithMaxShards(2), WithNotifyClient(http.DefaultClient))
+	d := New(store, &dispatchtest.FakeRunnerLister{HostNames: []string{"a", "b", "c", "d"}}, nil, WithMaxShards(2), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	parent, err := d.SubmitSplit(context.Background(), "play.yml", "inv", 4)
@@ -641,7 +591,7 @@ func TestDispatcherSplitFallsBackAndErrors(t *testing.T) {
 
 	// One shard falls back to a single non-shard run.
 	store := run.NewMemStore()
-	d2 := New(store, &fakeRunnerLister{hosts: []string{"a", "b"}}, nil, WithNotifyClient(http.DefaultClient))
+	d2 := New(store, &dispatchtest.FakeRunnerLister{HostNames: []string{"a", "b"}}, nil, WithNotifyClient(http.DefaultClient))
 	defer d2.Close()
 	single, err := d2.SubmitSplit(context.Background(), "play.yml", "inv", 1)
 	if err != nil {
@@ -757,10 +707,10 @@ func TestDispatcherEchoesChildEventsToParent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
-	waitTerminal(t, store, parent.ID)
+	dispatchtest.WaitTerminal(t, store, parent.ID)
 	waitPublished(t, pub, parent.ID, 2)
 
-	deadline := time.Now().Add(waitBudget)
+	deadline := time.Now().Add(dispatchtest.WaitBudget)
 	for {
 		parentClosed := false
 		for _, id := range pub.closedIDs() {
@@ -792,7 +742,7 @@ func TestDispatcherEchoesStepEventsToPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
-	waitTerminal(t, store, parent.ID)
+	dispatchtest.WaitTerminal(t, store, parent.ID)
 	waitPublished(t, pub, parent.ID, 2)
 }
 
@@ -807,7 +757,7 @@ func TestDispatcherRetryFailedShards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
-	if got := waitTerminal(t, store, parent.ID); got.Status != run.StatusFailed {
+	if got := dispatchtest.WaitTerminal(t, store, parent.ID); got.Status != run.StatusFailed {
 		t.Fatalf("parent status = %q, want failed", got.Status)
 	}
 
@@ -840,7 +790,7 @@ func TestDispatcherRetryFailedShards(t *testing.T) {
 		t.Errorf("retry ShardCount = %v, want 1", retry.ShardCount)
 	}
 
-	if got := waitTerminal(t, store, retry.ID); got.Status != run.StatusSucceeded {
+	if got := dispatchtest.WaitTerminal(t, store, retry.ID); got.Status != run.StatusSucceeded {
 		t.Errorf("retry status = %q, want succeeded", got.Status)
 	}
 	retryShards, err := store.Shards(context.Background(), retry.ID)
@@ -864,7 +814,7 @@ func TestDispatcherRetryFailedShardsErrors(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, &fakeRunnerLister{}, nil, WithNotifyClient(http.DefaultClient))
+	d := New(store, &dispatchtest.FakeRunnerLister{}, nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	code := 0
@@ -929,7 +879,7 @@ func TestDispatcherCancel(t *testing.T) {
 	if !d.Cancel(r.ID) {
 		t.Fatal("Cancel returned false for a running run")
 	}
-	got := waitTerminal(t, store, r.ID)
+	got := dispatchtest.WaitTerminal(t, store, r.ID)
 	if got.Status != run.StatusCanceled {
 		t.Errorf("status = %q, want canceled", got.Status)
 	}
@@ -969,7 +919,7 @@ func TestDispatcherSubmitPipeline(t *testing.T) {
 		t.Errorf("parent kind = %q, want %q", parent.Kind, run.KindPipeline)
 	}
 
-	got := waitTerminal(t, store, parent.ID)
+	got := dispatchtest.WaitTerminal(t, store, parent.ID)
 	if got.Status != run.StatusSucceeded {
 		t.Errorf("parent status = %q, want succeeded", got.Status)
 	}
@@ -996,7 +946,7 @@ func TestDispatcherPipelineStopOnFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
-	got := waitTerminal(t, store, parent.ID)
+	got := dispatchtest.WaitTerminal(t, store, parent.ID)
 	if got.Status != run.StatusFailed {
 		t.Errorf("parent status = %q, want failed", got.Status)
 	}
@@ -1020,7 +970,7 @@ func TestDispatcherPipelineContinueOnFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
-	got := waitTerminal(t, store, parent.ID)
+	got := dispatchtest.WaitTerminal(t, store, parent.ID)
 	if got.Status != run.StatusFailed {
 		t.Errorf("parent status = %q, want failed since a step failed", got.Status)
 	}
@@ -1092,7 +1042,7 @@ func TestDispatcherNotifiesWebhook(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	waitTerminal(t, store, created.ID)
+	dispatchtest.WaitTerminal(t, store, created.ID)
 
 	select {
 	case got := <-received:
@@ -1153,7 +1103,7 @@ func TestDispatcherEmailsOnFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	waitTerminal(t, store, created.ID)
+	dispatchtest.WaitTerminal(t, store, created.ID)
 
 	select {
 	case subject := <-emailer.sent:
@@ -1180,7 +1130,7 @@ func TestDispatcherSkipsEmailOnSuccessWhenFailureOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	waitTerminal(t, store, created.ID)
+	dispatchtest.WaitTerminal(t, store, created.ID)
 
 	select {
 	case subject := <-emailer.sent:
@@ -1221,7 +1171,7 @@ func TestRunImageReachesSpec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	waitTerminal(t, store, created.ID)
+	dispatchtest.WaitTerminal(t, store, created.ID)
 	spec := <-got
 	if spec.Image != "ghcr.io/acme/ee:9" {
 		t.Errorf("spec.Image = %q, want ghcr.io/acme/ee:9", spec.Image)
@@ -1237,7 +1187,7 @@ func TestRunImageReachesSpec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit(bash+image) error = %v, want nil", err)
 	}
-	waitTerminal(t, store, created.ID)
+	dispatchtest.WaitTerminal(t, store, created.ID)
 	spec = <-got
 	if run.NormalizeTool(spec.Tool) != run.ToolBash || spec.Image != "ghcr.io/acme/ee:9" ||
 		spec.Command != "echo hi" {
@@ -1266,7 +1216,7 @@ func TestDefaultImageFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	waitTerminal(t, store, created.ID)
+	dispatchtest.WaitTerminal(t, store, created.ID)
 	if spec := <-got; spec.Image != "ghcr.io/acme/default:1" {
 		t.Errorf("spec.Image = %q, want ghcr.io/acme/default:1", spec.Image)
 	}
@@ -1277,7 +1227,7 @@ func TestDefaultImageFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit(pinned) error = %v", err)
 	}
-	waitTerminal(t, store, created.ID)
+	dispatchtest.WaitTerminal(t, store, created.ID)
 	if spec := <-got; spec.Image != "ghcr.io/acme/pinned:2" {
 		t.Errorf("spec.Image = %q, want ghcr.io/acme/pinned:2", spec.Image)
 	}
@@ -1305,7 +1255,7 @@ func TestDispatcherRunTimeout(t *testing.T) {
 		t.Fatalf("Submit() error = %v", err)
 	}
 	<-started
-	got := waitTerminal(t, store, created.ID)
+	got := dispatchtest.WaitTerminal(t, store, created.ID)
 	if got.Status != run.StatusFailed {
 		t.Errorf("status = %q, want failed", got.Status)
 	}
@@ -1332,7 +1282,7 @@ func TestDispatcherPerRunTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	got := waitTerminal(t, store, created.ID)
+	got := dispatchtest.WaitTerminal(t, store, created.ID)
 	if got.Status != run.StatusFailed {
 		t.Errorf("status = %q, want failed from the per-run timeout", got.Status)
 	}
@@ -1362,7 +1312,7 @@ func TestDispatcherPerRunNotification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	waitTerminal(t, store, created.ID)
+	dispatchtest.WaitTerminal(t, store, created.ID)
 
 	deadline := time.Now().Add(3 * time.Second)
 	for atomic.LoadInt32(&hits) == 0 && time.Now().Before(deadline) {
@@ -1382,7 +1332,7 @@ func TestSplitShardsInheritExecution(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, &fakeRunnerLister{hosts: []string{"web01", "web02", "web03", "web04"}}, nil, WithNotifyClient(http.DefaultClient))
+	d := New(store, &dispatchtest.FakeRunnerLister{HostNames: []string{"web01", "web02", "web03", "web04"}}, nil, WithNotifyClient(http.DefaultClient))
 
 	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2,
 		run.WithExtraVars(map[string]any{"env": "prod"}),
@@ -1428,7 +1378,7 @@ func TestRetryShardsInheritExecution(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, &fakeRunnerLister{hosts: []string{"a", "b", "c", "d"}}, nil, WithNotifyClient(http.DefaultClient))
+	d := New(store, &dispatchtest.FakeRunnerLister{HostNames: []string{"a", "b", "c", "d"}}, nil, WithNotifyClient(http.DefaultClient))
 
 	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2,
 		run.WithExtraVars(map[string]any{"env": "prod"}),
@@ -1455,7 +1405,7 @@ func TestRetryShardsInheritExecution(t *testing.T) {
 			t.Fatalf("Save(shard) error = %v", err)
 		}
 	}
-	waitForStatus(t, store, parent.ID, run.StatusFailed)
+	dispatchtest.WaitForStatus(t, store, parent.ID, run.StatusFailed)
 
 	retry, err := d.RetryFailedShards(ctx, parent.ID)
 	if err != nil {
@@ -1532,7 +1482,7 @@ func TestClaimIdleBackoff(t *testing.T) {
 	t.Parallel()
 	const base = 50 * time.Millisecond
 	rec := &pollRecorder{Store: run.NewMemStore()}
-	d := New(rec, okRunner(), nil, WithClaimInterval(base), WithNoJanitor(), WithNotifyClient(http.DefaultClient))
+	d := New(rec, dispatchtest.OKRunner(), nil, WithClaimInterval(base), WithNoJanitor(), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	// Long enough for the wait to reach its ceiling several times over.
@@ -1555,7 +1505,7 @@ func TestClaimIdleBackoff(t *testing.T) {
 // not stay in step and land their empty claims on the same instant.
 func TestClaimJitter(t *testing.T) {
 	t.Parallel()
-	d := New(run.NewMemStore(), okRunner(), nil,
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil,
 		WithClaimInterval(DefaultClaimInterval), WithNoJanitor(),
 		WithNotifyClient(http.DefaultClient))
 	defer d.Close()
@@ -1598,7 +1548,7 @@ func TestClaimBackoffResetsOnWork(t *testing.T) {
 		}
 		return nil, run.ErrNonePending
 	}
-	d := New(rec, okRunner(), nil, WithClaimInterval(base), WithNoJanitor(), WithNotifyClient(http.DefaultClient))
+	d := New(rec, dispatchtest.OKRunner(), nil, WithClaimInterval(base), WithNoJanitor(), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	time.Sleep(4 * time.Second)
@@ -1629,7 +1579,7 @@ func TestRetryFailedShardsDedupes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
-	if got := waitTerminal(t, store, parent.ID); got.Status != run.StatusFailed {
+	if got := dispatchtest.WaitTerminal(t, store, parent.ID); got.Status != run.StatusFailed {
 		t.Fatalf("parent status = %q, want failed", got.Status)
 	}
 
@@ -1671,14 +1621,14 @@ func TestEventCaptureFailureWarnsOnRun(t *testing.T) {
 	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "not-a-directory"))
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil, WithNoJanitor(), WithNotifyClient(http.DefaultClient))
+	d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor(), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	created, err := d.Submit(ctx, "site.yml", "inv.ini")
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	got := waitTerminal(t, store, created.ID)
+	got := dispatchtest.WaitTerminal(t, store, created.ID)
 	if got.Status != run.StatusSucceeded {
 		t.Fatalf("status = %q, want succeeded: capture failing must not fail the run", got.Status)
 	}
@@ -1860,7 +1810,7 @@ func TestExecutedImageRecordedOnRun(t *testing.T) {
 			if err != nil {
 				t.Fatalf("test %d: Submit() error = %v", testNum, err)
 			}
-			got := waitTerminal(t, store, created.ID)
+			got := dispatchtest.WaitTerminal(t, store, created.ID)
 			if diff := cmp.Diff(test.WantImage, got.Image); diff != "" {
 				t.Errorf("test %d: recorded image mismatch (-want +got):\n%s", testNum, diff)
 			}

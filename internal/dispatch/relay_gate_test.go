@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/run"
@@ -255,7 +256,7 @@ func TestSubmitResolvesToTheWinnerOfAKeyRace(t *testing.T) {
 		t.Fatalf("Save(winner) error = %v", err)
 	}
 	store := &dupKeyStore{Store: base, winner: winner}
-	d := New(store, okRunner(), zap.NewNop(), WithNoJanitor())
+	d := New(store, dispatchtest.OKRunner(), zap.NewNop(), WithNoJanitor())
 	defer d.Close()
 
 	// The pre-check is bypassed by pointing the loser at a key the wrapped lookup does not answer
@@ -347,7 +348,7 @@ func TestPinHeldRunCommitLeavesUnpinnableRunsAlone(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewSyncer() error = %v", err)
 			}
-			d := New(run.NewMemStore(), okRunner(), zap.NewNop(), WithNoJanitor(),
+			d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithNoJanitor(),
 				WithProjects(project.NewMemStore(), syncer))
 			defer d.Close()
 
@@ -375,7 +376,7 @@ func TestPinHeldRunCommitSaysSoWhenItCannotPin(t *testing.T) {
 		t.Fatalf("NewSyncer() error = %v", err)
 	}
 	// The project store is empty, so the lookup for proj_missing fails.
-	d := New(run.NewMemStore(), okRunner(), zap.NewNop(), WithNoJanitor(),
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithNoJanitor(),
 		WithProjects(project.NewMemStore(), syncer))
 	defer d.Close()
 
@@ -402,7 +403,7 @@ func TestPinHeldRunCommitSaysSoWhenItCannotPin(t *testing.T) {
 // approval page.
 func TestPinHeldRunCommitWithNoProjectStoreIsSilent(t *testing.T) {
 	t.Parallel()
-	d := New(run.NewMemStore(), okRunner(), zap.NewNop(), WithNoJanitor())
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithNoJanitor())
 	defer d.Close()
 
 	r := &run.Run{Status: run.StatusPendingApproval, ProjectID: "proj_1"}

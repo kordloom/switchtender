@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -334,10 +335,10 @@ func TestCredentialedRunsKeepToolStateInTheRunDirectory(t *testing.T) {
 			var look toolLook
 			select {
 			case look = <-looks:
-			case <-time.After(waitBudget):
+			case <-time.After(dispatchtest.WaitBudget):
 				t.Fatal("the run never reached its tool")
 			}
-			if final := waitTerminal(t, fx.store, r.ID); final.Status != run.StatusSucceeded {
+			if final := dispatchtest.WaitTerminal(t, fx.store, r.ID); final.Status != run.StatusSucceeded {
 				t.Fatalf("run status = %s: %s", final.Status, final.Error)
 			}
 			if look.err != nil {
@@ -400,7 +401,7 @@ func TestUncredentialedRunKeepsToolsAtHome(t *testing.T) {
 		t.Fatalf("Submit() error = %v", err)
 	}
 	spec := <-specs
-	waitTerminal(t, store, r.ID)
+	dispatchtest.WaitTerminal(t, store, r.ID)
 	if filepath.Dir(spec.RunDir) != root || spec.RunFilesRoot != root {
 		t.Errorf("RunDir = %q under root %q, want a private directory under %s", spec.RunDir,
 			spec.RunFilesRoot, root)

@@ -13,6 +13,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/outcome"
+	"github.com/kordloom/switchtender/internal/outcometest"
 	"github.com/kordloom/switchtender/internal/receipt"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -142,7 +143,7 @@ func TestAnOutcomeIsCommittedAsTheBytesItsReceiptDiscloses(t *testing.T) {
 	if !rep.OutcomePresent || !rep.OutcomeDigestOK || !rep.OK() {
 		t.Errorf("the receipt's outcome does not verify: %+v", rep)
 	}
-	if report := verifyWithLoomSeal(t, loomsealRepo(t), res.Signed); !report.OK {
+	if report := outcometest.VerifyWithLoomSeal(t, outcometest.LoomsealRepo(t), res.Signed); !report.OK {
 		t.Fatalf("loomseal refused a receipt with an exact-form outcome: %v", report.Problems)
 	}
 }

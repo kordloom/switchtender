@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/handoff"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -235,14 +236,14 @@ func TestDeliveredSecretsAreGoneOnEveryExitPath(t *testing.T) {
 			if test.Act != nil {
 				select {
 				case <-runner.started:
-				case <-time.After(waitBudget):
+				case <-time.After(dispatchtest.WaitBudget):
 					t.Fatalf("the tool never started")
 				}
 				test.Act(d, id)
 			}
 			// The long budget, not waitFor's: the lease-lost path waits out a heartbeat tick, which a
 			// loaded race run can stretch well past a few seconds.
-			deadline := time.Now().Add(waitBudget)
+			deadline := time.Now().Add(dispatchtest.WaitBudget)
 			for _, discarded := held.counts(id); discarded == 0; _, discarded = held.counts(id) {
 				if time.Now().After(deadline) {
 					t.Fatalf("the run's delivery was never discarded")
@@ -346,7 +347,7 @@ func TestARelayWorkerSweepsWhatACrashLeftBehind(t *testing.T) {
 	d := New(run.NewMemStore(), roundhouse.RunnerFunc(nil), zap.NewNop(), WithNoJanitor(),
 		WithSecretDelivery(newHeldDeliveries()), WithRunFilesRoot(root))
 	t.Cleanup(d.Close)
-	deadline := time.Now().Add(waitBudget)
+	deadline := time.Now().Add(dispatchtest.WaitBudget)
 	for {
 		if _, err := os.Stat(sweepLock); err == nil {
 			break
@@ -402,10 +403,10 @@ func TestTheOpenedCopyIsDroppedBeforeTheToolStarts(t *testing.T) {
 		if !wiped {
 			t.Errorf("the opened delivery was still held when the tool started")
 		}
-	case <-time.After(waitBudget):
+	case <-time.After(dispatchtest.WaitBudget):
 		t.Fatalf("the tool never started")
 	}
-	if got := waitTerminal(t, store, id); got.Status != run.StatusSucceeded {
+	if got := dispatchtest.WaitTerminal(t, store, id); got.Status != run.StatusSucceeded {
 		t.Errorf("status = %s (%s), want succeeded", got.Status, got.Error)
 	}
 }

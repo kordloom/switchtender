@@ -9,6 +9,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/decision"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/dossier"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/receipt"
@@ -57,7 +58,7 @@ func TestEveryReaderCreditsOnlyTheStoredWinner(t *testing.T) {
 		outcome.DecisionExtras{ID: loser.ID}); err != nil {
 		t.Fatalf("append the losing entry: %v", err)
 	}
-	waitTerminal(t, store, held.ID)
+	dispatchtest.WaitTerminal(t, store, held.ID)
 	apprWaitOutcome(t, audits, held.ID)
 
 	listed, err := d.Decisions(ctx, held.ID)

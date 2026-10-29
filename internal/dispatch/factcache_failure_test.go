@@ -14,6 +14,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/factcache"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -125,7 +126,7 @@ func TestFactCacheServesFactsOlderThanTheTimeoutAfterALongRun(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Submit() error = %v", err)
 		}
-		return waitTerminal(t, store, r.ID)
+		return dispatchtest.WaitTerminal(t, store, r.ID)
 	}
 
 	if first := launch(); first.Status != run.StatusSucceeded {
@@ -206,10 +207,10 @@ func TestFactCacheOlderGatherFinishingLaterOverwritesNewerFacts(t *testing.T) {
 	slow := submit("slow.yml")
 	select {
 	case <-slowGathered:
-	case <-time.After(waitBudget):
+	case <-time.After(dispatchtest.WaitBudget):
 		t.Fatal("the slow run never gathered")
 	}
-	quick := waitTerminal(t, store, submit("quick.yml").ID)
+	quick := dispatchtest.WaitTerminal(t, store, submit("quick.yml").ID)
 	if quick.Status != run.StatusSucceeded {
 		t.Fatalf("the quick run = %s: %s", quick.Status, quick.Error)
 	}
@@ -218,7 +219,7 @@ func TestFactCacheOlderGatherFinishingLaterOverwritesNewerFacts(t *testing.T) {
 		t.Fatalf("the quick run kept no facts: %v", err)
 	}
 	close(releaseSlow)
-	if done := waitTerminal(t, store, slow.ID); done.Status != run.StatusSucceeded {
+	if done := dispatchtest.WaitTerminal(t, store, slow.ID); done.Status != run.StatusSucceeded {
 		t.Fatalf("the slow run = %s: %s", done.Status, done.Error)
 	}
 

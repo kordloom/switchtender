@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -53,7 +54,7 @@ func TestFinalizeWritesNothingWhenTheStoredStateIsUnknown(t *testing.T) {
 	mem := run.NewMemStore()
 	store := &blindStore{Store: mem}
 	audits := audit.NewMemStore()
-	d := New(store, okRunner(), nil, WithNoJanitor(), WithAudits(audits))
+	d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor(), WithAudits(audits))
 	defer d.Close()
 
 	started := time.Now()
@@ -158,7 +159,7 @@ func TestCancelingAPipelineStopsTheStepsThatFollow(t *testing.T) {
 		t.Fatal("the running pipeline was not registered as cancelable")
 	}
 
-	got := waitTerminal(t, store, parent.ID)
+	got := dispatchtest.WaitTerminal(t, store, parent.ID)
 	if got.Status != run.StatusCanceled {
 		t.Errorf("pipeline status = %q, want canceled", got.Status)
 	}

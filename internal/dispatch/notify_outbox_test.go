@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	named "github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -123,7 +124,7 @@ func outboxDispatcher(t *testing.T, recv *scriptedReceiver) (*Dispatcher, named.
 	router := named.NewRouter(store, plainSealer{}, named.SourceLineage(nil, nil, nil), nil)
 	outbox := named.NewOutbox(store, router, plainSealer{}, nil, named.WithClock(clock.read),
 		named.WithPoll(10*time.Millisecond))
-	d := New(run.NewMemStore(), okRunner(), nil, WithNotificationOutbox(outbox),
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithNotificationOutbox(outbox),
 		WithNotifyClient(http.DefaultClient))
 	t.Cleanup(d.Close)
 	return d, store, clock
@@ -309,7 +310,7 @@ func TestSendNamedClassifiesTheAnswer(t *testing.T) {
 			answer := func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(test.Status) }
 			srv := httptest.NewServer(http.HandlerFunc(answer))
 			defer srv.Close()
-			d := New(run.NewMemStore(), okRunner(), nil, WithNotifyClient(http.DefaultClient))
+			d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithNotifyClient(http.DefaultClient))
 			defer d.Close()
 			err := d.sendNamed(context.Background(), named.Message{
 				Target: run.NotifyTarget{Kind: run.NotifySlack, URL: srv.URL + "/secret-path"},
@@ -343,7 +344,7 @@ func TestSendNamedCarriesTheNote(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
-	d := New(run.NewMemStore(), okRunner(), nil, WithNotifyClient(http.DefaultClient))
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 	r := &run.Run{ID: "run_n", Status: run.StatusFailed}
 	for _, kind := range []string{run.NotifySlack, run.NotifyDiscord, run.NotifyTeams,
@@ -392,7 +393,7 @@ func TestSendNamedRendersAnAlertAsEveryPathDoes(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
-	d := New(run.NewMemStore(), okRunner(), nil, WithNotifyClient(http.DefaultClient),
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithNotifyClient(http.DefaultClient),
 		WithTwilio("AC1", "token", "+15550000000", nil))
 	defer d.Close()
 	d.pagerDutyEndpoint = srv.URL + "/pagerduty"

@@ -12,6 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -585,7 +586,7 @@ func TestWorkerPoolBoundsConcurrentExecutions(t *testing.T) {
 
 			close(runner.release)
 			for _, id := range ids {
-				waitTerminal(t, store, id)
+				dispatchtest.WaitTerminal(t, store, id)
 			}
 			d.Close()
 		})

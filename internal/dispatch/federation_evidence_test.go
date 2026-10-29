@@ -17,6 +17,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/federation"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
@@ -63,7 +64,7 @@ func TestFederatedRunRecordsItsSigningKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	final := waitTerminal(t, fx.store, r.ID)
+	final := dispatchtest.WaitTerminal(t, fx.store, r.ID)
 	if final.Status != run.StatusSucceeded {
 		t.Fatalf("run status = %s (%s), want succeeded", final.Status, final.Error)
 	}
@@ -134,7 +135,7 @@ func TestARunWhoseTokenCannotBeRecordedNeverReceivesIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	final := waitTerminal(t, fx.store, r.ID)
+	final := dispatchtest.WaitTerminal(t, fx.store, r.ID)
 	if final.Status != run.StatusFailed {
 		t.Fatalf("status = %s, want failed", final.Status)
 	}
@@ -147,7 +148,7 @@ func TestARunWhoseTokenCannotBeRecordedNeverReceivesIt(t *testing.T) {
 	if ran != 0 {
 		t.Error("the tool ran with a token whose issuance was never recorded")
 	}
-	deadline := time.Now().Add(waitBudget)
+	deadline := time.Now().Add(dispatchtest.WaitBudget)
 	for {
 		left, err := os.ReadDir(scratch)
 		if err != nil {
@@ -193,7 +194,7 @@ func TestARefusedExchangeStillRecordsTheTokenItSent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	if final := waitTerminal(t, fx.store, r.ID); final.Status != run.StatusFailed {
+	if final := dispatchtest.WaitTerminal(t, fx.store, r.ID); final.Status != run.StatusFailed {
 		t.Fatalf("status = %s, want failed", final.Status)
 	}
 	mu.Lock()

@@ -9,6 +9,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/outcome"
+	"github.com/kordloom/switchtender/internal/outcometest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/receipt"
 	"github.com/kordloom/switchtender/internal/run"
@@ -25,7 +26,7 @@ import (
 //
 // It does not run in parallel: it pins the audit key environment for the identity it signs with.
 func TestAReceiptCarryingAPolicyNoteVerifiesInLoomSeal(t *testing.T) {
-	repo := loomsealRepo(t)
+	repo := outcometest.LoomsealRepo(t)
 	ctx := context.Background()
 	runs := run.NewMemStore()
 	audits := audit.NewMemStore()
@@ -101,7 +102,7 @@ func TestAReceiptCarryingAPolicyNoteVerifiesInLoomSeal(t *testing.T) {
 		}
 	}
 
-	report := verifyWithLoomSeal(t, repo, res.Signed)
+	report := outcometest.VerifyWithLoomSeal(t, repo, res.Signed)
 	if !report.OK {
 		t.Fatalf("loomseal refused a receipt carrying a policy note: %v", report.Problems)
 	}

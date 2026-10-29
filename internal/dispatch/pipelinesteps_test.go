@@ -6,6 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -15,7 +16,7 @@ import (
 // definition raced on it.
 func TestSubmitPipelineLeavesTheCallersStepsAlone(t *testing.T) {
 	t.Parallel()
-	d := New(run.NewMemStore(), okRunner(), zap.NewNop(), WithNoJanitor())
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithNoJanitor())
 	t.Cleanup(d.Close)
 	steps := []run.PipelineStep{{Name: "build", Tool: run.ToolBash, Command: "echo a\x00b"}}
 	if _, err := d.SubmitPipeline(context.Background(), "release", "", steps); err != nil {

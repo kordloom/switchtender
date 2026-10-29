@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/factcache"
 	"github.com/kordloom/switchtender/internal/federation"
 	"github.com/kordloom/switchtender/internal/inventory"
@@ -69,7 +70,7 @@ func TestAnApprovedForcingDryRunKeepsItsRunMaterial(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
-	writeFiles(t, dir, map[string]string{"site.yml": forcedTaskPlaybook})
+	dispatchtest.WriteFiles(t, dir, map[string]string{"site.yml": forcedTaskPlaybook})
 	issuer, err := federation.NewIssuer("https://st.example.com", federation.NewMemKeyStore(),
 		fedSealer)
 	if err != nil {
@@ -109,7 +110,7 @@ func TestAnApprovedForcingDryRunKeepsItsRunMaterial(t *testing.T) {
 	if _, err := d.Approve(ctx, held.ID, decider("approver", "session")); err != nil {
 		t.Fatalf("Approve() error = %v", err)
 	}
-	final := waitTerminal(t, store, held.ID)
+	final := dispatchtest.WaitTerminal(t, store, held.ID)
 	if final.Status != run.StatusSucceeded {
 		t.Fatalf("status = %q (%s), want succeeded", final.Status, final.Error)
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/dossier"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/policy"
@@ -23,25 +24,10 @@ import (
 const smokeExemptNote = `requested by an agent bound to account "dev-lead", exempt from the ` +
 	`default hold by policy "nightly smoke"`
 
-// agentOpts returns the options an agent token's request stamps on what it submits: the token's
-// label, its kind, the account it is bound to by id and by name, and the identity evidence naming
-// that account.
-func agentOpts() []run.SubmitOption {
-	return []run.SubmitOption{run.WithActor("release-agent"),
-		run.WithActorType(policy.ActorKindAgent), run.WithActorAccount("usr_dev_lead"),
-		run.WithAccount("dev-lead"),
-		run.WithInitiator(&run.Initiator{InitiatedBy: "release-agent", BoundTo: "dev-lead"})}
-}
-
-// personOpts returns the options a signed-in person's request stamps on what it submits.
-func personOpts() []run.SubmitOption {
-	return []run.SubmitOption{run.WithActor("dev-lead"), run.WithActorType("session")}
-}
-
 // smokeExemption returns a policy store holding one exemption: agent bash runs naming smoke.
 func smokeExemption(t *testing.T) policy.Store {
 	t.Helper()
-	return rulesHolding(t, &policy.Policy{
+	return dispatchtest.RulesHolding(t, &policy.Policy{
 		ID: "pol_smoke", Name: "nightly smoke", Tool: run.ToolBash, CommandContains: "smoke",
 		Effect: policy.EffectExempt, MaxDestroy: policy.DisabledMaxDestroy,
 	})
@@ -55,7 +41,7 @@ func newAgentHoldDispatcher(t *testing.T, store run.Store, rules policy.Store) *
 	if rules != nil {
 		opts = append(opts, WithPolicies(rules))
 	}
-	d := New(store, okRunner(), zap.NewNop(), opts...)
+	d := New(store, dispatchtest.OKRunner(), zap.NewNop(), opts...)
 	t.Cleanup(d.Close)
 	return d
 }
@@ -80,22 +66,22 @@ func TestAnAgentsRunIsHeldWithNoPolicyWritten(t *testing.T) {
 		// WantNotes are the notes the run carries.
 		WantNotes []string
 	}{{ // Test 0: An agent's run with no policy store at all is held by default.
-		Opts: agentOpts(), Command: "systemctl restart web", WantHeld: true,
+		Opts: dispatchtest.AgentOpts(), Command: "systemctl restart web", WantHeld: true,
 		WantNotes: []string{policy.AgentDefaultName},
 	}, { // Test 1: A person's identical run goes ahead, the control for test 0.
-		Opts: personOpts(), Command: "systemctl restart web", WantHeld: false,
+		Opts: dispatchtest.PersonOpts(), Command: "systemctl restart web", WantHeld: false,
 	}, { // Test 2: An empty policy store holds the agent's run the same way.
 		Rules: func(*testing.T) policy.Store { return policy.NewMemStore() },
-		Opts:  agentOpts(), Command: "systemctl restart web", WantHeld: true,
+		Opts:  dispatchtest.AgentOpts(), Command: "systemctl restart web", WantHeld: true,
 		WantNotes: []string{policy.AgentDefaultName},
 	}, { // Test 3: An exemption lets the agent's run it covers go ahead, named in the evidence.
-		Rules: smokeExemption, Opts: agentOpts(), Command: "./run smoke tests", WantHeld: false,
+		Rules: smokeExemption, Opts: dispatchtest.AgentOpts(), Command: "./run smoke tests", WantHeld: false,
 		WantNotes: []string{smokeExemptNote},
 	}, { // Test 4: The exemption covers nothing it does not name.
-		Rules: smokeExemption, Opts: agentOpts(), Command: "rm -rf /var/backups", WantHeld: true,
+		Rules: smokeExemption, Opts: dispatchtest.AgentOpts(), Command: "rm -rf /var/backups", WantHeld: true,
 		WantNotes: []string{policy.AgentDefaultName},
 	}, { // Test 5: The exemption never touches a person's run.
-		Rules: smokeExemption, Opts: personOpts(), Command: "./run smoke tests", WantHeld: false,
+		Rules: smokeExemption, Opts: dispatchtest.PersonOpts(), Command: "./run smoke tests", WantHeld: false,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -129,7 +115,7 @@ func TestAnAgentsRunIsHeldWithNoPolicyWritten(t *testing.T) {
 				}
 				return
 			}
-			if final := waitTerminal(t, store, got.ID); final.Status != run.StatusSucceeded {
+			if final := dispatchtest.WaitTerminal(t, store, got.ID); final.Status != run.StatusSucceeded {
 				t.Errorf("status = %q, want the run to have gone ahead and succeeded", final.Status)
 			}
 		})
@@ -149,12 +135,12 @@ func TestTheEvidenceSaysWhyAnAgentsRunWaitedOrWent(t *testing.T) {
 		// WantNotes are the notes the committed outcome record carries.
 		WantNotes []string
 	}{{ // Test 0: A held and then approved agent run says it was held by default.
-		Opts: agentOpts(), Command: "systemctl restart web",
+		Opts: dispatchtest.AgentOpts(), Command: "systemctl restart web",
 		WantNotes: []string{policy.AgentDefaultName},
 	}, { // Test 1: An exempt agent run names its exemption.
-		Opts: agentOpts(), Command: "./run smoke tests", WantNotes: []string{smokeExemptNote},
+		Opts: dispatchtest.AgentOpts(), Command: "./run smoke tests", WantNotes: []string{smokeExemptNote},
 	}, { // Test 2: A person's run records nothing about the agent hold.
-		Opts: personOpts(), Command: "systemctl restart web",
+		Opts: dispatchtest.PersonOpts(), Command: "systemctl restart web",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -181,7 +167,7 @@ func TestTheEvidenceSaysWhyAnAgentsRunWaitedOrWent(t *testing.T) {
 					t.Fatalf("Approve() error = %v", err)
 				}
 			}
-			final := waitTerminal(t, store, got.ID)
+			final := dispatchtest.WaitTerminal(t, store, got.ID)
 			if final.Status != run.StatusSucceeded {
 				t.Fatalf("status = %q, want succeeded", final.Status)
 			}
@@ -210,12 +196,12 @@ func TestTheEvidenceSaysWhyAnAgentsRunWaitedOrWent(t *testing.T) {
 func TestAnAgentsDryRunIsHeld(t *testing.T) {
 	t.Parallel()
 	ansibleChecks := func(t *testing.T) policy.Store {
-		return rulesHolding(t, &policy.Policy{ID: "pol_ans", Name: "ansible checks",
+		return dispatchtest.RulesHolding(t, &policy.Policy{ID: "pol_ans", Name: "ansible checks",
 			Tool: run.ToolAnsible, Effect: policy.EffectExempt,
 			MaxDestroy: policy.DisabledMaxDestroy})
 	}
 	previewsFree := func(t *testing.T) policy.Store {
-		return rulesHolding(t, &policy.Policy{ID: "pol_prev", Name: "hold ansible",
+		return dispatchtest.RulesHolding(t, &policy.Policy{ID: "pol_prev", Name: "hold ansible",
 			Tool: run.ToolAnsible, ExcludeDryRun: true, MaxDestroy: policy.DisabledMaxDestroy})
 	}
 	tests := []struct {
@@ -235,38 +221,38 @@ func TestAnAgentsDryRunIsHeld(t *testing.T) {
 		WantFinding string
 	}{{ // Test 0: A clean playbook's check-mode run is held all the same, saying why.
 		Tool: run.ToolAnsible, Files: map[string]string{"site.yml": cleanPlaybook},
-		Opts: agentOpts(), WantHeldBy: policy.AgentDefaultName,
+		Opts: dispatchtest.AgentOpts(), WantHeldBy: policy.AgentDefaultName,
 		WantNoteParts: []string{"check mode still runs lookups", "this server's credentials",
 			"waits for a person or for an exemption"},
 	}, { // Test 1: A playbook that forces a task under check mode is held, with the scan recorded.
 		Tool: run.ToolAnsible, Files: map[string]string{"site.yml": forcedTaskPlaybook},
-		Opts: agentOpts(), WantHeldBy: policy.AgentDefaultName,
+		Opts: dispatchtest.AgentOpts(), WantHeldBy: policy.AgentDefaultName,
 		WantNoteParts: []string{"check mode still runs lookups"},
 		WantFinding:   `site.yml: task "Restart web" sets check_mode to false`,
 	}, { // Test 2: The same dry run from a person is not held, the control for test 1.
 		Tool: run.ToolAnsible, Files: map[string]string{"site.yml": forcedTaskPlaybook},
-		Opts: personOpts(),
+		Opts: dispatchtest.PersonOpts(),
 	}, { // Test 3: An exemption covering the agent's dry run lets it go ahead.
 		Tool: run.ToolAnsible, Files: map[string]string{"site.yml": forcedTaskPlaybook},
-		Rules: ansibleChecks, Opts: agentOpts(),
+		Rules: ansibleChecks, Opts: dispatchtest.AgentOpts(),
 	}, { // Test 4: A clean configuration's plan is held all the same, saying why.
-		Tool: run.ToolTerraform, Files: map[string]string{"main.tf": cleanConfig},
-		Opts: agentOpts(), WantHeldBy: policy.AgentDefaultName,
+		Tool: run.ToolTerraform, Files: map[string]string{"main.tf": dispatchtest.CleanConfig},
+		Opts: dispatchtest.AgentOpts(), WantHeldBy: policy.AgentDefaultName,
 		WantNoteParts: []string{"a plan still runs provider code and data sources",
 			"this server's credentials"},
 	}, { // Test 5: A configuration with an external data source is held, with the scan recorded.
-		Tool: run.ToolTerraform, Files: map[string]string{"main.tf": externalConfig},
-		Opts: agentOpts(), WantHeldBy: policy.AgentDefaultName,
+		Tool: run.ToolTerraform, Files: map[string]string{"main.tf": dispatchtest.ExternalConfig},
+		Opts: dispatchtest.AgentOpts(), WantHeldBy: policy.AgentDefaultName,
 		WantFinding: "data.external.lookup runs a program during plan (main.tf line 1)",
 	}, { // Test 6: The same plan from a person is not held, the control for test 5.
-		Tool: run.ToolTerraform, Files: map[string]string{"main.tf": externalConfig},
-		Opts: personOpts(),
+		Tool: run.ToolTerraform, Files: map[string]string{"main.tf": dispatchtest.ExternalConfig},
+		Opts: dispatchtest.PersonOpts(),
 	}, { // Test 7: A person's clean dry run under exclude_dry_run goes ahead, as it always did.
 		Tool: run.ToolAnsible, Files: map[string]string{"site.yml": cleanPlaybook},
-		Rules: previewsFree, Opts: personOpts(),
+		Rules: previewsFree, Opts: dispatchtest.PersonOpts(),
 	}, { // Test 8: A person's forcing dry run under it is held by the rule, saying what was found.
 		Tool: run.ToolAnsible, Files: map[string]string{"site.yml": forcedTaskPlaybook},
-		Rules: previewsFree, Opts: personOpts(), WantHeldBy: "hold ansible",
+		Rules: previewsFree, Opts: dispatchtest.PersonOpts(), WantHeldBy: "hold ansible",
 		WantNoteParts: []string{`"hold ansible" does not exempt it`,
 			"drop exclude_dry_run from"},
 		WantFinding: `site.yml: task "Restart web" sets check_mode to false`,
@@ -276,7 +262,7 @@ func TestAnAgentsDryRunIsHeld(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
 			dir := t.TempDir()
-			writeFiles(t, dir, test.Files)
+			dispatchtest.WriteFiles(t, dir, test.Files)
 			store := run.NewMemStore()
 			var rules policy.Store
 			if test.Rules != nil {
@@ -327,9 +313,9 @@ func TestAnAgentsSplitIsHeldWithEveryShard(t *testing.T) {
 		// WantHeld is whether the split and its shards wait for a person.
 		WantHeld bool
 	}{{ // Test 0: An agent's split and its shards are held.
-		Opts: agentOpts(), WantHeld: true,
+		Opts: dispatchtest.AgentOpts(), WantHeld: true,
 	}, { // Test 1: A person's split runs, the control.
-		Opts: personOpts(), WantHeld: false,
+		Opts: dispatchtest.PersonOpts(), WantHeld: false,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -347,7 +333,7 @@ func TestAnAgentsSplitIsHeldWithEveryShard(t *testing.T) {
 				t.Fatalf("parent held = %v, want %v", held, test.WantHeld)
 			}
 			if !test.WantHeld {
-				if final := waitTerminal(t, store, parent.ID); final.Status != run.StatusSucceeded {
+				if final := dispatchtest.WaitTerminal(t, store, parent.ID); final.Status != run.StatusSucceeded {
 					t.Errorf("parent status = %q, want succeeded", final.Status)
 				}
 				return
@@ -387,9 +373,9 @@ func TestAnAgentsRetryOfFailedShardsIsHeld(t *testing.T) {
 		// WantHeld is whether the retry waits for a person.
 		WantHeld bool
 	}{{ // Test 0: An agent's retry of a person's failed split is held with its shards.
-		Opts: agentOpts(), WantHeld: true,
+		Opts: dispatchtest.AgentOpts(), WantHeld: true,
 	}, { // Test 1: The person's own retry runs, the control.
-		Opts: personOpts(), WantHeld: false,
+		Opts: dispatchtest.PersonOpts(), WantHeld: false,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -399,11 +385,11 @@ func TestAnAgentsRetryOfFailedShardsIsHeld(t *testing.T) {
 			runner := &flakyRunnerLister{hosts: []string{"a", "b", "c", "d"}, failHost: "b"}
 			d := New(store, runner, zap.NewNop(), WithNoJanitor())
 			t.Cleanup(d.Close)
-			parent, err := d.SubmitSplit(ctx, "play.yml", "inv", 2, personOpts()...)
+			parent, err := d.SubmitSplit(ctx, "play.yml", "inv", 2, dispatchtest.PersonOpts()...)
 			if err != nil {
 				t.Fatalf("SubmitSplit() error = %v", err)
 			}
-			if got := waitTerminal(t, store, parent.ID); got.Status != run.StatusFailed {
+			if got := dispatchtest.WaitTerminal(t, store, parent.ID); got.Status != run.StatusFailed {
 				t.Fatalf("parent status = %q, want failed", got.Status)
 			}
 			runner.fixed.Store(true)
@@ -415,7 +401,7 @@ func TestAnAgentsRetryOfFailedShardsIsHeld(t *testing.T) {
 				t.Fatalf("retry held = %v, want %v", held, test.WantHeld)
 			}
 			if !test.WantHeld {
-				if final := waitTerminal(t, store, retry.ID); final.Status != run.StatusSucceeded {
+				if final := dispatchtest.WaitTerminal(t, store, retry.ID); final.Status != run.StatusSucceeded {
 					t.Errorf("retry status = %q, want succeeded", final.Status)
 				}
 				return
@@ -438,9 +424,9 @@ func TestAnAgentsRelaunchOfFailedHostsIsHeld(t *testing.T) {
 		// WantHeld is whether the relaunch waits for a person.
 		WantHeld bool
 	}{{ // Test 0: An agent's relaunch is held.
-		Opts: agentOpts(), WantHeld: true,
+		Opts: dispatchtest.AgentOpts(), WantHeld: true,
 	}, { // Test 1: The person's own relaunch runs, the control.
-		Opts: personOpts(), WantHeld: false,
+		Opts: dispatchtest.PersonOpts(), WantHeld: false,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -491,7 +477,7 @@ func TestAnAgentsWorkflowIsHeld(t *testing.T) {
 		}
 	}
 	byName := func(t *testing.T) policy.Store {
-		return rulesHolding(t, &policy.Policy{ID: "pol_agent", Name: "release agent",
+		return dispatchtest.RulesHolding(t, &policy.Policy{ID: "pol_agent", Name: "release agent",
 			Actor: "release-agent", Account: "dev-lead", Effect: policy.EffectExempt,
 			MaxDestroy: policy.DisabledMaxDestroy})
 	}
@@ -503,11 +489,11 @@ func TestAnAgentsWorkflowIsHeld(t *testing.T) {
 		// WantHeld is whether the workflow waits for a person.
 		WantHeld bool
 	}{{ // Test 0: An agent's workflow is held.
-		Opts: agentOpts(), WantHeld: true,
+		Opts: dispatchtest.AgentOpts(), WantHeld: true,
 	}, { // Test 1: A person's workflow runs, the control.
-		Opts: personOpts(), WantHeld: false,
+		Opts: dispatchtest.PersonOpts(), WantHeld: false,
 	}, { // Test 2: An exemption naming the agent covers the workflow and its steps.
-		Rules: byName, Opts: agentOpts(), WantHeld: false,
+		Rules: byName, Opts: dispatchtest.AgentOpts(), WantHeld: false,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -530,7 +516,7 @@ func TestAnAgentsWorkflowIsHeld(t *testing.T) {
 				t.Errorf("held by %q, want %q", got.HeldByPolicy, policy.AgentDefaultName)
 			}
 			if !test.WantHeld {
-				if final := waitTerminal(t, store, got.ID); final.Status != run.StatusSucceeded {
+				if final := dispatchtest.WaitTerminal(t, store, got.ID); final.Status != run.StatusSucceeded {
 					t.Errorf("status = %q, want succeeded", final.Status)
 				}
 			}
@@ -574,40 +560,40 @@ hold contains msg if {
 		// WantProposalHeldBy names what holds the proposed apply, the built-in hold when empty.
 		WantProposalHeldBy string
 	}{{ // Test 0: With no rule written.
-		Config: cleanConfig, Opts: agentOpts(), WantTwoSteps: true,
+		Config: dispatchtest.CleanConfig, Opts: dispatchtest.AgentOpts(), WantTwoSteps: true,
 	}, { // Test 1: With a destroy limit in force.
-		Rules:  func(t *testing.T) policy.Store { return rulesHolding(t, limit) },
-		Config: cleanConfig, Opts: agentOpts(), WantTwoSteps: true,
+		Rules:  func(t *testing.T) policy.Store { return dispatchtest.RulesHolding(t, limit) },
+		Config: dispatchtest.CleanConfig, Opts: dispatchtest.AgentOpts(), WantTwoSteps: true,
 	}, { // Test 2: With a reversibility floor in force, which names itself on the proposal.
-		Rules:  func(t *testing.T) policy.Store { return rulesHolding(t, floor) },
-		Config: cleanConfig, Opts: agentOpts(), WantTwoSteps: true,
+		Rules:  func(t *testing.T) policy.Store { return dispatchtest.RulesHolding(t, floor) },
+		Config: dispatchtest.CleanConfig, Opts: dispatchtest.AgentOpts(), WantTwoSteps: true,
 		WantProposalHeldBy: "irreversible needs a person",
 	}, { // Test 3: With a Rego plan gate in force.
 		Rules:  func(t *testing.T) policy.Store { return regoStore(t, regoGate) },
-		Config: cleanConfig, Opts: agentOpts(), WantTwoSteps: true,
+		Config: dispatchtest.CleanConfig, Opts: dispatchtest.AgentOpts(), WantTwoSteps: true,
 	}, { // Test 4: With a configuration that runs a program while it plans.
-		Config: externalConfig, Opts: agentOpts(), WantTwoSteps: true,
+		Config: dispatchtest.ExternalConfig, Opts: dispatchtest.AgentOpts(), WantTwoSteps: true,
 	}, { // Test 5: A person's apply applies as it always did, the control.
-		Config: cleanConfig, Opts: personOpts(),
+		Config: dispatchtest.CleanConfig, Opts: dispatchtest.PersonOpts(),
 	}, { // Test 6: An exempt agent's apply applies as the exemption allows.
-		Rules:  func(t *testing.T) policy.Store { return rulesHolding(t, exempt) },
-		Config: cleanConfig, Opts: agentOpts(),
+		Rules:  func(t *testing.T) policy.Store { return dispatchtest.RulesHolding(t, exempt) },
+		Config: dispatchtest.CleanConfig, Opts: dispatchtest.AgentOpts(),
 	}, { // Test 7: Under a destroy limit it plans first and its proposal goes ahead.
-		Rules:  func(t *testing.T) policy.Store { return rulesHolding(t, exempt, limit) },
-		Config: cleanConfig, Opts: agentOpts(), WantProposal: true,
+		Rules:  func(t *testing.T) policy.Store { return dispatchtest.RulesHolding(t, exempt, limit) },
+		Config: dispatchtest.CleanConfig, Opts: dispatchtest.AgentOpts(), WantProposal: true,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
 			dir := t.TempDir()
-			writeFiles(t, dir, map[string]string{"main.tf": test.Config})
+			dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": test.Config})
 			store := run.NewMemStore()
 			opts := []Option{WithNoJanitor()}
 			if test.Rules != nil {
 				opts = append(opts, WithPolicies(test.Rules(t)))
 			}
-			d := New(store, planRunner("Plan: 0 to add, 0 to change, 1 to destroy"), zap.NewNop(),
+			d := New(store, dispatchtest.PlanRunner("Plan: 0 to add, 0 to change, 1 to destroy"), zap.NewNop(),
 				opts...)
 			t.Cleanup(d.Close)
 			created, err := d.Submit(ctx, "", "", append([]run.SubmitOption{
@@ -620,15 +606,15 @@ hold contains msg if {
 					test.WantTwoSteps, created.HeldByPolicy)
 			}
 			if !test.WantTwoSteps {
-				if final := waitTerminal(t, store, created.ID); final.Status != run.StatusSucceeded {
+				if final := dispatchtest.WaitTerminal(t, store, created.ID); final.Status != run.StatusSucceeded {
 					t.Fatalf("status = %q, want succeeded", final.Status)
 				}
 				if n := countProposals(t, store); (n > 0) != test.WantProposal {
 					t.Fatalf("%d applies proposed, want proposal %v", n, test.WantProposal)
 				}
 				if test.WantProposal {
-					proposal := waitProposal(t, store, created.ID)
-					if done := waitTerminal(t, store, proposal.ID); done.Status != run.StatusSucceeded {
+					proposal := dispatchtest.WaitProposal(t, store, created.ID)
+					if done := dispatchtest.WaitTerminal(t, store, proposal.ID); done.Status != run.StatusSucceeded {
 						t.Errorf("proposed apply status = %q, want succeeded", done.Status)
 					}
 				}
@@ -646,13 +632,13 @@ hold contains msg if {
 			if _, err := d.Approve(ctx, created.ID, decider("approver", "session")); err != nil {
 				t.Fatalf("Approve(request) error = %v", err)
 			}
-			if final := waitTerminal(t, store, created.ID); final.Status != run.StatusSucceeded {
+			if final := dispatchtest.WaitTerminal(t, store, created.ID); final.Status != run.StatusSucceeded {
 				t.Fatalf("released request status = %q, want succeeded", final.Status)
 			}
 			if log := readLog(t, store, created.ID); strings.Contains(log, "Apply complete") {
 				t.Fatalf("the released request applied without a plan: %q", log)
 			}
-			proposal := waitProposal(t, store, created.ID)
+			proposal := dispatchtest.WaitProposal(t, store, created.ID)
 			wantHeldBy := test.WantProposalHeldBy
 			if wantHeldBy == "" {
 				wantHeldBy = policy.AgentDefaultName
@@ -675,7 +661,7 @@ hold contains msg if {
 			if _, err := d.Approve(ctx, proposal.ID, decider("approver", "session")); err != nil {
 				t.Fatalf("Approve(proposal) error = %v", err)
 			}
-			if done := waitTerminal(t, store, proposal.ID); done.Status != run.StatusSucceeded {
+			if done := dispatchtest.WaitTerminal(t, store, proposal.ID); done.Status != run.StatusSucceeded {
 				t.Errorf("approved apply status = %q, want succeeded", done.Status)
 			}
 		})
@@ -693,27 +679,27 @@ func TestAnAgentsRerunOfAnApplyTakesTwoApprovals(t *testing.T) {
 		// WantHeld is whether the rerun waits for a person before it plans.
 		WantHeld bool
 	}{{ // Test 0: The agent's rerun is held before it plans.
-		Opts: agentOpts(), WantHeld: true,
+		Opts: dispatchtest.AgentOpts(), WantHeld: true,
 	}, { // Test 1: A person's rerun is not, the control.
-		Opts: personOpts(), WantHeld: false,
+		Opts: dispatchtest.PersonOpts(), WantHeld: false,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
 			dir := t.TempDir()
-			writeFiles(t, dir, map[string]string{"main.tf": cleanConfig})
+			dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": dispatchtest.CleanConfig})
 			store := run.NewMemStore()
-			d := New(store, planRunner("Plan: 0 to add, 0 to change, 1 to destroy"), zap.NewNop(),
+			d := New(store, dispatchtest.PlanRunner("Plan: 0 to add, 0 to change, 1 to destroy"), zap.NewNop(),
 				WithNoJanitor())
 			t.Cleanup(d.Close)
 			// A person's apply finished, so it can be rerun.
 			src, err := d.Submit(ctx, "", "", append([]run.SubmitOption{
-				run.WithTool(run.ToolTerraform), run.WithCommand(dir)}, personOpts()...)...)
+				run.WithTool(run.ToolTerraform), run.WithCommand(dir)}, dispatchtest.PersonOpts()...)...)
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
-			done := waitTerminal(t, store, src.ID)
+			done := dispatchtest.WaitTerminal(t, store, src.ID)
 			rerun, err := d.Submit(ctx, done.Playbook, done.Inventory, append(append(
 				done.ExecutionOptions(), run.WithSource("rerun", done.ID),
 				run.WithRerunOf(done.ID)), test.Opts...)...)

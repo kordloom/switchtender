@@ -14,6 +14,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/decision"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/dossier"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/receipt"
@@ -89,7 +90,7 @@ func apprWait(t *testing.T, ch <-chan struct{}, what string) {
 	t.Helper()
 	select {
 	case <-ch:
-	case <-time.After(waitBudget):
+	case <-time.After(dispatchtest.WaitBudget):
 		t.Fatalf("timed out waiting for %s", what)
 	}
 }
@@ -97,7 +98,7 @@ func apprWait(t *testing.T, ch <-chan struct{}, what string) {
 // apprWaitOutcome waits until the chain holds the outcome entry of run id.
 func apprWaitOutcome(t *testing.T, audits audit.Store, id string) {
 	t.Helper()
-	deadline := time.Now().Add(waitBudget)
+	deadline := time.Now().Add(dispatchtest.WaitBudget)
 	for time.Now().Before(deadline) {
 		chain, err := audits.Chain(context.Background())
 		if err != nil {
@@ -280,14 +281,14 @@ func TestApprovalThatLosesItsRaceLeavesTheChainVerifiable(t *testing.T) {
 					t.Fatalf("CancelWaiting() = (%v, %v), want (true, nil)", ok, err)
 				}
 			}
-			final := waitTerminal(t, store, workID)
+			final := dispatchtest.WaitTerminal(t, store, workID)
 			apprWaitOutcome(t, audits, workID)
 
 			close(gated.release)
 			var err error
 			select {
 			case err = <-approved:
-			case <-time.After(waitBudget):
+			case <-time.After(dispatchtest.WaitBudget):
 				t.Fatal("the held approval never returned")
 			}
 			if !errors.Is(err, ErrNotPendingApproval) {
@@ -349,7 +350,7 @@ func TestApprovalStepRegisterCreditsTheDecisionThatTookEffect(t *testing.T) {
 		By: outcome.Decider{Name: "approver-a", Type: "session"}}); err != nil {
 		t.Fatalf("approve on the first replica error = %v", err)
 	}
-	final := waitTerminal(t, store, parent.ID)
+	final := dispatchtest.WaitTerminal(t, store, parent.ID)
 	apprWaitOutcome(t, audits, parent.ID)
 	if final.Status != run.StatusSucceeded || runner.count("deploy") != 1 {
 		t.Fatalf("workflow = %s with deploy run %d times, want it shipped once", final.Status,
@@ -409,7 +410,7 @@ func TestApprovalStepTimesOutOnceAcrossReplicas(t *testing.T) {
 	}()
 	apprWait(t, gated.reached, "the first sweep to reach its timeout entry")
 	replicaB.sweepApprovalSteps()
-	final := waitTerminal(t, store, parent.ID)
+	final := dispatchtest.WaitTerminal(t, store, parent.ID)
 	apprWaitOutcome(t, audits, parent.ID)
 	close(gated.release)
 	apprWait(t, sweptA, "the first sweep to finish")
@@ -509,7 +510,7 @@ func TestApprovalStepReceiptDisclosesOnlyTheDecisionThatTookEffect(t *testing.T)
 		t.Fatalf("the late approval returned %v, want ErrNotPendingApproval", aerr)
 	}
 	close(runner.release)
-	final := waitTerminal(t, store, parent.ID)
+	final := dispatchtest.WaitTerminal(t, store, parent.ID)
 	apprWaitOutcome(t, audits, parent.ID)
 
 	id, err := audit.LoadIdentity(t.TempDir())

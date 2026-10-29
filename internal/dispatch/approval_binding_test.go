@@ -11,6 +11,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -54,7 +55,7 @@ func TestADecisionCommitsTheDecidersAccount(t *testing.T) {
 			ctx := context.Background()
 			store := run.NewMemStore()
 			audits := audit.NewMemStore()
-			d := New(store, okRunner(), nil, WithAudits(audits), WithNoJanitor())
+			d := New(store, dispatchtest.OKRunner(), nil, WithAudits(audits), WithNoJanitor())
 			defer d.Close()
 			held := &run.Run{
 				ID: "run_account", Playbook: "site.yml", Inventory: "prod",
@@ -92,7 +93,7 @@ func TestApproveCommitsTheDecision(t *testing.T) {
 	ctx := context.Background()
 	store := run.NewMemStore()
 	audits := audit.NewMemStore()
-	d := New(store, okRunner(), nil, WithAudits(audits), WithNoJanitor())
+	d := New(store, dispatchtest.OKRunner(), nil, WithAudits(audits), WithNoJanitor())
 	defer d.Close()
 
 	held := &run.Run{
@@ -162,7 +163,7 @@ func TestExecutorRefusesASpecChangedAfterApproval(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil, WithNoJanitor())
+	d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor())
 	defer d.Close()
 
 	r := &run.Run{
@@ -213,7 +214,7 @@ func TestExecutorRefusesAPinnedCommitChangedAfterApproval(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
 			store := run.NewMemStore()
-			d := New(store, okRunner(), nil, WithNoJanitor())
+			d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor())
 			defer d.Close()
 
 			r := &run.Run{
@@ -333,7 +334,7 @@ func TestARefusedDecisionLeavesNoChainEntry(t *testing.T) {
 			t.Parallel()
 			store := run.NewMemStore()
 			audits := audit.NewMemStore()
-			d := New(store, okRunner(), nil, WithAudits(audits), WithNoJanitor())
+			d := New(store, dispatchtest.OKRunner(), nil, WithAudits(audits), WithNoJanitor())
 			defer d.Close()
 
 			held := &run.Run{
@@ -346,7 +347,7 @@ func TestARefusedDecisionLeavesNoChainEntry(t *testing.T) {
 			if _, err := d.Approve(ctx, held.ID, decider("approver-pat", "session")); err != nil {
 				t.Fatalf("Approve() error = %v", err)
 			}
-			waitTerminal(t, store, held.ID)
+			dispatchtest.WaitTerminal(t, store, held.ID)
 
 			before := decisionsFor(t, audits, held.ID)
 			if len(before) != 1 {

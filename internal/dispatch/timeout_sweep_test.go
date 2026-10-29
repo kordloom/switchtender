@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -74,7 +75,7 @@ func TestPerRunTimeoutOverridesTheServerDefault(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
-			got := waitTerminal(t, store, created.ID)
+			got := dispatchtest.WaitTerminal(t, store, created.ID)
 			if got.Status != test.WantStatus {
 				t.Errorf("status = %q, want %q (server cap %v, run asked for %ds)",
 					got.Status, test.WantStatus, test.ServerTimeout, test.RunTimeout)
@@ -99,7 +100,7 @@ func TestATimedOutRunIsFailedRatherThanCanceled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	got := waitTerminal(t, store, created.ID)
+	got := dispatchtest.WaitTerminal(t, store, created.ID)
 
 	if got.Status == run.StatusCanceled {
 		t.Fatal("a run stopped by its own timeout was recorded as canceled, which is the record a " +

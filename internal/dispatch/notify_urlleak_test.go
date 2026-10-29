@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -119,7 +120,7 @@ func TestNotifyFailureDoesNotLogSecretURL(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
-			if got := waitTerminal(t, store, created.ID); got.Status != run.StatusFailed {
+			if got := dispatchtest.WaitTerminal(t, store, created.ID); got.Status != run.StatusFailed {
 				t.Fatalf("status = %q, want failed", got.Status)
 			}
 			// Close joins the notify goroutines, so every delivery attempt has reported by the

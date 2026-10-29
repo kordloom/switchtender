@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -88,7 +89,7 @@ func TestPublisherReceivesOutputAndExactlyOneClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	if got := waitTerminal(t, store, created.ID); got.Status != run.StatusSucceeded {
+	if got := dispatchtest.WaitTerminal(t, store, created.ID); got.Status != run.StatusSucceeded {
 		t.Fatalf("run status = %q, want succeeded", got.Status)
 	}
 	deadline := time.Now().Add(5 * time.Second)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -58,7 +59,7 @@ func TestARetryCarriesTheActorTheGateJudges(t *testing.T) {
 			if err != nil {
 				t.Fatalf("test %d: SubmitSplit() error = %v", testNum, err)
 			}
-			waitForStatus(t, store, parent.ID, run.StatusFailed)
+			dispatchtest.WaitForStatus(t, store, parent.ID, run.StatusFailed)
 
 			if err := policies.Save(ctx, test.Policy); err != nil {
 				t.Fatalf("test %d: policies.Save() error = %v", testNum, err)
@@ -105,7 +106,7 @@ func TestARetryOfSomebodyElsesRunIsJudgedOnWhoRetried(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
-	waitForStatus(t, store, parent.ID, run.StatusFailed)
+	dispatchtest.WaitForStatus(t, store, parent.ID, run.StatusFailed)
 
 	if err := policies.Save(ctx, &policy.Policy{
 		ID: policy.NewID(), Name: "hold that bot", Tool: "ansible",

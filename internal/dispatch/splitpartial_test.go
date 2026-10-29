@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -199,7 +200,7 @@ func TestASplitMissingShardsIsNeitherStartedNorRetried(t *testing.T) {
 		if _, err := d.Approve(ctx, parentID, decider("admin", "user")); err != nil {
 			t.Fatalf("Approve() error = %v", err)
 		}
-		waitForStatus(t, store, parentID, run.StatusFailed)
+		dispatchtest.WaitForStatus(t, store, parentID, run.StatusFailed)
 		parent, err := store.Get(ctx, parentID)
 		if err != nil {
 			t.Fatalf("Get() error = %v", err)

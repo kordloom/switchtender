@@ -12,6 +12,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -52,7 +53,7 @@ func TestNamedTargetsHearEveryEvent(t *testing.T) {
 		WantStatus []run.Status
 		Held       bool
 	}{{ // Test 0: A run that succeeds is announced when it starts and when it ends.
-		Runner:     okRunner(),
+		Runner:     dispatchtest.OKRunner(),
 		WantEvents: []string{"run.started running", "run.finished succeeded"},
 		WantStatus: []run.Status{run.StatusRunning, run.StatusSucceeded},
 	}, { // Test 1: A run that fails is announced when it starts and when it fails.
@@ -60,7 +61,7 @@ func TestNamedTargetsHearEveryEvent(t *testing.T) {
 		WantEvents: []string{"run.started running", "run.finished failed"},
 		WantStatus: []run.Status{run.StatusRunning, run.StatusFailed},
 	}, { // Test 2: A held run is announced when it is held, then started and finished on release.
-		Runner: okRunner(), Held: true,
+		Runner: dispatchtest.OKRunner(), Held: true,
 		WantEvents: []string{"run.held pending_approval", "run.started running",
 			"run.finished succeeded"},
 		WantStatus: []run.Status{run.StatusPendingApproval, run.StatusRunning,
@@ -159,7 +160,7 @@ func TestNamedTargetsSkipChildren(t *testing.T) {
 		asked <- r.ID
 		return nil
 	})
-	d := New(run.NewMemStore(), okRunner(), nil, WithNotificationRouter(router))
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithNotificationRouter(router))
 	defer d.Close()
 	parent := "run_parent"
 	d.notifyNamed(&run.Run{ID: "run_child", ParentID: &parent, Status: run.StatusSucceeded})

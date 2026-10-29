@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -35,7 +36,7 @@ func TestFinalizeCommitsRunOutcomeToChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	got := waitTerminal(t, store, created.ID)
+	got := dispatchtest.WaitTerminal(t, store, created.ID)
 
 	outcomeEntry := waitOutcomeEntry(t, audits, created.ID)
 	if want := "/runs/" + created.ID + "/outcome/succeeded"; outcomeEntry.Path != want {
@@ -83,7 +84,7 @@ func TestNoAuditsNoOutcomeEntry(t *testing.T) {
 		t.Fatalf("Submit() error = %v", err)
 	}
 	// Reaching a terminal state without a nil-audits panic is the assertion.
-	waitTerminal(t, store, created.ID)
+	dispatchtest.WaitTerminal(t, store, created.ID)
 }
 
 // TestClockSeedsRunAndOutcomeInThePast proves WithClock parks a run's whole history in the past: the
@@ -120,7 +121,7 @@ func TestClockSeedsRunAndOutcomeInThePast(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	got := waitTerminal(t, store, created.ID)
+	got := dispatchtest.WaitTerminal(t, store, created.ID)
 
 	// Every record stamp lands well in the injected past, not at the real wall clock.
 	recent := time.Now().Add(-7 * time.Hour)

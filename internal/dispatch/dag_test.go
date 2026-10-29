@@ -15,6 +15,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -104,7 +105,7 @@ func TestDispatcherPipelineDAGSkipsAfterFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
-	got := waitTerminal(t, store, parent.ID)
+	got := dispatchtest.WaitTerminal(t, store, parent.ID)
 	if got.Status != run.StatusFailed {
 		t.Errorf("parent status = %q, want failed", got.Status)
 	}
@@ -132,7 +133,7 @@ func TestDispatcherPipelineDAGContinueOnFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
-	got := waitTerminal(t, store, parent.ID)
+	got := dispatchtest.WaitTerminal(t, store, parent.ID)
 	if got.Status != run.StatusFailed {
 		t.Errorf("parent status = %q, want failed since b failed", got.Status)
 	}
@@ -216,7 +217,7 @@ func TestDispatcherPipelineDAGRunsBranchesInParallel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
-	got := waitTerminal(t, store, parent.ID)
+	got := dispatchtest.WaitTerminal(t, store, parent.ID)
 	if got.Status != run.StatusSucceeded {
 		t.Errorf("parent status = %q, want succeeded, so b and c overlapped", got.Status)
 	}
@@ -267,7 +268,7 @@ func TestDispatcherPipelineStepRetries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
-	got := waitTerminal(t, store, parent.ID)
+	got := dispatchtest.WaitTerminal(t, store, parent.ID)
 	if got.Status != run.StatusSucceeded {
 		t.Errorf("parent status = %q, want succeeded after retries", got.Status)
 	}
@@ -305,7 +306,7 @@ func TestDispatcherPipelineStepRetriesExhausted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
-	got := waitTerminal(t, store, parent.ID)
+	got := dispatchtest.WaitTerminal(t, store, parent.ID)
 	if got.Status != run.StatusFailed {
 		t.Errorf("parent status = %q, want failed once retries are spent", got.Status)
 	}
@@ -340,7 +341,7 @@ func TestDispatcherPipelineDAGRetries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
-	got := waitTerminal(t, store, parent.ID)
+	got := dispatchtest.WaitTerminal(t, store, parent.ID)
 	if got.Status != run.StatusSucceeded {
 		t.Errorf("parent status = %q, want succeeded, b recovered on retry so d ran", got.Status)
 	}
@@ -410,7 +411,7 @@ func TestDispatcherPipelineOutputsFlowLinear(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
-	if got := waitTerminal(t, store, parent.ID); got.Status != run.StatusSucceeded {
+	if got := dispatchtest.WaitTerminal(t, store, parent.ID); got.Status != run.StatusSucceeded {
 		t.Fatalf("parent status = %q, want succeeded", got.Status)
 	}
 
@@ -454,7 +455,7 @@ func TestDispatcherPipelineOutputsFlowDAG(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
-	if got := waitTerminal(t, store, parent.ID); got.Status != run.StatusSucceeded {
+	if got := dispatchtest.WaitTerminal(t, store, parent.ID); got.Status != run.StatusSucceeded {
 		t.Fatalf("parent status = %q, want succeeded", got.Status)
 	}
 
@@ -665,7 +666,7 @@ func TestDenyPathNeedsARecordedVerdict(t *testing.T) {
 				}
 				d.sweepApprovalSteps()
 			}
-			got := waitTerminal(t, store, parent.ID)
+			got := dispatchtest.WaitTerminal(t, store, parent.ID)
 			prefix, _, _ := strings.Cut(got.Error, ":")
 			res := result{Status: got.Status, Deploy: runner.count("deploy"),
 				Notify: runner.count("notify"), Prefix: prefix}

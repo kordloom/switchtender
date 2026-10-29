@@ -10,31 +10,12 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/tfscan"
 )
-
-// Configurations the plan gate tests submit.
-const (
-	// cleanConfig declares nothing that runs a program while it plans.
-	cleanConfig = "resource \"terraform_data\" \"x\" {\n  input = \"y\"\n}\n"
-	// externalConfig declares one external data source, which runs its program while it plans.
-	externalConfig = "data \"external\" \"lookup\" {\n  program = [\"sh\", \"-c\", \"echo {}\"]\n}\n"
-)
-
-// rulesHolding returns a policy store holding the given rules.
-func rulesHolding(t *testing.T, rules ...*policy.Policy) policy.Store {
-	t.Helper()
-	store := policy.NewMemStore()
-	for _, p := range rules {
-		if err := store.Save(context.Background(), p); err != nil {
-			t.Fatalf("Save(policy) error = %v", err)
-		}
-	}
-	return store
-}
 
 // excludePlans is the rule a team writes to let plans through and hold everything else.
 func excludePlans(tool string) *policy.Policy {
@@ -65,17 +46,17 @@ func TestAPlanThatRunsAProgramIsHeld(t *testing.T) {
 		WantEntry  string
 		WantFixTxt string
 	}{{ // Test 0: A clean plan is still exempt.
-		Tool: run.ToolTerraform, Files: map[string]string{"main.tf": cleanConfig},
+		Tool: run.ToolTerraform, Files: map[string]string{"main.tf": dispatchtest.CleanConfig},
 		WantClass: run.DryRunChangeFree,
 	}, { // Test 1: An external data source in the root module holds the plan, named by address.
-		Tool: run.ToolTerraform, Files: map[string]string{"main.tf": externalConfig},
+		Tool: run.ToolTerraform, Files: map[string]string{"main.tf": dispatchtest.ExternalConfig},
 		WantHeld: true, WantClass: run.DryRunNotChangeFree,
 		WantEntry:  "data.external.lookup runs a program during plan (main.tf line 1)",
 		WantFixTxt: "replace the external data source with one that runs no program",
 	}, { // Test 2: One behind a module is named by the module's address.
 		Tool: run.ToolTerraform, Files: map[string]string{
 			"main.tf":             "module \"net\" {\n  source = \"./modules/net\"\n}\n",
-			"modules/net/main.tf": externalConfig,
+			"modules/net/main.tf": dispatchtest.ExternalConfig,
 		},
 		WantHeld: true, WantClass: run.DryRunNotChangeFree,
 		WantEntry:  "module.net.data.external.lookup runs a program during plan",
@@ -87,7 +68,7 @@ func TestAPlanThatRunsAProgramIsHeld(t *testing.T) {
 		WantEntry:  `could not read module.vpc from "terraform-aws-modules/vpc/aws"`,
 		WantFixTxt: "downloads registry and remote modules with the run's own credentials",
 	}, { // Test 4: OpenTofu's own files are read too.
-		Tool: run.ToolOpenTofu, Files: map[string]string{"main.tofu": externalConfig},
+		Tool: run.ToolOpenTofu, Files: map[string]string{"main.tofu": dispatchtest.ExternalConfig},
 		WantHeld: true, WantClass: run.DryRunNotChangeFree,
 		WantEntry:  "data.external.lookup runs a program during plan (main.tofu line 1)",
 		WantFixTxt: "while OpenTofu plans",
@@ -97,7 +78,7 @@ func TestAPlanThatRunsAProgramIsHeld(t *testing.T) {
 		WantEntry:  `could not read file "main.tf" (it could not be parsed`,
 		WantFixTxt: "drop exclude_dry_run",
 	}, { // Test 6: A working directory that is not there is unread, never change free.
-		Tool: run.ToolTerraform, Files: map[string]string{"main.tf": cleanConfig}, Dir: "absent",
+		Tool: run.ToolTerraform, Files: map[string]string{"main.tf": dispatchtest.CleanConfig}, Dir: "absent",
 		WantHeld: true, WantClass: run.DryRunIncomplete,
 		WantEntry:  "(not on this server)",
 		WantFixTxt: "drop exclude_dry_run",
@@ -107,10 +88,10 @@ func TestAPlanThatRunsAProgramIsHeld(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
 			dir := t.TempDir()
-			writeFiles(t, dir, test.Files)
+			dispatchtest.WriteFiles(t, dir, test.Files)
 			store := run.NewMemStore()
-			d := New(store, okRunner(), zap.NewNop(),
-				WithPolicies(rulesHolding(t, excludePlans(test.Tool))), WithNoJanitor())
+			d := New(store, dispatchtest.OKRunner(), zap.NewNop(),
+				WithPolicies(dispatchtest.RulesHolding(t, excludePlans(test.Tool))), WithNoJanitor())
 			t.Cleanup(d.Close)
 			workdir := dir
 			if test.Dir != "" {
@@ -178,10 +159,10 @@ func TestARuleHoldingEveryPlanNamesNoFix(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
-	writeFiles(t, dir, map[string]string{"main.tf": externalConfig})
+	dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": dispatchtest.ExternalConfig})
 	every := excludePlans(run.ToolTerraform)
 	every.ExcludeDryRun = false
-	d := New(run.NewMemStore(), okRunner(), zap.NewNop(), WithPolicies(rulesHolding(t, every)),
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithPolicies(dispatchtest.RulesHolding(t, every)),
 		WithNoJanitor())
 	t.Cleanup(d.Close)
 	got, err := d.Submit(ctx, "", "", run.WithTool(run.ToolTerraform), run.WithCommand(dir),
@@ -211,16 +192,16 @@ func TestARegoExemptionHoldsAPlanThatRunsAProgram(t *testing.T) {
 		Config   string
 		WantHeld bool
 	}{{ // Test 0: A clean plan passes.
-		Config: cleanConfig,
+		Config: dispatchtest.CleanConfig,
 	}, { // Test 1: A plan that runs a program is held.
-		Config: externalConfig, WantHeld: true,
+		Config: dispatchtest.ExternalConfig, WantHeld: true,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			writeFiles(t, dir, map[string]string{"main.tf": test.Config})
-			d := New(run.NewMemStore(), okRunner(), zap.NewNop(), WithPolicies(rules),
+			dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": test.Config})
+			d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithPolicies(rules),
 				WithNoJanitor())
 			t.Cleanup(d.Close)
 			got, err := d.Submit(ctx, "", "", run.WithTool(run.ToolTerraform), run.WithCommand(dir),
@@ -246,7 +227,7 @@ func TestARegoExemptionHoldsAPlanThatRunsAProgram(t *testing.T) {
 func TestAProjectPlanIsReadAtTheCommitItRuns(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	repo := newTreeRepo(t, map[string]string{"infra/main.tf": cleanConfig})
+	repo := newTreeRepo(t, map[string]string{"infra/main.tf": dispatchtest.CleanConfig})
 	syncer, err := project.NewSyncer(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewSyncer() error = %v", err)
@@ -256,8 +237,8 @@ func TestAProjectPlanIsReadAtTheCommitItRuns(t *testing.T) {
 	if err := projects.Save(ctx, p); err != nil {
 		t.Fatalf("Save(project) error = %v", err)
 	}
-	d := New(run.NewMemStore(), okRunner(), zap.NewNop(), WithProjects(projects, syncer),
-		WithPolicies(rulesHolding(t, excludePlans(run.ToolTerraform))), WithNoJanitor())
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithProjects(projects, syncer),
+		WithPolicies(dispatchtest.RulesHolding(t, excludePlans(run.ToolTerraform))), WithNoJanitor())
 	t.Cleanup(d.Close)
 	submit := func() *run.Run {
 		t.Helper()
@@ -276,7 +257,7 @@ func TestAProjectPlanIsReadAtTheCommitItRuns(t *testing.T) {
 	if clean := submit(); clean.Status == run.StatusPendingApproval {
 		t.Fatalf("a clean project plan was held: %q", clean.DryRunFindings())
 	}
-	commitTree(t, repo, map[string]string{"infra/lookup.tf": externalConfig})
+	commitTree(t, repo, map[string]string{"infra/lookup.tf": dispatchtest.ExternalConfig})
 	held := submit()
 	if held.Status != run.StatusPendingApproval {
 		t.Fatalf("a project plan running a program, pushed before the launch, was exempt")
@@ -297,9 +278,9 @@ func TestAPipelinePlanStepThatRunsAProgramHoldsThePipeline(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
-	writeFiles(t, dir, map[string]string{"main.tf": externalConfig})
-	d := New(run.NewMemStore(), okRunner(), zap.NewNop(),
-		WithPolicies(rulesHolding(t, excludePlans(run.ToolTerraform))), WithNoJanitor())
+	dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": dispatchtest.ExternalConfig})
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(),
+		WithPolicies(dispatchtest.RulesHolding(t, excludePlans(run.ToolTerraform))), WithNoJanitor())
 	t.Cleanup(d.Close)
 	got, err := d.SubmitPipeline(ctx, "nightly", "", []run.PipelineStep{{
 		Name: "plan", Tool: run.ToolTerraform, Command: dir, DryRun: true,
@@ -334,12 +315,12 @@ func TestThePlanGateStillPlansAnApplyThatRunsAProgram(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
-	writeFiles(t, dir, map[string]string{"main.tf": externalConfig})
+	dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": dispatchtest.ExternalConfig})
 	store := run.NewMemStore()
 	runner := &specRecorder{}
 	limit := &policy.Policy{ID: "pol_limit", Name: "prod applies", Tool: run.ToolTerraform,
 		Effect: policy.EffectRequireApproval, MaxDestroy: 5}
-	d := New(store, runner, zap.NewNop(), WithPolicies(rulesHolding(t, limit)), WithNoJanitor())
+	d := New(store, runner, zap.NewNop(), WithPolicies(dispatchtest.RulesHolding(t, limit)), WithNoJanitor())
 	t.Cleanup(d.Close)
 	got, err := d.Submit(ctx, "", "", run.WithTool(run.ToolTerraform), run.WithCommand(dir))
 	if err != nil {
@@ -349,7 +330,7 @@ func TestThePlanGateStillPlansAnApplyThatRunsAProgram(t *testing.T) {
 		t.Fatalf("status %q, note %q, scans %v: the apply was held or scanned before its plan",
 			got.Status, got.HoldNote, got.DryRunScans)
 	}
-	waitTerminal(t, store, got.ID)
+	dispatchtest.WaitTerminal(t, store, got.ID)
 	specs := runner.executed()
 	if len(specs) == 0 || !specs[0].DryRun {
 		t.Errorf("executed %+v, want the plan gate to plan the apply first", specs)

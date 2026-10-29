@@ -8,6 +8,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -65,7 +66,7 @@ func TestApprovalStepTimeoutFromAStaleSweepIsNotRecorded(t *testing.T) {
 			if b.timeOutStep(context.Background(), stale) {
 				t.Errorf("a sweep holding a stale listing settled a step already decided")
 			}
-			waitTerminal(t, store, parent.ID)
+			dispatchtest.WaitTerminal(t, store, parent.ID)
 			if diff := cmp.Diff(test.WantPaths, stepPaths(t, audits)); diff != "" {
 				t.Errorf("the step's chain entries (-want +got):\n%s", diff)
 			}

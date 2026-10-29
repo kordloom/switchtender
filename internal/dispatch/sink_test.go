@@ -39,7 +39,7 @@ func TestStreamMaskerDrainWithholdsPartialSecret(t *testing.T) {
 	if strings.Contains("log: "+got, "TOPSEC") {
 		t.Errorf("drain leaked a partial secret across the release: %q then %q", "log: ", got)
 	}
-	if want := maskToken + " done"; got != want {
+	if want := MaskToken + " done"; got != want {
 		t.Errorf("after drain, rest = %q, want %q", got, want)
 	}
 }
@@ -100,7 +100,7 @@ func TestLogSinkReleaseHeldWithholdsPartialSecret(t *testing.T) {
 			t.Fatalf("stored log %q leaked %q despite the mid-stream release", got, leak)
 		}
 	}
-	if want := "log: " + maskToken + " done"; string(got) != want {
+	if want := "log: " + MaskToken + " done"; string(got) != want {
 		t.Errorf("stored log = %q, want %q", got, want)
 	}
 }

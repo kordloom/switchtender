@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -195,7 +196,7 @@ func newFetchingRunner(t *testing.T) fetchingRunner {
 	if !ok {
 		t.Fatal("the runner cannot fetch modules")
 	}
-	return fetchingRunner{Runner: okRunner(), fetch: fetch}
+	return fetchingRunner{Runner: dispatchtest.OKRunner(), fetch: fetch}
 }
 
 // cliCredential stores an env credential carrying the CLI configuration path, which is how a run
@@ -287,11 +288,11 @@ func TestTheGateDownloadsModulesBeforeItReadsAPlan(t *testing.T) {
 			reg := newTestRegistry(t, testModules())
 			creds, sealer := cliCredential(t, reg.cliConfig(t))
 			dir := t.TempDir()
-			writeFiles(t, dir, map[string]string{"main.tf": registryCall(test.Module)})
+			dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": registryCall(test.Module)})
 			store := run.NewMemStore()
 			files := t.TempDir()
 			d := New(store, newFetchingRunner(t), zap.NewNop(),
-				WithPolicies(rulesHolding(t, excludePlans(run.ToolTerraform))),
+				WithPolicies(dispatchtest.RulesHolding(t, excludePlans(run.ToolTerraform))),
 				WithCredentials(creds, sealer), WithRunFilesRoot(files), WithNoJanitor(),
 				WithModuleFetchLimits(cmp.Or(test.Timeout, time.Minute), 1<<20))
 			t.Cleanup(d.Close)
@@ -353,9 +354,9 @@ func TestOneSubmissionDownloadsOnce(t *testing.T) {
 	reg := newTestRegistry(t, testModules())
 	creds, sealer := cliCredential(t, reg.cliConfig(t))
 	dir := t.TempDir()
-	writeFiles(t, dir, map[string]string{"main.tf": registryCall("clean")})
+	dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": registryCall("clean")})
 	d := New(run.NewMemStore(), newFetchingRunner(t), zap.NewNop(),
-		WithPolicies(rulesHolding(t, excludePlans(run.ToolTerraform))),
+		WithPolicies(dispatchtest.RulesHolding(t, excludePlans(run.ToolTerraform))),
 		WithCredentials(creds, sealer), WithRunFilesRoot(t.TempDir()), WithNoJanitor())
 	t.Cleanup(d.Close)
 	probe := &run.Run{Tool: run.ToolTerraform, Command: dir, DryRun: true,
@@ -376,7 +377,7 @@ func TestOneSubmissionDownloadsOnce(t *testing.T) {
 	}
 	// A change to the configuration is a different configuration, so it is downloaded and read
 	// again rather than answered from what was read before.
-	writeFiles(t, dir, map[string]string{"main.tf": registryCall("clean") + "\n# edited\n"})
+	dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": registryCall("clean") + "\n# edited\n"})
 	if _, err := d.Submit(ctx, "", "", run.WithTool(run.ToolTerraform), run.WithCommand(dir),
 		run.WithDryRun(true), run.WithCredentialIDs([]string{"cred_tf"})); err != nil {
 		t.Fatalf("Submit() error = %v", err)
@@ -392,7 +393,7 @@ func TestOneSubmissionDownloadsOnce(t *testing.T) {
 func TestTheGateDownloadsOnlyWhereThePlanRuns(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	writeFiles(t, dir, map[string]string{"main.tf": registryCall("clean")})
+	dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": registryCall("clean")})
 	tests := []struct {
 		// CanFetch gives the runner a download.
 		CanFetch bool
@@ -411,9 +412,9 @@ func TestTheGateDownloadsOnlyWhereThePlanRuns(t *testing.T) {
 			t.Parallel()
 			var mu sync.Mutex
 			fetches := 0
-			runner := roundhouse.Runner(okRunner())
+			runner := roundhouse.Runner(dispatchtest.OKRunner())
 			if test.CanFetch {
-				runner = fetchingRunner{Runner: okRunner(), fetch: roundhouse.ModuleFetcherFunc(
+				runner = fetchingRunner{Runner: dispatchtest.OKRunner(), fetch: roundhouse.ModuleFetcherFunc(
 					func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
 						mu.Lock()
 						fetches++
@@ -465,7 +466,7 @@ func TestTheGateDownloadsWithTheRunsCredentialsAlone(t *testing.T) {
 		}
 	}
 	dir := t.TempDir()
-	writeFiles(t, dir, map[string]string{"main.tf": registryCall("clean")})
+	dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": registryCall("clean")})
 	tests := []struct {
 		// Creds are the credentials the run names.
 		Creds []string
@@ -487,7 +488,7 @@ func TestTheGateDownloadsWithTheRunsCredentialsAlone(t *testing.T) {
 			var handed roundhouse.Spec
 			// The download fails the way a registry refusing a token does, and echoes what it was
 			// handed, as a careless error line would.
-			runner := fetchingRunner{Runner: okRunner(), fetch: roundhouse.ModuleFetcherFunc(
+			runner := fetchingRunner{Runner: dispatchtest.OKRunner(), fetch: roundhouse.ModuleFetcherFunc(
 				func(_ context.Context, spec roundhouse.Spec, out io.Writer) (roundhouse.Result, error) {
 					mu.Lock()
 					handed = spec
@@ -558,7 +559,7 @@ func TestAProjectPlanDownloadsItsModulesAtTheCommit(t *testing.T) {
 		t.Fatalf("Save(project) error = %v", err)
 	}
 	d := New(run.NewMemStore(), newFetchingRunner(t), zap.NewNop(), WithProjects(projects, syncer),
-		WithPolicies(rulesHolding(t, excludePlans(run.ToolTerraform))),
+		WithPolicies(dispatchtest.RulesHolding(t, excludePlans(run.ToolTerraform))),
 		WithCredentials(creds, sealer), WithRunFilesRoot(t.TempDir()), WithNoJanitor())
 	t.Cleanup(d.Close)
 	wt, err := syncer.Sync(p, "")
@@ -607,7 +608,7 @@ func TestTheGateIgnoresACommittedManifestAndDownloadsTheRealModule(t *testing.T)
 	dir := t.TempDir()
 	// The committed tree: a call to the registry module "hiding", plus a planted clean copy and a
 	// manifest that names it, the shape a pull request author commits to dodge the gate.
-	writeFiles(t, dir, map[string]string{
+	dispatchtest.WriteFiles(t, dir, map[string]string{
 		"main.tf": registryCall("hiding"),
 		".terraform/modules/modules.json": "{\"Modules\":[{\"Key\":\"\",\"Source\":\"\",\"Dir\":\".\"}," +
 			"{\"Key\":\"net\",\"Source\":\"" + registryHost + "/acme/hiding/null\"," +
@@ -617,7 +618,7 @@ func TestTheGateIgnoresACommittedManifestAndDownloadsTheRealModule(t *testing.T)
 	files := t.TempDir()
 	// The download gets a minute, so a busy machine never stops it before it reads the module.
 	d := New(run.NewMemStore(), newFetchingRunner(t), zap.NewNop(),
-		WithPolicies(rulesHolding(t, excludePlans(run.ToolTerraform))),
+		WithPolicies(dispatchtest.RulesHolding(t, excludePlans(run.ToolTerraform))),
 		WithCredentials(creds, sealer), WithRunFilesRoot(files), WithNoJanitor(),
 		WithModuleFetchLimits(time.Minute, 1<<20))
 	t.Cleanup(d.Close)

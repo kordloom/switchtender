@@ -13,6 +13,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/plantest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -74,7 +75,7 @@ func TestARunWhoseOutputWasNotStoredIsNotASuccess(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
-			got := waitTerminal(t, store, created.ID)
+			got := dispatchtest.WaitTerminal(t, store, created.ID)
 			if got.Status != test.WantStatus {
 				t.Errorf("run status = %q, want %q", got.Status, test.WantStatus)
 			}
@@ -107,7 +108,7 @@ func TestLostOutputReachesTheSignedOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	got := waitTerminal(t, store, created.ID)
+	got := dispatchtest.WaitTerminal(t, store, created.ID)
 	entry := waitOutcomeEntry(t, audits, created.ID)
 	body, err := outcome.Body(ctx, store, got)
 	if err != nil {
@@ -149,7 +150,7 @@ func TestAPlanWhoseOutputWasNotStoredProposesNoApply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	got := waitTerminal(t, store, created.ID)
+	got := dispatchtest.WaitTerminal(t, store, created.ID)
 	if got.Status != run.StatusFailed {
 		t.Errorf("plan run status = %q, want failed: its output was not stored", got.Status)
 	}
@@ -185,11 +186,11 @@ func TestALostPlanGateNoteIsNotSilent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	got := waitTerminal(t, store, created.ID)
+	got := dispatchtest.WaitTerminal(t, store, created.ID)
 	if got.Status != run.StatusSucceeded {
 		t.Fatalf("plan run status = %q, want succeeded: the plan's own output was stored", got.Status)
 	}
-	proposal := waitProposal(t, store, created.ID)
+	proposal := dispatchtest.WaitProposal(t, store, created.ID)
 	want := "the note naming proposed apply " + proposal.ID + " could not be stored in this log"
 	if !strings.Contains(got.Warning, want) {
 		t.Errorf("plan run warning = %q, want it to contain %q", got.Warning, want)

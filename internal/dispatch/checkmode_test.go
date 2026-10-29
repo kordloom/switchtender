@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -14,6 +13,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -41,20 +41,6 @@ func excludeDryRuns(t *testing.T) policy.Store {
 		t.Fatalf("Save(policy) error = %v", err)
 	}
 	return rules
-}
-
-// writeFiles writes files under dir, creating the directories they sit in.
-func writeFiles(t *testing.T, dir string, files map[string]string) {
-	t.Helper()
-	for name, body := range files {
-		full := filepath.Join(dir, filepath.FromSlash(name))
-		if err := os.MkdirAll(filepath.Dir(full), 0o750); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
-		if err := os.WriteFile(full, []byte(body), 0o600); err != nil {
-			t.Fatalf("write %s: %v", name, err)
-		}
-	}
 }
 
 // specRecorder is a runner that records the specs it executes.
@@ -145,9 +131,9 @@ func TestADryRunThatForcesRealTasksIsHeld(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
 			dir := t.TempDir()
-			writeFiles(t, dir, test.Files)
+			dispatchtest.WriteFiles(t, dir, test.Files)
 			store := run.NewMemStore()
-			d := New(store, okRunner(), zap.NewNop(), WithPolicies(excludeDryRuns(t)), WithNoJanitor())
+			d := New(store, dispatchtest.OKRunner(), zap.NewNop(), WithPolicies(excludeDryRuns(t)), WithNoJanitor())
 			t.Cleanup(d.Close)
 
 			got, err := d.Submit(ctx, filepath.Join(dir, "site.yml"), "hosts.ini",
@@ -204,7 +190,7 @@ func TestADryRunThatForcesRealTasksIsHeld(t *testing.T) {
 func TestAnUnreadablePlaybookFailsClosed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	d := New(run.NewMemStore(), okRunner(), zap.NewNop(), WithPolicies(excludeDryRuns(t)),
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithPolicies(excludeDryRuns(t)),
 		WithNoJanitor())
 	t.Cleanup(d.Close)
 	got, err := d.Submit(ctx, filepath.Join(t.TempDir(), "absent.yml"), "hosts.ini",
@@ -233,7 +219,7 @@ func TestAnApprovedForcingDryRunStillRunsInCheckMode(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
-	writeFiles(t, dir, map[string]string{"site.yml": forcedTaskPlaybook})
+	dispatchtest.WriteFiles(t, dir, map[string]string{"site.yml": forcedTaskPlaybook})
 	store := run.NewMemStore()
 	runner := &specRecorder{}
 	d := New(store, runner, zap.NewNop(), WithPolicies(excludeDryRuns(t)), WithNoJanitor())
@@ -249,7 +235,7 @@ func TestAnApprovedForcingDryRunStillRunsInCheckMode(t *testing.T) {
 	if _, err := d.Approve(ctx, held.ID, decider("approver", "session")); err != nil {
 		t.Fatalf("Approve() error = %v", err)
 	}
-	final := waitTerminal(t, store, held.ID)
+	final := dispatchtest.WaitTerminal(t, store, held.ID)
 	if final.Status != run.StatusSucceeded {
 		t.Fatalf("status = %q, want succeeded", final.Status)
 	}
@@ -278,8 +264,8 @@ func TestAPipelineStepThatForcesRealTasksHoldsThePipeline(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
 			dir := t.TempDir()
-			writeFiles(t, dir, map[string]string{"site.yml": test.Step})
-			d := New(run.NewMemStore(), okRunner(), zap.NewNop(), WithPolicies(excludeDryRuns(t)),
+			dispatchtest.WriteFiles(t, dir, map[string]string{"site.yml": test.Step})
+			d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithPolicies(excludeDryRuns(t)),
 				WithNoJanitor())
 			t.Cleanup(d.Close)
 			got, err := d.SubmitPipeline(ctx, "nightly", "hosts.ini", []run.PipelineStep{{
@@ -321,7 +307,7 @@ func TestAProjectDryRunIsReadAtTheCommitItRuns(t *testing.T) {
 	if err := projects.Save(ctx, p); err != nil {
 		t.Fatalf("Save(project) error = %v", err)
 	}
-	d := New(run.NewMemStore(), okRunner(), zap.NewNop(), WithProjects(projects, syncer),
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithProjects(projects, syncer),
 		WithPolicies(excludeDryRuns(t)), WithNoJanitor())
 	t.Cleanup(d.Close)
 	submit := func() *run.Run {

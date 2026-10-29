@@ -17,6 +17,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/factcache"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/outcome"
@@ -132,7 +133,7 @@ func TestFactCacheRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Submit() error = %v", err)
 		}
-		return waitTerminal(t, store, r.ID)
+		return dispatchtest.WaitTerminal(t, store, r.ID)
 	}
 	cached := func() []string {
 		t.Helper()
@@ -291,11 +292,11 @@ func TestFactCacheLivesInALockedRunDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	waitTerminal(t, store, r.ID)
+	dispatchtest.WaitTerminal(t, store, r.ID)
 	if diff := cmp.Diff(seen{Parent: root, Locked: true}, <-got); diff != "" {
 		t.Errorf("fact cache placement mismatch (-want +got):\n%s", diff)
 	}
-	deadline := time.Now().Add(waitBudget)
+	deadline := time.Now().Add(dispatchtest.WaitBudget)
 	for {
 		entries, err := os.ReadDir(root)
 		if err != nil {
@@ -336,7 +337,7 @@ func TestFactCacheUnavailableSaysSo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	done := waitTerminal(t, store, r.ID)
+	done := dispatchtest.WaitTerminal(t, store, r.ID)
 	if !strings.Contains(done.Warning, "fact cache is not reachable from this executor") {
 		t.Errorf("warning = %q, want it to say the cache was unavailable", done.Warning)
 	}

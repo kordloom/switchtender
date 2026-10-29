@@ -14,6 +14,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
@@ -25,7 +26,7 @@ import (
 func moduleTree(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "modules")
-	writeFiles(t, dir, files)
+	dispatchtest.WriteFiles(t, dir, files)
 	return dir
 }
 
@@ -61,23 +62,23 @@ func TestAModuleTreeHasOneDigest(t *testing.T) {
 		Want error
 	}{{ // Test 0: Version control metadata from a repository download is left out.
 		Change: func(t *testing.T, dir string) {
-			writeFiles(t, dir, map[string]string{"net/.git/index": "stat data", "net/.git/HEAD": "x"})
+			dispatchtest.WriteFiles(t, dir, map[string]string{"net/.git/index": "stat data", "net/.git/HEAD": "x"})
 		},
 		WantSame: true,
 	}, { // Test 1: The manifest is read for what it records, not the order it was written in.
 		Change: func(t *testing.T, dir string) {
-			writeFiles(t, dir, map[string]string{"modules.json": `{"Modules": [` +
+			dispatchtest.WriteFiles(t, dir, map[string]string{"modules.json": `{"Modules": [` +
 				`{"Key":"net","Source":"registry.example.test/acme/net/null","Version":"1.0.0",` +
 				`"Dir":".terraform/modules/net"}, {"Key":"","Source":"","Dir":"."}]}`})
 		},
 		WantSame: true,
 	}, { // Test 2: A file's content.
 		Change: func(t *testing.T, dir string) {
-			writeFiles(t, dir, map[string]string{"net/main.tf": "output \"o\" {\n  value = \"two\"\n}\n"})
+			dispatchtest.WriteFiles(t, dir, map[string]string{"net/main.tf": "output \"o\" {\n  value = \"two\"\n}\n"})
 		},
 	}, { // Test 3: The version the manifest records.
 		Change: func(t *testing.T, dir string) {
-			writeFiles(t, dir, map[string]string{"modules.json": strings.Replace(
+			dispatchtest.WriteFiles(t, dir, map[string]string{"modules.json": strings.Replace(
 				pinnedTree()["modules.json"], "1.0.0", "1.1.0", 1)})
 		},
 	}, { // Test 4: Whether a file is executable.
@@ -153,7 +154,7 @@ func TestTheGateKeepsWhatItRead(t *testing.T) {
 		WantDropped bool
 	}{{ // Test 0: The kept tree replaces whatever the working directory held.
 		Prepare: func(t *testing.T, _, workdir string) string {
-			writeFiles(t, workdir, map[string]string{".terraform/modules/stale/main.tf": "old"})
+			dispatchtest.WriteFiles(t, workdir, map[string]string{".terraform/modules/stale/main.tf": "old"})
 			return ""
 		},
 		WantRestored: true,
@@ -340,7 +341,7 @@ func TestAPlanRunsTheModulesTheGateRead(t *testing.T) {
 			store := run.NewMemStore()
 			files := t.TempDir()
 			d := New(store, fetch, zap.NewNop(), WithProjects(projects, syncer),
-				WithPolicies(rulesHolding(t, &policy.Policy{ID: "pol_all", Name: "hold plans",
+				WithPolicies(dispatchtest.RulesHolding(t, &policy.Policy{ID: "pol_all", Name: "hold plans",
 					Tool: run.ToolTerraform, Effect: policy.EffectRequireApproval,
 					MaxDestroy: policy.DisabledMaxDestroy})),
 				WithCredentials(creds, sealer), WithRunFilesRoot(files), WithNoJanitor(),
@@ -375,7 +376,7 @@ func TestAPlanRunsTheModulesTheGateRead(t *testing.T) {
 			if _, err := d.Approve(ctx, held.ID, decider("approver-pat", "session")); err != nil {
 				t.Fatalf("Approve() error = %v", err)
 			}
-			final := waitTerminal(t, store, held.ID)
+			final := dispatchtest.WaitTerminal(t, store, held.ID)
 			if final.Status != test.WantStatus || !strings.Contains(final.Error, test.WantError) {
 				t.Errorf("run ended %q with %q, want %q saying %q", final.Status, final.Error,
 					test.WantStatus, test.WantError)
@@ -443,7 +444,7 @@ func TestARunThatCannotShowItsModulesIsRefused(t *testing.T) {
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			d := New(run.NewMemStore(), okRunner(), zap.NewNop(), WithRunFilesRoot(t.TempDir()),
+			d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithRunFilesRoot(t.TempDir()),
 				WithNoJanitor())
 			t.Cleanup(d.Close)
 			r := &run.Run{ID: "run_pin", Tool: run.ToolTerraform, Command: ".", DryRun: true}
@@ -483,7 +484,7 @@ func TestTheGateDownloadsEveryModuleAfresh(t *testing.T) {
 	})
 	creds, sealer := cliCredential(t, reg.cliConfig(t))
 	dir := t.TempDir()
-	writeFiles(t, dir, map[string]string{
+	dispatchtest.WriteFiles(t, dir, map[string]string{
 		"main.tf": fmt.Sprintf("module \"a\" {\n  source  = \"%s/acme/clean/null\"\n"+
 			"  version = \"1.0.0\"\n}\nmodule \"b\" {\n  source  = \"%s/acme/other/null\"\n"+
 			"  version = \"1.0.0\"\n}\n", registryHost, registryHost),
@@ -494,7 +495,7 @@ func TestTheGateDownloadsEveryModuleAfresh(t *testing.T) {
 	})
 	files := t.TempDir()
 	d := New(run.NewMemStore(), newFetchingRunner(t), zap.NewNop(),
-		WithPolicies(rulesHolding(t, excludePlans(run.ToolTerraform))),
+		WithPolicies(dispatchtest.RulesHolding(t, excludePlans(run.ToolTerraform))),
 		WithCredentials(creds, sealer), WithRunFilesRoot(files), WithNoJanitor())
 	t.Cleanup(d.Close)
 	got, err := d.Submit(ctx, "", "", run.WithTool(run.ToolTerraform), run.WithCommand(dir),
@@ -539,7 +540,7 @@ func TestModuleKeepIsWhatTheOptionSays(t *testing.T) {
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			d := New(run.NewMemStore(), okRunner(), nil, WithNoJanitor(),
+			d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithNoJanitor(),
 				WithRunFilesRoot(t.TempDir()), WithModuleKeep(test.KeepFor, test.MaxBytes))
 			t.Cleanup(d.Close)
 			got := [2]int64{int64(d.modules.ttl), d.modules.maxBytes}

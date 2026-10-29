@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -97,7 +98,7 @@ func TestKubeconfigTypeMasksEveryLineUntilSwitched(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
-			if got := waitTerminal(t, store, r.ID); got.Status != run.StatusSucceeded {
+			if got := dispatchtest.WaitTerminal(t, store, r.ID); got.Status != run.StatusSucceeded {
 				t.Fatalf("status = %q (%s), want succeeded", got.Status, got.Error)
 			}
 			if n := <-envVars; n != test.WantEnvVars {

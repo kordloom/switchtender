@@ -16,6 +16,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/binding"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -166,7 +167,7 @@ func (in *adoptInstall) parked(t *testing.T) (*run.Run, *run.Run) {
 // stepOf returns the step of the workflow parentID named name, waiting for its record.
 func (in *adoptInstall) stepOf(t *testing.T, parentID, name string) *run.Run {
 	t.Helper()
-	deadline := time.Now().Add(waitBudget)
+	deadline := time.Now().Add(dispatchtest.WaitBudget)
 	for time.Now().Before(deadline) {
 		steps, err := in.store.Steps(context.Background(), parentID)
 		if err != nil {
@@ -317,7 +318,7 @@ func TestAdoptSealsWhatAnOldBinaryLeft(t *testing.T) {
 			if _, err := in.keyed(t).Approve(ctx, c.row.ID, bndDecider()); err != nil {
 				t.Fatalf("Approve() error = %v", err)
 			}
-			return waitTerminal(t, in.store, c.row.ID)
+			return dispatchtest.WaitTerminal(t, in.store, c.row.ID)
 		},
 		WantResult: adoptResult{Seals: []string{binding.KindSubmit}, Holds: true,
 			Status: run.StatusSucceeded, Ran: ran("site.yml")},
@@ -336,7 +337,7 @@ func TestAdoptSealsWhatAnOldBinaryLeft(t *testing.T) {
 		},
 		Drive: func(t *testing.T, in *adoptInstall, c adoptCase) *run.Run {
 			in.keyed(t)
-			return waitTerminal(t, in.store, c.row.ID)
+			return dispatchtest.WaitTerminal(t, in.store, c.row.ID)
 		},
 		WantResult: adoptResult{Seals: []string{binding.KindRun}, Holds: true,
 			Status: run.StatusSucceeded, Ran: ran("site.yml")},
@@ -354,7 +355,7 @@ func TestAdoptSealsWhatAnOldBinaryLeft(t *testing.T) {
 		Check: func(in *adoptInstall, c adoptCase) error { return in.claimHolds(c.row) },
 		Drive: func(t *testing.T, in *adoptInstall, c adoptCase) *run.Run {
 			in.keyed(t).sweepApprovalSteps()
-			return waitTerminal(t, in.store, c.row.ID)
+			return dispatchtest.WaitTerminal(t, in.store, c.row.ID)
 		},
 		WantResult: adoptResult{Seals: []string{binding.KindClaim}, Holds: true,
 			Status: run.StatusSucceeded, Ran: ran("site.yml")},
@@ -385,7 +386,7 @@ func TestAdoptSealsWhatAnOldBinaryLeft(t *testing.T) {
 			if _, err := in.keyed(t).Approve(ctx, c.parent.ID, bndDecider()); err != nil {
 				t.Fatalf("Approve() error = %v", err)
 			}
-			return waitTerminal(t, in.store, c.parent.ID)
+			return dispatchtest.WaitTerminal(t, in.store, c.parent.ID)
 		},
 		WantResult: adoptResult{Seals: []string{binding.KindShard, binding.KindShard,
 			binding.KindSubmit}, Holds: true, Status: run.StatusSucceeded,
@@ -406,7 +407,7 @@ func TestAdoptSealsWhatAnOldBinaryLeft(t *testing.T) {
 			if _, err := in.keyed(t).DecideStep(ctx, c.node.ID, deny); err != nil {
 				t.Fatalf("DecideStep() error = %v", err)
 			}
-			return waitTerminal(t, in.store, c.parent.ID)
+			return dispatchtest.WaitTerminal(t, in.store, c.parent.ID)
 		},
 		WantResult: adoptResult{Seals: []string{binding.KindResult, binding.KindStep,
 			binding.KindSubmit}, Holds: true, Status: run.StatusSucceeded,
@@ -426,7 +427,7 @@ func TestAdoptSealsWhatAnOldBinaryLeft(t *testing.T) {
 		Check: func(in *adoptInstall, c adoptCase) error { return in.claimHolds(c.row) },
 		Drive: func(t *testing.T, in *adoptInstall, c adoptCase) *run.Run {
 			in.keyed(t).sweepApprovalSteps()
-			return waitTerminal(t, in.store, c.parent.ID)
+			return dispatchtest.WaitTerminal(t, in.store, c.parent.ID)
 		},
 		WantResult: adoptResult{Seals: []string{binding.KindClaim, binding.KindResult,
 			binding.KindSubmit}, Holds: true, Status: run.StatusSucceeded,
@@ -447,7 +448,7 @@ func TestAdoptSealsWhatAnOldBinaryLeft(t *testing.T) {
 		},
 		Drive: func(t *testing.T, in *adoptInstall, c adoptCase) *run.Run {
 			in.keyed(t)
-			return waitTerminal(t, in.store, c.parent.ID)
+			return dispatchtest.WaitTerminal(t, in.store, c.parent.ID)
 		},
 		WantResult: adoptResult{Seals: []string{binding.KindStep, binding.KindSubmit}, Holds: true,
 			Status: run.StatusSucceeded, Ran: ran("deploy.yml")},
@@ -472,7 +473,7 @@ func TestAdoptSealsWhatAnOldBinaryLeft(t *testing.T) {
 		},
 		Drive: func(t *testing.T, in *adoptInstall, c adoptCase) *run.Run {
 			in.keyed(t)
-			return waitTerminal(t, in.store, c.parent.ID)
+			return dispatchtest.WaitTerminal(t, in.store, c.parent.ID)
 		},
 		WantResult: adoptResult{Seals: []string{binding.KindRun, binding.KindStep}, Released: 1,
 			Holds: true, Status: run.StatusSucceeded, Ran: ran("deploy.yml")},
@@ -491,7 +492,7 @@ func TestAdoptSealsWhatAnOldBinaryLeft(t *testing.T) {
 			if _, err := in.keyed(t).DecideStep(ctx, c.node.ID, approve); err != nil {
 				t.Fatalf("DecideStep() error = %v", err)
 			}
-			return waitTerminal(t, in.store, c.parent.ID)
+			return dispatchtest.WaitTerminal(t, in.store, c.parent.ID)
 		},
 		WantResult: adoptResult{Seals: []string{binding.KindResult, binding.KindStep,
 			binding.KindSubmit}, Holds: true, Status: run.StatusSucceeded,
@@ -519,7 +520,7 @@ func TestAdoptSealsWhatAnOldBinaryLeft(t *testing.T) {
 		},
 		Drive: func(t *testing.T, in *adoptInstall, c adoptCase) *run.Run {
 			in.keyed(t).sweepApprovalSteps()
-			return waitTerminal(t, in.store, c.parent.ID)
+			return dispatchtest.WaitTerminal(t, in.store, c.parent.ID)
 		},
 		WantResult: adoptResult{Seals: []string{binding.KindGate, binding.KindResult,
 			binding.KindSubmit}, Holds: true, Status: run.StatusSucceeded,

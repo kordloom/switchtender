@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -233,26 +234,6 @@ func (c *countingRunnerLister) Hosts(context.Context, string, string) ([]string,
 	return c.hosts, nil
 }
 
-// waitForStatus blocks until the run reaches want or the deadline passes, failing the test with the
-// status it was actually left in.
-func waitForStatus(t *testing.T, store run.Store, id string, want run.Status) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	var last run.Status
-	for time.Now().Before(deadline) {
-		got, err := store.Get(context.Background(), id)
-		if err != nil {
-			t.Fatalf("Get() error = %v", err)
-		}
-		last = got.Status
-		if last == want {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("run %s status = %q after 5s, want %q", id, last, want)
-}
-
 // ansibleWidePolicy gates every Ansible run, the blanket shape an operator writes to keep changes
 // behind an approver. Splitting only ever happens for Ansible, so this is the policy a split has to
 // respect.
@@ -336,7 +317,7 @@ func TestApproveStartsHeldSplit(t *testing.T) {
 	if _, err := d.Approve(ctx, parent.ID, decider("approver-pat", "session")); err != nil {
 		t.Fatalf("Approve() error = %v", err)
 	}
-	waitForStatus(t, store, parent.ID, run.StatusSucceeded)
+	dispatchtest.WaitForStatus(t, store, parent.ID, run.StatusSucceeded)
 	if runner.executions.Load() == 0 {
 		t.Error("an approved split executed nothing")
 	}

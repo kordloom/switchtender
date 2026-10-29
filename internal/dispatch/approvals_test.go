@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -62,7 +63,7 @@ func TestRunApprovalGate(t *testing.T) {
 	if approved.Status != run.StatusPending {
 		t.Errorf("approved status = %q, want pending", approved.Status)
 	}
-	final := waitTerminal(t, store, created.ID)
+	final := dispatchtest.WaitTerminal(t, store, created.ID)
 	if final.Status != run.StatusSucceeded {
 		t.Errorf("final status = %q, want succeeded", final.Status)
 	}
@@ -123,7 +124,7 @@ func TestApproveRejectRequireHeld(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	waitTerminal(t, store, created.ID)
+	dispatchtest.WaitTerminal(t, store, created.ID)
 
 	if _, err := d.Approve(context.Background(), created.ID,
 		decider("approver-pat", "session")); !errors.Is(err, ErrNotPendingApproval) {

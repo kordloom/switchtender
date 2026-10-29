@@ -16,6 +16,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/plantest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -122,7 +123,7 @@ func TestADriftCheckKeepsItsPlanForAReconcile(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
-			done := waitTerminal(t, store, check.ID)
+			done := dispatchtest.WaitTerminal(t, store, check.ID)
 			sealed, err := store.DriftPlan(ctx, check.ID)
 			if err != nil {
 				t.Fatalf("DriftPlan() error = %v", err)
@@ -179,10 +180,10 @@ func TestARuleHeldApplyPlansFirstAndHoldsItsPlan(t *testing.T) {
 		t.Fatalf("the request is %q held by %q, want it queued to plan first", plan.Status,
 			plan.HeldByPolicy)
 	}
-	if done := waitTerminal(t, store, plan.ID); done.Status != run.StatusSucceeded {
+	if done := dispatchtest.WaitTerminal(t, store, plan.ID); done.Status != run.StatusSucceeded {
 		t.Fatalf("plan status = %q (%s), want succeeded", done.Status, done.Error)
 	}
-	proposal := waitProposal(t, store, plan.ID)
+	proposal := dispatchtest.WaitProposal(t, store, plan.ID)
 	held, err := store.Get(ctx, proposal.ID)
 	if err != nil {
 		t.Fatalf("Get(proposal) error = %v", err)
@@ -201,7 +202,7 @@ func TestARuleHeldApplyPlansFirstAndHoldsItsPlan(t *testing.T) {
 	if _, err := d.Approve(ctx, held.ID, decider("approver-1", "session")); err != nil {
 		t.Fatalf("Approve() error = %v", err)
 	}
-	if final := waitTerminal(t, store, held.ID); final.Status != run.StatusSucceeded {
+	if final := dispatchtest.WaitTerminal(t, store, held.ID); final.Status != run.StatusSucceeded {
 		t.Fatalf("apply status = %q (%s), want succeeded", final.Status, final.Error)
 	}
 	if diff := cmp.Diff([]string{string(savedPlanBytes)}, runner.applies()); diff != "" {
@@ -257,7 +258,7 @@ func TestAStaleSavedPlanSaysTheProposalHasToBeMadeAgain(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
-			final := waitTerminal(t, store, apply.ID)
+			final := dispatchtest.WaitTerminal(t, store, apply.ID)
 			if final.Status != run.StatusFailed {
 				t.Fatalf("status = %q, want failed", final.Status)
 			}
@@ -391,10 +392,10 @@ func TestARequestThatAsksForApprovalPlansFirst(t *testing.T) {
 				t.Fatalf("the request is %q held by %q asked %v, want it queued to plan first with "+
 					"its ask recorded", plan.Status, plan.HeldByPolicy, plan.ApprovalRequested)
 			}
-			if done := waitTerminal(t, store, plan.ID); done.Status != run.StatusSucceeded {
+			if done := dispatchtest.WaitTerminal(t, store, plan.ID); done.Status != run.StatusSucceeded {
 				t.Fatalf("plan status = %q (%s), want succeeded", done.Status, done.Error)
 			}
-			held, err := store.Get(ctx, waitProposal(t, store, plan.ID).ID)
+			held, err := store.Get(ctx, dispatchtest.WaitProposal(t, store, plan.ID).ID)
 			if err != nil {
 				t.Fatalf("Get(proposal) error = %v", err)
 			}
@@ -413,7 +414,7 @@ func TestARequestThatAsksForApprovalPlansFirst(t *testing.T) {
 			if _, err := d.Approve(ctx, held.ID, decider("approver-1", "session")); err != nil {
 				t.Fatalf("Approve() error = %v", err)
 			}
-			if final := waitTerminal(t, store, held.ID); final.Status != run.StatusSucceeded {
+			if final := dispatchtest.WaitTerminal(t, store, held.ID); final.Status != run.StatusSucceeded {
 				t.Fatalf("apply status = %q (%s), want succeeded", final.Status, final.Error)
 			}
 			if diff := cmp.Diff([]string{string(savedPlanBytes)}, runner.applies()); diff != "" {
@@ -458,7 +459,7 @@ func TestACleanCheckShowsTheTargetInSync(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Submit() error = %v", err)
 		}
-		return waitTerminal(t, store, r.ID)
+		return dispatchtest.WaitTerminal(t, store, r.ID)
 	}
 	drift := func() run.HostDrift {
 		t.Helper()

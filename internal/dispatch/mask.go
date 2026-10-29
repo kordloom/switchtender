@@ -10,8 +10,8 @@ import (
 	"github.com/kordloom/switchtender/internal/util"
 )
 
-// maskToken replaces a redacted secret value in run output.
-const maskToken = "***"
+// MaskToken replaces a redacted secret value in run output.
+const MaskToken = "***"
 
 // minMaskLen is the shortest secret value the masker redacts. A shorter value is skipped so a one or
 // two character secret does not black out unrelated output.
@@ -77,7 +77,7 @@ func beginsWith(sec string, prefix []byte) bool {
 }
 
 // maskBytes is the mask token as bytes, converted once rather than per replacement.
-var maskBytes = []byte(maskToken)
+var maskBytes = []byte(MaskToken)
 
 // set replaces the masker's secret values, expanding a multi-line secret into its lines as well so
 // output that streams a secret one line at a time is still redacted, and into its encoded forms so
@@ -367,7 +367,7 @@ func (m *masker) redactStringLocked(s string) string {
 	b.WriteString(s[:first])
 	for i := first; i < len(s); {
 		if n := matchAt(m, s, i); n > 0 {
-			b.WriteString(maskToken)
+			b.WriteString(MaskToken)
 			i += n
 			continue
 		}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -47,7 +48,7 @@ func TestACancelDuringAClaimedApprovalEndsTheRun(t *testing.T) {
 	if err := <-approved; err != nil {
 		t.Fatalf("DecideRun() error = %v", err)
 	}
-	if got := waitTerminal(t, store, held.ID); got.Status != run.StatusCanceled {
+	if got := dispatchtest.WaitTerminal(t, store, held.ID); got.Status != run.StatusCanceled {
 		t.Errorf("the run ended %s, want canceled", got.Status)
 	}
 	if n := runner.count("play.yml"); n != 0 {

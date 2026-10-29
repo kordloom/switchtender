@@ -12,6 +12,7 @@ import (
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/relay"
+	"github.com/kordloom/switchtender/internal/relaytest"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -296,7 +297,7 @@ func TestPolicyClientGet(t *testing.T) {
 	if err := backing.Save(ctx, want); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	c := newPolicyRelay(t, backing)
+	c := relaytest.NewPolicyRelay(t, backing)
 
 	got, err := c.Get(ctx, "pol_destroy")
 	if err != nil {

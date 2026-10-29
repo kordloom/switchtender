@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -65,7 +66,7 @@ func TestRetryHonorsTheApprovalPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
-	waitForStatus(t, store, parent.ID, run.StatusFailed)
+	dispatchtest.WaitForStatus(t, store, parent.ID, run.StatusFailed)
 
 	// The policy arrives after the failure, which is the ordinary case: an operator tightens the
 	// gate, and every later submission has to face it, including a retry of an older run.
@@ -192,7 +193,7 @@ func TestApprovedSplitSurvivesTheAbandonedParentSweep(t *testing.T) {
 			t.Errorf("shard %s was canceled by the sweep after approval: %q", s.ID, s.Error)
 		}
 	}
-	waitForStatus(t, store, parent.ID, run.StatusSucceeded)
+	dispatchtest.WaitForStatus(t, store, parent.ID, run.StatusSucceeded)
 	if runner.executions.Load() == 0 {
 		t.Error("an approved split executed nothing")
 	}
@@ -323,7 +324,7 @@ func TestPlanGateRunsUngatedWorkWhereThePoliciesAreReadable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v: an install with no policies refused an ungated apply", err)
 	}
-	waitForStatus(t, store, r.ID, run.StatusSucceeded)
+	dispatchtest.WaitForStatus(t, store, r.ID, run.StatusSucceeded)
 	if n := runner.executions.Load(); n != 1 {
 		t.Errorf("executions = %d, want 1: an ungated apply did not run", n)
 	}

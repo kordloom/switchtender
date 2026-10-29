@@ -199,7 +199,7 @@ func TestMaskerRedactsEncodedSecrets(t *testing.T) {
 			if recoverable(got, test.Secret) {
 				t.Errorf("the secret can be read back out of the masked output %q", got)
 			}
-			if !strings.Contains(got, maskToken) {
+			if !strings.Contains(got, MaskToken) {
 				t.Errorf("nothing was masked in %q", got)
 			}
 		})
@@ -339,7 +339,7 @@ func TestMaskerRedactsWhatToolsActuallyPrint(t *testing.T) {
 			if recoverable(got, test.Secret) {
 				t.Errorf("the secret can be read back out of the masked output %q", got)
 			}
-			if !strings.Contains(got, maskToken) {
+			if !strings.Contains(got, MaskToken) {
 				t.Errorf("nothing was masked in %q", got)
 			}
 		})

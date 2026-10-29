@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/ansibleruntime"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/inventorytest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -252,7 +253,7 @@ func TestCrossCheckBeforeAnsibleRuns(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
-			done := waitTerminal(t, store, created.ID)
+			done := dispatchtest.WaitTerminal(t, store, created.ID)
 			if done.Status != test.WantStatus {
 				t.Fatalf("status = %s (%s), want %s", done.Status, done.Error, test.WantStatus)
 			}

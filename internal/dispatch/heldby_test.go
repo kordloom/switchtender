@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -25,7 +26,7 @@ func TestHeldRunNamesTheRuleThatStoppedIt(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save() policy error = %v", err)
 	}
-	d := New(store, &fakeRunnerLister{hosts: []string{"a"}}, nil, WithPolicies(policies))
+	d := New(store, &dispatchtest.FakeRunnerLister{HostNames: []string{"a"}}, nil, WithPolicies(policies))
 	defer d.Close()
 
 	r, err := d.Submit(context.Background(), "", "inv",
@@ -58,7 +59,7 @@ func TestHeldRunNamesTheRuleThatStoppedIt(t *testing.T) {
 func TestEveryHeldRunSaysWhatHeldIt(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
-	d := New(store, &fakeRunnerLister{hosts: []string{"a", "b"}}, nil)
+	d := New(store, &dispatchtest.FakeRunnerLister{HostNames: []string{"a", "b"}}, nil)
 	defer d.Close()
 
 	// Held because the submission asked for it, with no policy in play at all.
@@ -106,7 +107,7 @@ func TestPipelineHeldByAStepNamesTheRule(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save() policy error = %v", err)
 	}
-	d := New(store, &fakeRunnerLister{hosts: []string{"a"}}, nil, WithPolicies(policies))
+	d := New(store, &dispatchtest.FakeRunnerLister{HostNames: []string{"a"}}, nil, WithPolicies(policies))
 	defer d.Close()
 
 	parent, err := d.SubmitPipeline(context.Background(), "release", "inv", []run.PipelineStep{

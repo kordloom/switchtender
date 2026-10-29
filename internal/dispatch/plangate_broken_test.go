@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/plantest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -108,7 +109,7 @@ func TestABrokenPlanProposesNoApply(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
-			got := waitTerminal(t, store, created.ID)
+			got := dispatchtest.WaitTerminal(t, store, created.ID)
 			if got.Status != run.StatusFailed {
 				t.Errorf("plan run status = %q, want failed: the plan did not work", got.Status)
 			}
@@ -148,10 +149,10 @@ func TestAPlanWhoseRenderingCouldNotBeReadIsHeld(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	if plan := waitTerminal(t, store, created.ID); plan.Status != run.StatusSucceeded {
+	if plan := dispatchtest.WaitTerminal(t, store, created.ID); plan.Status != run.StatusSucceeded {
 		t.Fatalf("plan run status = %q, want succeeded: the plan itself worked", plan.Status)
 	}
-	proposal := waitProposal(t, store, created.ID)
+	proposal := dispatchtest.WaitProposal(t, store, created.ID)
 	stored, err := store.Get(ctx, proposal.ID)
 	if err != nil {
 		t.Fatalf("Get(proposal) error = %v", err)
@@ -195,7 +196,7 @@ func TestPlanGateSkipsWhatItMustNotRegate(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
-			d := New(run.NewMemStore(), okRunner(), nil, WithNoJanitor(),
+			d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithNoJanitor(),
 				WithPolicies(destroyGuardStore(t, 3)))
 			defer d.Close()
 
@@ -216,7 +217,7 @@ func TestPlanGateSkipsWhatItMustNotRegate(t *testing.T) {
 func TestPlanGateClaimsATerraformApply(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	d := New(run.NewMemStore(), okRunner(), nil, WithNoJanitor(),
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithNoJanitor(),
 		WithPolicies(destroyGuardStore(t, 3)))
 	defer d.Close()
 
@@ -236,7 +237,7 @@ func TestPlanGateClaimsATerraformApply(t *testing.T) {
 // first.
 func TestPlanGateWithNoPoliciesConfiguredGatesNothing(t *testing.T) {
 	t.Parallel()
-	d := New(run.NewMemStore(), okRunner(), nil, WithNoJanitor())
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithNoJanitor())
 	defer d.Close()
 
 	policies, err := d.planGatePolicies(context.Background(),
@@ -271,10 +272,10 @@ func TestTheGateWeighsTheSavedPlanNotThePrintedSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	if plan := waitTerminal(t, store, created.ID); plan.Status != run.StatusSucceeded {
+	if plan := dispatchtest.WaitTerminal(t, store, created.ID); plan.Status != run.StatusSucceeded {
 		t.Fatalf("plan run status = %q, want succeeded: the plan itself worked", plan.Status)
 	}
-	proposal := waitProposal(t, store, created.ID)
+	proposal := dispatchtest.WaitProposal(t, store, created.ID)
 	stored, err := store.Get(ctx, proposal.ID)
 	if err != nil {
 		t.Fatalf("Get(proposal) error = %v", err)

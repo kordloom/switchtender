@@ -12,6 +12,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -107,7 +108,7 @@ func TestAGatedApplyWhosePlanFileCannotBeTrustedIsRefused(t *testing.T) {
 			executor := New(store, runner, nil, WithCredentials(credential.NewMemStore(), snapshotSealer),
 				WithRunFilesRoot(t.TempDir()), WithNoJanitor())
 			t.Cleanup(executor.Close)
-			final := waitTerminal(t, store, apply.ID)
+			final := dispatchtest.WaitTerminal(t, store, apply.ID)
 			if final.Status != run.StatusFailed || !strings.Contains(final.Error, test.WantError) {
 				t.Errorf("apply ended %q (%q), want failed saying %q", final.Status, final.Error,
 					test.WantError)
@@ -142,7 +143,7 @@ func TestAPlansSensitiveValuesAreMaskedWhileItApplies(t *testing.T) {
 	d := New(store, runner, nil, WithCredentials(credential.NewMemStore(), snapshotSealer),
 		WithRunFilesRoot(t.TempDir()), WithNoJanitor())
 	t.Cleanup(d.Close)
-	final := waitTerminal(t, store, "run_apply")
+	final := dispatchtest.WaitTerminal(t, store, "run_apply")
 	if final.Status != run.StatusSucceeded {
 		t.Fatalf("apply ended %q (%s), want succeeded", final.Status, final.Error)
 	}

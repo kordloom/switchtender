@@ -6,14 +6,13 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
-	"github.com/kordloom/switchtender/internal/plantest"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -78,28 +77,6 @@ func TestParsePlanDestroys(t *testing.T) {
 	}
 }
 
-// planGateRunner emits a fixed plan summary for a plan and counts the applies that really executed,
-// so a test can assert whether a gated apply ever reached the infrastructure.
-type planGateRunner struct {
-	// applies counts executions that were not dry runs, which are the real applies.
-	applies atomic.Int64
-	// summary is the plan output written whenever a dry run executes.
-	summary string
-}
-
-// Run writes the plan summary for a dry run, returning the plan it saved, and records a real apply
-// otherwise.
-func (p *planGateRunner) Run(_ context.Context, spec roundhouse.Spec,
-	out io.Writer) (roundhouse.Result, error) {
-	if spec.DryRun {
-		_, _ = io.WriteString(out, p.summary)
-		return plantest.Result(p.summary), nil
-	}
-	p.applies.Add(1)
-	_, _ = io.WriteString(out, "Apply complete!\n")
-	return roundhouse.Result{ExitCode: 0}, nil
-}
-
 // TestCancelingAPlanGateEndsItCanceledAndProposesNothing pins what a person's cancel does to a
 // plan-gated run while its plan executes: the run ends canceled, like any run stopped in flight,
 // and no apply is proposed from a plan that never finished. Finalized as failed instead, a plan a
@@ -142,7 +119,7 @@ func TestCancelingAPlanGateEndsItCanceledAndProposesNothing(t *testing.T) {
 	if !d.Cancel(submitted.ID) {
 		t.Fatal("Cancel() = false for a plan-gated run whose plan is executing")
 	}
-	if got := waitTerminal(t, store, submitted.ID); got.Status != run.StatusCanceled {
+	if got := dispatchtest.WaitTerminal(t, store, submitted.ID); got.Status != run.StatusCanceled {
 		t.Errorf("status = %q, want canceled: a plan a person stopped is not a plan that broke",
 			got.Status)
 	}
@@ -211,7 +188,7 @@ func TestPlanGateHoldsImportPlan(t *testing.T) {
 			}); err != nil {
 				t.Fatalf("policies.Save() error = %v", err)
 			}
-			runner := &planGateRunner{summary: test.Summary}
+			runner := &dispatchtest.PlanGateRunner{Summary: test.Summary}
 			d := New(store, runner, nil, WithPolicies(policies))
 			defer d.Close()
 
@@ -220,7 +197,7 @@ func TestPlanGateHoldsImportPlan(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
-			if plan := waitTerminal(t, store, created.ID); plan.Status != run.StatusSucceeded {
+			if plan := dispatchtest.WaitTerminal(t, store, created.ID); plan.Status != run.StatusSucceeded {
 				t.Fatalf("plan run status = %q, want succeeded", plan.Status)
 			}
 
@@ -235,7 +212,7 @@ func TestPlanGateHoldsImportPlan(t *testing.T) {
 					planLog[max(0, len(planLog)-200):])
 			}
 
-			proposal := waitProposal(t, store, created.ID)
+			proposal := dispatchtest.WaitProposal(t, store, created.ID)
 			stored, err := store.Get(ctx, proposal.ID)
 			if err != nil {
 				t.Fatalf("Get(proposal) error = %v", err)
@@ -253,15 +230,15 @@ func TestPlanGateHoldsImportPlan(t *testing.T) {
 			if test.WantApproval {
 				// A held apply must not have touched anything while it waits for a person.
 				time.Sleep(200 * time.Millisecond)
-				if n := runner.applies.Load(); n != 0 {
+				if n := runner.Applies(); n != 0 {
 					t.Errorf("%d applies executed on a plan held for approval", n)
 				}
 				return
 			}
-			if applied := waitTerminal(t, store, stored.ID); applied.Status != run.StatusSucceeded {
+			if applied := dispatchtest.WaitTerminal(t, store, stored.ID); applied.Status != run.StatusSucceeded {
 				t.Fatalf("proposed apply status = %q, want succeeded", applied.Status)
 			}
-			if n := runner.applies.Load(); n != 1 {
+			if n := runner.Applies(); n != 1 {
 				t.Errorf("applies = %d, want 1: an unheld apply did not run", n)
 			}
 		})
@@ -359,7 +336,7 @@ func TestPlanGateDistinctApproverComesFromAnyExceededRule(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save(strict) error = %v", err)
 	}
-	runner := &planGateRunner{summary: "Plan: 0 to add, 0 to change, 5 to destroy.\n"}
+	runner := &dispatchtest.PlanGateRunner{Summary: "Plan: 0 to add, 0 to change, 5 to destroy.\n"}
 	d := New(store, runner, nil, WithPolicies(policies))
 	defer d.Close()
 
@@ -368,10 +345,10 @@ func TestPlanGateDistinctApproverComesFromAnyExceededRule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	if plan := waitTerminal(t, store, created.ID); plan.Status != run.StatusSucceeded {
+	if plan := dispatchtest.WaitTerminal(t, store, created.ID); plan.Status != run.StatusSucceeded {
 		t.Fatalf("plan run status = %q, want succeeded", plan.Status)
 	}
-	proposal := waitProposal(t, store, created.ID)
+	proposal := dispatchtest.WaitProposal(t, store, created.ID)
 	stored, err := store.Get(ctx, proposal.ID)
 	if err != nil {
 		t.Fatalf("Get(proposal) error = %v", err)

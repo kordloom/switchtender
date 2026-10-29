@@ -13,6 +13,7 @@ import (
 	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/outcome"
+	"github.com/kordloom/switchtender/internal/outcometest"
 	"github.com/kordloom/switchtender/internal/receipt"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -54,7 +55,7 @@ func buildReasonedReceipt(t *testing.T, reason string) *reasonedReceipt {
 	)
 	rr.d = dispatch.New(rr.runs, runner, nil, dispatch.WithAudits(rr.audits),
 		dispatch.WithDecisions(rr.decisions), dispatch.WithNoJanitor(),
-		dispatch.WithBindingKey(receiptKey(t, id)))
+		dispatch.WithBindingKey(outcometest.ReceiptKey(t, id)))
 	t.Cleanup(rr.d.Close)
 	creation := &audit.Entry{ID: audit.NewID(), At: time.Now(), Actor: "deploy-bot",
 		ActorType: "agent", OnBehalfOf: "dev-lead", Method: "POST", Path: "/v1/runs"}
@@ -85,7 +86,7 @@ func buildReasonedReceipt(t *testing.T, reason string) *reasonedReceipt {
 func (rr *reasonedReceipt) rebuild(t *testing.T) {
 	t.Helper()
 	res, err := receipt.Build(context.Background(), rr.runs, rr.audits, rr.id, "v-test", rr.runID,
-		keyedReceipt(t, rr.runs, rr.audits, rr.id, receipt.Options{Decisions: rr.decisions}))
+		outcometest.KeyedReceipt(t, rr.runs, rr.audits, rr.id, receipt.Options{Decisions: rr.decisions}))
 	if err != nil {
 		t.Fatalf("receipt.Build() error = %v", err)
 	}
@@ -163,8 +164,8 @@ func TestAReceiptCarriesTheReasonItsCommitmentOpens(t *testing.T) {
 		t.Errorf("committed outcome initiator = %+v, want the agent, its account, and its issuer",
 			rec.Initiator)
 	}
-	repo := loomsealRepo(t)
-	if lrep := verifyWithLoomSeal(t, repo, rr.signed); !lrep.OK {
+	repo := outcometest.LoomsealRepo(t)
+	if lrep := outcometest.VerifyWithLoomSeal(t, repo, rr.signed); !lrep.OK {
 		t.Fatalf("loomseal refused a receipt carrying an approver's reason: %v", lrep.Problems)
 	}
 }
@@ -236,8 +237,8 @@ func TestARedactedReasonLeavesAReceiptThatStillVerifies(t *testing.T) {
 		t.Errorf("reason state = %q (%q), want redacted for personal data", got.ReasonState,
 			got.RedactedCategory)
 	}
-	repo := loomsealRepo(t)
-	if lrep := verifyWithLoomSeal(t, repo, rr.signed); !lrep.OK {
+	repo := outcometest.LoomsealRepo(t)
+	if lrep := outcometest.VerifyWithLoomSeal(t, repo, rr.signed); !lrep.OK {
 		t.Fatalf("loomseal refused a receipt carrying a redacted reason: %v", lrep.Problems)
 	}
 }

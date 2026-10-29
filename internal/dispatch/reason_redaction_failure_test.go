@@ -12,6 +12,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/decision"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/receipt"
 	"github.com/kordloom/switchtender/internal/run"
@@ -83,7 +84,7 @@ func apprApprovedWithReason(t *testing.T, d *Dispatcher, store run.Store,
 		By: outcome.Decider{Name: "approver", Type: "session"}}); err != nil {
 		t.Fatalf("DecideRun() error = %v", err)
 	}
-	waitTerminal(t, store, held.ID)
+	dispatchtest.WaitTerminal(t, store, held.ID)
 	apprWaitOutcome(t, audits, held.ID)
 	records, err := d.Decisions(context.Background(), held.ID)
 	if err != nil || len(records) != 1 || records[0].Reason == nil ||

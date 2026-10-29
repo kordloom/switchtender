@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -46,7 +47,7 @@ func TestDispatcherNotifiesTwilio(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	if got := waitTerminal(t, store, created.ID); got.Status != run.StatusFailed {
+	if got := dispatchtest.WaitTerminal(t, store, created.ID); got.Status != run.StatusFailed {
 		t.Fatalf("status = %q, want failed", got.Status)
 	}
 

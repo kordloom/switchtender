@@ -12,6 +12,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -160,7 +161,7 @@ func TestARunThatTouchedNoHostIsNotASuccess(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
-			got := waitTerminal(t, store, created.ID)
+			got := dispatchtest.WaitTerminal(t, store, created.ID)
 
 			if diff := cmp.Diff(test.WantStatus, got.Status, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("status mismatch (-want +got):\n%s", diff)
@@ -243,7 +244,7 @@ func TestTheZeroHostFailureDoesNotAlsoCarryTheUnreportedWarning(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
-			got := waitTerminal(t, store, created.ID)
+			got := dispatchtest.WaitTerminal(t, store, created.ID)
 
 			if diff := cmp.Diff(test.WantStatus, got.Status, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("status mismatch (-want +got):\n%s", diff)
@@ -274,7 +275,7 @@ func TestZeroHostOutcomeCommitsWhyTheRunFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	got := waitTerminal(t, store, created.ID)
+	got := dispatchtest.WaitTerminal(t, store, created.ID)
 	if got.Status != run.StatusFailed {
 		t.Fatalf("run status = %q, want failed", got.Status)
 	}
@@ -337,7 +338,7 @@ func TestSplitWhoseShardsTouchedNoHostFails(t *testing.T) {
 			if err != nil {
 				t.Fatalf("SubmitSplit() error = %v", err)
 			}
-			got := waitTerminal(t, store, parent.ID)
+			got := dispatchtest.WaitTerminal(t, store, parent.ID)
 			if diff := cmp.Diff(test.WantStatus, got.Status, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("parent status mismatch (-want +got):\n%s", diff)
 			}
@@ -378,7 +379,7 @@ func TestPipelineStepThatTouchedNoHostFailsThePipeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
-	got := waitTerminal(t, store, parent.ID)
+	got := dispatchtest.WaitTerminal(t, store, parent.ID)
 	if got.Status != run.StatusFailed {
 		t.Errorf("pipeline status = %q, want failed, since its first step touched no host", got.Status)
 	}

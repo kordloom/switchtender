@@ -12,6 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -83,11 +84,11 @@ func TestARealPlanRunsTheProgramTheGateHeldItFor(t *testing.T) {
 			ctx := context.Background()
 			store := run.NewMemStore()
 			d := New(store, roundhouse.NewAnsibleRunner(), zap.NewNop(),
-				WithPolicies(rulesHolding(t, excludePlans(test.Tool))), WithNoJanitor())
+				WithPolicies(dispatchtest.RulesHolding(t, excludePlans(test.Tool))), WithNoJanitor())
 			t.Cleanup(d.Close)
 
 			clean := t.TempDir()
-			writeFiles(t, clean, map[string]string{"main.tf": cleanConfig})
+			dispatchtest.WriteFiles(t, clean, map[string]string{"main.tf": dispatchtest.CleanConfig})
 			planned, err := d.Submit(ctx, "", "", run.WithTool(test.Tool), run.WithCommand(clean),
 				run.WithDryRun(true))
 			if err != nil {
@@ -96,12 +97,12 @@ func TestARealPlanRunsTheProgramTheGateHeldItFor(t *testing.T) {
 			if planned.Status == run.StatusPendingApproval {
 				t.Fatalf("a change-free plan was held: %q", planned.DryRunFindings())
 			}
-			if done := waitTerminal(t, store, planned.ID); done.Status != run.StatusSucceeded {
+			if done := dispatchtest.WaitTerminal(t, store, planned.ID); done.Status != run.StatusSucceeded {
 				t.Fatalf("the change-free plan ended %q: %s", done.Status, done.Error)
 			}
 
 			dir := t.TempDir()
-			writeFiles(t, dir, map[string]string{"main.tf": probeConfig, "probe.sh": probeScript})
+			dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": probeConfig, "probe.sh": probeScript})
 			marker := filepath.Join(dir, "ran")
 			held, err := d.Submit(ctx, "", "", run.WithTool(test.Tool), run.WithCommand(dir),
 				run.WithDryRun(true))
@@ -117,7 +118,7 @@ func TestARealPlanRunsTheProgramTheGateHeldItFor(t *testing.T) {
 			if _, err := d.Approve(ctx, held.ID, decider("approver", "session")); err != nil {
 				t.Fatalf("Approve() error = %v", err)
 			}
-			done := waitTerminal(t, store, held.ID)
+			done := dispatchtest.WaitTerminal(t, store, held.ID)
 			if done.Status != run.StatusSucceeded {
 				t.Fatalf("the approved plan ended %q: %s", done.Status, done.Error)
 			}

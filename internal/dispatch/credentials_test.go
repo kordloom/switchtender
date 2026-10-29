@@ -889,8 +889,8 @@ func TestRegistryPasswordMaskedInLog(t *testing.T) {
 	if strings.Contains(string(body), pw) {
 		t.Errorf("registry password leaked into the run log: %q", body)
 	}
-	if !strings.Contains(string(body), maskToken) {
-		t.Errorf("expected the registry password masked with %q; log: %q", maskToken, body)
+	if !strings.Contains(string(body), MaskToken) {
+		t.Errorf("expected the registry password masked with %q; log: %q", MaskToken, body)
 	}
 }
 

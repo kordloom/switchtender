@@ -9,6 +9,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/outcome"
+	"github.com/kordloom/switchtender/internal/outcometest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/receipt"
 	"github.com/kordloom/switchtender/internal/run"
@@ -24,7 +25,7 @@ import (
 //
 // It does not run in parallel: it pins the audit key environment for the identity it signs with.
 func TestAReceiptNamingTheRegoBundleThatDecidedVerifiesInLoomSeal(t *testing.T) {
-	repo := loomsealRepo(t)
+	repo := outcometest.LoomsealRepo(t)
 	ctx := context.Background()
 	runs := run.NewMemStore()
 	audits := audit.NewMemStore()
@@ -72,7 +73,7 @@ func TestAReceiptNamingTheRegoBundleThatDecidedVerifiesInLoomSeal(t *testing.T) 
 	if err := runs.Save(ctx, r); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	r = approveSealed(t, runs, audits, id, r.ID, outcome.Decider{Name: "approver", Type: "session"},
+	r = outcometest.ApproveSealed(t, runs, audits, id, r.ID, outcome.Decider{Name: "approver", Type: "session"},
 		run.DecisionSettle{Status: run.StatusSucceeded, EndedAt: ended})
 	if err := runs.AppendLog(ctx, r.ID, []byte("Apply complete!\n")); err != nil {
 		t.Fatalf("AppendLog() error = %v", err)
@@ -82,7 +83,7 @@ func TestAReceiptNamingTheRegoBundleThatDecidedVerifiesInLoomSeal(t *testing.T) 
 	}
 
 	res, err := receipt.Build(ctx, runs, audits, id, "v-test", r.ID,
-		keyedReceipt(t, runs, audits, id, receipt.Options{}))
+		outcometest.KeyedReceipt(t, runs, audits, id, receipt.Options{}))
 	if err != nil {
 		t.Fatalf("receipt.Build() error = %v", err)
 	}
@@ -98,7 +99,7 @@ func TestAReceiptNamingTheRegoBundleThatDecidedVerifiesInLoomSeal(t *testing.T) 
 		t.Fatal("the signed receipt does not disclose the approval decision")
 	}
 
-	report := verifyWithLoomSeal(t, repo, res.Signed)
+	report := outcometest.VerifyWithLoomSeal(t, repo, res.Signed)
 	if !report.OK {
 		t.Fatalf("loomseal refused a receipt naming a Rego bundle: %v", report.Problems)
 	}

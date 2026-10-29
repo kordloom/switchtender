@@ -21,6 +21,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/federation"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -187,7 +188,7 @@ func tokenClaims(t *testing.T, issuer *federation.Issuer, token string) federati
 // execution returns, a moment after the terminal status lands.
 func waitGone(t *testing.T, path string) {
 	t.Helper()
-	deadline := time.Now().Add(waitBudget)
+	deadline := time.Now().Add(dispatchtest.WaitBudget)
 	for {
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			return
@@ -223,7 +224,7 @@ func TestFederatedRunMintsAndLeaksNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	final := waitTerminal(t, fx.store, r.ID)
+	final := dispatchtest.WaitTerminal(t, fx.store, r.ID)
 	if final.Status != run.StatusSucceeded {
 		t.Fatalf("run status = %s (%s), want succeeded", final.Status, final.Error)
 	}
@@ -335,7 +336,7 @@ func TestFederatedFilesGoOnEveryExit(t *testing.T) {
 			}
 			select {
 			case <-runner.started:
-			case <-time.After(waitBudget):
+			case <-time.After(dispatchtest.WaitBudget):
 				t.Fatal("the run never started")
 			}
 			// The runner looked at the file while it executed. Checking here instead would race a run
@@ -348,7 +349,7 @@ func TestFederatedFilesGoOnEveryExit(t *testing.T) {
 			if test.Cancel {
 				fx.d.Cancel(r.ID)
 			}
-			final := waitTerminal(t, fx.store, r.ID)
+			final := dispatchtest.WaitTerminal(t, fx.store, r.ID)
 			if final.Status != test.WantStatus {
 				t.Errorf("status = %s, want %s", final.Status, test.WantStatus)
 			}
@@ -390,7 +391,7 @@ func TestFederatedExchangeRefusalFailsCleanly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	final := waitTerminal(t, fx.store, r.ID)
+	final := dispatchtest.WaitTerminal(t, fx.store, r.ID)
 	if final.Status != run.StatusFailed {
 		t.Fatalf("status = %s, want failed", final.Status)
 	}
@@ -415,7 +416,7 @@ func TestFederatedExchangeRefusalFailsCleanly(t *testing.T) {
 	}
 	// The run directory was created before the exchange was tried, so its absence now is the
 	// cleanup on the failure path, not a directory that never existed.
-	deadline := time.Now().Add(waitBudget)
+	deadline := time.Now().Add(dispatchtest.WaitBudget)
 	for {
 		left, err := os.ReadDir(scratch)
 		if err != nil {
@@ -540,7 +541,7 @@ func TestApprovedRunNamesItsApprover(t *testing.T) {
 		outcome.Decider{Name: "approver-two", Type: "session"}); err != nil {
 		t.Fatalf("Approve() error = %v", err)
 	}
-	final := waitTerminal(t, fx.store, r.ID)
+	final := dispatchtest.WaitTerminal(t, fx.store, r.ID)
 	if final.Status != run.StatusSucceeded {
 		t.Fatalf("status = %s (%s), want succeeded", final.Status, final.Error)
 	}
@@ -719,20 +720,20 @@ func TestAFederatedTokenSaysWhyItWasMinted(t *testing.T) {
 		}
 		return roundhouse.Result{ExitCode: 0}, nil
 	})
-	d := New(run.NewMemStore(), fetchingRunner{Runner: okRunner(), fetch: fetch}, zap.NewNop(),
+	d := New(run.NewMemStore(), fetchingRunner{Runner: dispatchtest.OKRunner(), fetch: fetch}, zap.NewNop(),
 		WithNoJanitor(), WithCredentials(creds, fedSealer), WithFederation(issuer),
-		WithPolicies(rulesHolding(t, excludePlans(run.ToolTerraform))),
+		WithPolicies(dispatchtest.RulesHolding(t, excludePlans(run.ToolTerraform))),
 		WithRunFilesRoot(t.TempDir()))
 	t.Cleanup(d.Close)
 	dir := t.TempDir()
-	writeFiles(t, dir, map[string]string{"main.tf": registryCall("clean")})
+	dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": registryCall("clean")})
 	ctx := context.Background()
 	d.DryRunScansAt(ctx, &run.Run{Tool: run.ToolTerraform, Command: dir, DryRun: true,
 		CredentialIDs: []string{"cred_oidc"}, PinnedCommit: "0123456789abcdef",
 		Labels: map[string]string{run.LabelPullRequest: "7"}})
 	// Another configuration, so the gate downloads for the submission rather than reusing the
 	// pre-check's download.
-	writeFiles(t, dir, map[string]string{"main.tf": registryCall("clean") + "\n# next push\n"})
+	dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": registryCall("clean") + "\n# next push\n"})
 	submitted, err := d.Submit(ctx, "", "", run.WithTool(run.ToolTerraform),
 		run.WithCommand(dir), run.WithDryRun(true), run.WithCredentialIDs([]string{"cred_oidc"}))
 	if err != nil {

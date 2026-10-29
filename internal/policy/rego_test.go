@@ -35,7 +35,7 @@ func mustCompileRego(t *testing.T, body string) *RegoProgram {
 func regoPolicy(t *testing.T, name, body string) *Policy {
 	t.Helper()
 	return &Policy{
-		ID: filePolicyID(name), Name: name, MaxDestroy: DisabledMaxDestroy,
+		ID: FilePolicyID(name), Name: name, MaxDestroy: DisabledMaxDestroy,
 		Rego: mustCompileRego(t, body),
 	}
 }

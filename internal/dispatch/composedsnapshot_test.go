@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/inventorytest"
 	"github.com/kordloom/switchtender/internal/outcome"
@@ -124,7 +125,7 @@ func TestAComposedRunExecutesItsSnapshot(t *testing.T) {
 		t.Fatalf("Save(inv_a) error = %v", err)
 	}
 	f.release()
-	done := waitTerminal(t, f.Store, created.ID)
+	done := dispatchtest.WaitTerminal(t, f.Store, created.ID)
 	if done.Status != run.StatusSucceeded {
 		t.Fatalf("status = %q (%s), want succeeded", done.Status, done.Error)
 	}
@@ -211,7 +212,7 @@ func TestAComposedRunWhoseSnapshotCannotBeTrustedIsRefused(t *testing.T) {
 				t.Fatalf("CancelWaiting() = %v, %v, want the unspoiled run canceled", canceled, err)
 			}
 			f.release()
-			final := waitTerminal(t, f.Store, spoiled.ID)
+			final := dispatchtest.WaitTerminal(t, f.Store, spoiled.ID)
 			if final.Status != run.StatusFailed || !strings.Contains(final.Error, test.WantError) {
 				t.Errorf("run ended %q (%q), want failed saying %q", final.Status, final.Error,
 					test.WantError)

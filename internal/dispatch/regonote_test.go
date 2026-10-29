@@ -13,6 +13,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -86,7 +87,7 @@ hold contains "python needs a person" if input.run.tool == "python"`
 			t.Parallel()
 			policies, bundle := settingsStore(t, body, test.Settings)
 			store := run.NewMemStore()
-			d := New(store, &fakeRunnerLister{hosts: []string{"a"}}, nil, WithPolicies(policies))
+			d := New(store, &dispatchtest.FakeRunnerLister{HostNames: []string{"a"}}, nil, WithPolicies(policies))
 			t.Cleanup(d.Close)
 			created, err := d.Submit(context.Background(), "", "", test.Opts...)
 			if err != nil {
@@ -104,7 +105,7 @@ hold contains "python needs a person" if input.run.tool == "python"`
 					t.Fatalf("the run was held by %q, want it to go ahead", created.HeldByPolicy)
 				}
 				// The note is part of the run's record, so it has to outlast the execution.
-				done := waitTerminal(t, store, created.ID)
+				done := dispatchtest.WaitTerminal(t, store, created.ID)
 				if diff := cmp.Diff(wantNotes, done.PolicyNotes, cmpopts.EquateEmpty()); diff != "" {
 					t.Errorf("notes on the finished run mismatch (-want +got):\n%s", diff)
 				}
@@ -147,7 +148,7 @@ func TestAPolicyNeverWritesTheRunsOwnSecretIntoItsRecord(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			policies, _ := settingsStore(t, body, test.Settings)
-			d := New(run.NewMemStore(), &fakeRunnerLister{hosts: []string{"a"}}, nil,
+			d := New(run.NewMemStore(), &dispatchtest.FakeRunnerLister{HostNames: []string{"a"}}, nil,
 				WithPolicies(policies), WithNoJanitor())
 			t.Cleanup(d.Close)
 			created, err := d.Submit(context.Background(), "", "", run.WithTool("bash"),
@@ -162,7 +163,7 @@ func TestAPolicyNeverWritesTheRunsOwnSecretIntoItsRecord(t *testing.T) {
 			if strings.Contains(got, secret) {
 				t.Errorf("the run's record carries its secret in plain text: %q", got)
 			}
-			if !strings.Contains(got, maskToken) {
+			if !strings.Contains(got, MaskToken) {
 				t.Errorf("the recorded text %q does not show where the secret was masked", got)
 			}
 		})
@@ -235,7 +236,7 @@ func TestARefusalAndAPreviewNeverQuoteTheRunsOwnSecret(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			policies, _ := settingsStore(t, test.Body, "")
-			d := New(run.NewMemStore(), &fakeRunnerLister{hosts: []string{"a"}}, nil,
+			d := New(run.NewMemStore(), &dispatchtest.FakeRunnerLister{HostNames: []string{"a"}}, nil,
 				WithPolicies(policies), WithNoJanitor())
 			t.Cleanup(d.Close)
 			got := test.Text(t, d)
@@ -245,7 +246,7 @@ func TestARefusalAndAPreviewNeverQuoteTheRunsOwnSecret(t *testing.T) {
 			if strings.Contains(got, secret) {
 				t.Errorf("the caller is shown the run's secret in plain text: %q", got)
 			}
-			if !strings.Contains(got, maskToken) {
+			if !strings.Contains(got, MaskToken) {
 				t.Errorf("the text %q does not show where the secret was masked", got)
 			}
 		})
@@ -259,7 +260,7 @@ func TestAPipelineRecordsEachStepsNotesUnderItsName(t *testing.T) {
 	t.Parallel()
 	policies, bundle := settingsStore(t,
 		`warn contains "a shell step" if input.run.tool == "bash"`, noteSettings)
-	d := New(run.NewMemStore(), okRunner(), nil, WithPolicies(policies), WithNoJanitor())
+	d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithPolicies(policies), WithNoJanitor())
 	t.Cleanup(d.Close)
 	steps := []run.PipelineStep{
 		{Name: "lint", Tool: "bash", Command: "echo lint"},
@@ -307,7 +308,7 @@ func TestAShardCarriesItsParentsNotes(t *testing.T) {
 	policies, bundle := settingsStore(t, `warn contains "fans out" if input.run.tool == "ansible"`,
 		noteSettings)
 	store := run.NewMemStore()
-	d := New(store, &fakeRunnerLister{hosts: []string{"web01", "web02", "web03", "web04"}}, nil,
+	d := New(store, &dispatchtest.FakeRunnerLister{HostNames: []string{"web01", "web02", "web03", "web04"}}, nil,
 		WithPolicies(policies))
 	t.Cleanup(d.Close)
 	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2)
@@ -336,7 +337,7 @@ func TestAShardCarriesItsParentsNotes(t *testing.T) {
 			t.Fatalf("Save(shard) error = %v", err)
 		}
 	}
-	waitForStatus(t, store, parent.ID, run.StatusFailed)
+	dispatchtest.WaitForStatus(t, store, parent.ID, run.StatusFailed)
 	retry, err := d.RetryFailedShards(ctx, parent.ID)
 	if err != nil {
 		t.Fatalf("RetryFailedShards() error = %v", err)
@@ -395,7 +396,7 @@ warn contains msg if {
 			// In process: the plan gate plans, then submits the apply through the dispatcher.
 			ctx := context.Background()
 			store := run.NewMemStore()
-			runner := &planGateRunner{summary: "Plan: 0 to add, 0 to change, 5 to destroy.\n"}
+			runner := &dispatchtest.PlanGateRunner{Summary: "Plan: 0 to add, 0 to change, 5 to destroy.\n"}
 			d := New(store, runner, nil, WithPolicies(policies))
 			t.Cleanup(d.Close)
 			created, err := d.Submit(ctx, "", "", run.WithTool(run.ToolTerraform),
@@ -403,8 +404,8 @@ warn contains msg if {
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
-			waitTerminal(t, store, created.ID)
-			proposal, err := store.Get(ctx, waitProposal(t, store, created.ID).ID)
+			dispatchtest.WaitTerminal(t, store, created.ID)
+			proposal, err := store.Get(ctx, dispatchtest.WaitProposal(t, store, created.ID).ID)
 			if err != nil {
 				t.Fatalf("Get(proposal) error = %v", err)
 			}

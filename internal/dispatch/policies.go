@@ -137,7 +137,7 @@ func maskPolicyText(r *run.Run, text string) string {
 	}
 	m := &masker{}
 	m.set(runOwnSecrets(r.ExtraVars, r.Command))
-	masked, _ := util.RedactAssignments(m.redactString(text), maskToken)
+	masked, _ := util.RedactAssignments(m.redactString(text), MaskToken)
 	return masked
 }
 

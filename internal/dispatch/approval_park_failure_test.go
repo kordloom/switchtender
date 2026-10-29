@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -63,7 +64,7 @@ func (s *apprLostAckStore) lose() bool {
 // when the coordinator that walked it has returned.
 func apprWaitNoCoordinator(t *testing.T, d *Dispatcher, id string) {
 	t.Helper()
-	deadline := time.Now().Add(waitBudget)
+	deadline := time.Now().Add(dispatchtest.WaitBudget)
 	for time.Now().Before(deadline) {
 		d.cmu.Lock()
 		_, busy := d.coordinators[id]
@@ -95,7 +96,7 @@ func TestApprovalStepParkWhoseAnswerIsLostStillWaits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
-	deadline := time.Now().Add(waitBudget)
+	deadline := time.Now().Add(dispatchtest.WaitBudget)
 	for store.parkCalls.Load() == 0 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -107,7 +108,7 @@ func TestApprovalStepParkWhoseAnswerIsLostStillWaits(t *testing.T) {
 		t.Fatalf("ApprovalSteps() = (%d steps, %v), want the one gate", len(steps), err)
 	}
 	if steps[0].Status != run.StatusPendingApproval {
-		got := waitTerminal(t, store, parent.ID)
+		got := dispatchtest.WaitTerminal(t, store, parent.ID)
 		t.Fatalf("after a park whose answer was lost the approval step is %s and the workflow "+
 			"ended %s, want the step still waiting for a person: nobody canceled it",
 			steps[0].Status, got.Status)
@@ -116,7 +117,7 @@ func TestApprovalStepParkWhoseAnswerIsLostStillWaits(t *testing.T) {
 		By: outcome.Decider{Name: "approver", Type: "session"}}); err != nil {
 		t.Fatalf("DecideStep() error = %v", err)
 	}
-	if got := waitTerminal(t, store, parent.ID); got.Status != run.StatusSucceeded {
+	if got := dispatchtest.WaitTerminal(t, store, parent.ID); got.Status != run.StatusSucceeded {
 		t.Errorf("workflow = %s (%s), want succeeded", got.Status, got.Error)
 	}
 }
@@ -161,7 +162,7 @@ func TestApprovalStepResumeWhoseAnswerIsLostStillContinues(t *testing.T) {
 	if _, err := store.ReclaimStale(ctx, 0); err != nil {
 		t.Fatalf("ReclaimStale() error = %v", err)
 	}
-	got := waitTerminal(t, store, parent.ID)
+	got := dispatchtest.WaitTerminal(t, store, parent.ID)
 	if got.Status != run.StatusSucceeded || runner.count("deploy") != 1 {
 		t.Errorf("an approved workflow ended %s (%s) with deploy run %d times, want it to "+
 			"continue down its approve path once", got.Status, got.Error, runner.count("deploy"))

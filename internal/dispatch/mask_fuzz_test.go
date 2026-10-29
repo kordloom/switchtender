@@ -100,7 +100,7 @@ func FuzzStreamMaskerHoldsAcrossAnyChunking(f *testing.F) {
 		// above exists to catch. What the masker does promise is that nothing the run emitted
 		// survives, and that is what is asserted here.
 		for _, sec := range m.strs {
-			if strings.ContainsAny(sec, maskToken) {
+			if strings.ContainsAny(sec, MaskToken) {
 				continue
 			}
 			if bytes.Contains(got, []byte(sec)) {
