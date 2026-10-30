@@ -192,6 +192,7 @@ var landingURLs = []string{
 	"https://switchtender.com/rundeck-alternative", "https://switchtender.com/jenkins-alternative",
 	"https://switchtender.com/migration",
 	"https://switchtender.com/chef-eol", "https://switchtender.com/puppet-eol",
+	"https://switchtender.com/contact",
 	"https://switchtender.com/privacy",
 	"https://switchtender.com/terms",
 	"https://switchtender.com/procurement",
