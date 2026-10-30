@@ -29,11 +29,9 @@ import (
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
-	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/plantest"
 	"github.com/kordloom/switchtender/internal/policy"
-	"github.com/kordloom/switchtender/internal/policytest"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -629,7 +627,7 @@ func TestSeedConfigStoresPoliciesTheGovernanceSeedNames(t *testing.T) {
 	for _, p := range policies {
 		byName[p.Name] = p
 	}
-	tfDestroy, ok := byName["terraform destroys need a second approver"]
+	tfDestroy, ok := byName["terraform destroys need approval"]
 	if !ok {
 		t.Fatal("the rule the held apply cites was not seeded")
 	}
@@ -643,8 +641,12 @@ func TestSeedConfigStoresPoliciesTheGovernanceSeedNames(t *testing.T) {
 		t.Errorf("the terraform rule still matches on a command string (%q), which is the brittle "+
 			"form this demo should not be teaching", tfDestroy.CommandContains)
 	}
-	if !tfDestroy.RequireDistinctApprover {
-		t.Error("the terraform rule lets whoever asked for a destroy release it")
+	// The demo runs the public release, so a paid rule there holds under "this build cannot
+	// evaluate it" instead of under its own name.
+	for _, p := range policies {
+		if p.Advanced() {
+			t.Errorf("the demo seeds %q, a paid rule the Community build it runs cannot evaluate", p.Name)
+		}
 	}
 	// The rule has to be able to hold what the demo shows it holding. An apply grades costly before
 	// its plan exists, so an irreversible floor failed every terraform apply before the destroy limit
@@ -1224,10 +1226,7 @@ func TestSeedHeldDestroyHoldsTheApplyItsPlanProposed(t *testing.T) {
 	if apply == nil {
 		t.Fatal("the plan proposed no apply, so the demo shows no change the gate is holding")
 	}
-	// The seeded rule demands a second approver, a Team rule, which a Community build holds on and
-	// enforces without evaluating, and the hold names the tier.
-	wantHeld := policytest.CommunityHold("terraform destroys need a second approver",
-		license.FeaturePolicyFull) + " (plan destroys 3, limit 0)"
+	wantHeld := "terraform destroys need approval (plan destroys 3, limit 0)"
 	if apply.Status != run.StatusPendingApproval || apply.HeldByPolicy != wantHeld {
 		t.Errorf("apply = %s held by %q, want pending_approval held by %q", apply.Status,
 			apply.HeldByPolicy, wantHeld)
@@ -1241,9 +1240,6 @@ func TestSeedHeldDestroyHoldsTheApplyItsPlanProposed(t *testing.T) {
 	if undo := run.AssessReversibility(apply); undo.Class != run.Irreversible {
 		t.Errorf("the held apply grades %q (%v), want irreversible beside a hold citing three "+
 			"destroys", undo.Class, undo.Reasons)
-	}
-	if !apply.RequireDistinctApprover {
-		t.Error("the held apply accepts its own requester as approver, which is not the rule it cites")
 	}
 	if apply.Actor != "deploy-bot" || apply.Source != "api" || apply.Labels["ticket"] != "OPS-511" {
 		t.Errorf("apply provenance = %q/%q/%v, want deploy-bot, api, and the plan's ticket",

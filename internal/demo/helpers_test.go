@@ -276,7 +276,7 @@ func TestSeedOptsLetsExtrasWin(t *testing.T) {
 		run.WithCommand("/srv/infra"),
 		run.WithRequireApproval(true),
 		run.WithRequireDistinctApprover(true),
-		run.WithHeldByPolicy("terraform destroys need a second approver"))
+		run.WithHeldByPolicy("terraform destroys need approval"))
 	for _, o := range opts {
 		o(r)
 	}

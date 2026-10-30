@@ -501,8 +501,7 @@ func seedGovernance(ctx context.Context, d Deps, playbook, inv string, ids seede
 	// decision and the digest of the exact spec that decision released.
 	opts := seedOpts(ctx, d, "template", ids.id(ids.Templates, "Deploy web", "tpl_deploy_web"), "deploy-bot",
 		map[string]string{"env": "prod", "ticket": "OPS-512"},
-		run.WithRequireApproval(true), run.WithRequireDistinctApprover(true),
-		run.WithHeldByPolicy("any production run"))
+		run.WithRequireApproval(true), run.WithHeldByPolicy("any production run"))
 	r, err := d.Submitter.Submit(ctx, playbook, inv, opts...)
 	if err != nil {
 		log.Warn("demo: seed approved run: " + err.Error())
@@ -1213,11 +1212,10 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
 	}
 
 	if d.Policies != nil {
-		// The destroy rule demands a distinct approver, because the apply it is holding does: seeded
-		// without it, the Second approver column read "any approver" on every row while the run
-		// linked from that same row carried require_distinct_approver. The page told a stranger
-		// that no rule here enforces separation of duties, which is the compliance story the
-		// Policies page exists to tell.
+		// Every seeded rule is one a Community build evaluates, because the demo runs the public
+		// release. A distinct-approver rule is Team, and the Community gate held the destroy under
+		// it with "this build cannot evaluate it" on the flagship page, which read as a broken
+		// product. The destroy limit is free, so the rule still holds what the plan destroys.
 		// It holds on what the plan destroys rather than on the word "destroy" in a command line,
 		// which misses the spelling a destroy usually reaches production as, an apply replaying a
 		// plan file, and teaches that governing this product means keeping a list of dangerous
@@ -1226,13 +1224,12 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
 		// It carries no reversibility floor. A terraform apply is graded before its plan exists,
 		// and it grades costly, so a floor of irreversible would fail every apply before the
 		// destroy limit was weighed and the rule could never hold one.
-		tfDestroy := policy.NewPolicy("terraform destroys need a second approver")
+		tfDestroy := policy.NewPolicy("terraform destroys need approval")
 		tfDestroy.Tool, tfDestroy.ExcludeDryRun, tfDestroy.CreatedAt = run.ToolTerraform, true, made(40)
 		// Zero holds a plan that would destroy anything at all. The default disables the check,
 		// which is safe for availability and not for change control, and leaving it disabled on
 		// the one policy demonstrating change control said the opposite of what was intended.
 		tfDestroy.MaxDestroy = 0
-		tfDestroy.RequireDistinctApprover = true
 		anyProd := policy.NewPolicy("any production run")
 		anyProd.InventoryID, anyProd.CreatedAt = inventories[0].ID, made(22)
 
