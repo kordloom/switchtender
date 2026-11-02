@@ -119,7 +119,7 @@ runs, which no other product in the table documents. Outside the table, Spacelif
 accepts the plan generated in the planning phase for infrastructure-as-code runs; it does not cover
 an inventory snapshot or a container image. The controller work underneath, one binary, a live
 matrix, balanced splits, fleet memory, a visual DAG editor, and a one-command import from six
-tools, ships in the paid build. It is younger, and its integration catalog is smaller. Both gaps
+tools, ships in Community. It is younger, and its integration catalog is smaller. Both gaps
 are being closed on purpose.
 
 The [reliability](reliability.md) page details how runs execute under load: bounded workers, splits
