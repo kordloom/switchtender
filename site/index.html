@@ -283,7 +283,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 		<section class="section wrap" id="features">
 			<div class="section-head reveal">
 				<h2>Free, with no caps.</h2>
-				<p>Everything on this page ships in the binary you already deployed: no host caps, no seat caps, no run caps, no time limit. Nothing that is free today will ever move behind a paywall. Six cards carry a Team line, and each says so where it applies.</p>
+				<p>Everything on this page without a Team line ships in the binary you already deployed: no host caps, no seat caps, no run caps, no time limit. Nothing that is free today will ever move behind a paywall. Five cards carry a Team line, and each says so where it applies. Those run on the paid build, a separate download.</p>
 			</div>
 			<div class="deck reveal" data-deck aria-label="Headline features">
 				<div class="deck-stack">
@@ -346,7 +346,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 				</details>
 				<details class="reveal">
 					<summary>Schedules you can trust before you save</summary>
-					<p>Type a cron expression, or an RFC 5545 recurrence rule for what cron cannot say, such as the last Friday of each quarter, and see its next firings before you save it. A scheduled launch carries its template's approvals, notifications, and timeout, and every run records which schedule started it. A server that stops mid-fire hands the occurrence back, and the occurrence's key keeps it from running twice. Where several servers share a PostgreSQL database, another takes it up, and creating that database is Team.</p>
+					<p>Type a cron expression, or an RFC 5545 recurrence rule for what cron cannot say, such as the last Friday of each quarter, and see its next firings before you save it. A scheduled launch carries its template's approvals, notifications, and timeout, and every run records which schedule started it. A server that stops mid-fire hands the occurrence back, and the occurrence's key keeps it from running twice. Where several servers share a PostgreSQL database, another takes it up.</p>
 				</details>
 				<details class="reveal">
 					<summary>Roles, teams, and orgs</summary>
@@ -492,7 +492,7 @@ func main() {
 					<h2>The honest side-by-side</h2>
 				</div>
 				<div class="sh-body">
-					<p>Every product in this table runs jobs and schedules them, and most of them pause a workflow for a click. SwitchTender starts one layer above that. An approval here commits a digest of the inventory snapshot, the resolved container image, the pinned commit, and the saved plan, and the executor recomputes that digest before it runs anything. An AI agent gets one credential and a ceiling below admin, so it can propose a change and never approve one. The audit trail is a signed hash chain that an Apache-2.0 verifier checks offline, without an account on this server or trust in it. No product in this table documents an approval whose digest is recomputed at run time, an agent that cannot approve its own run, or evidence verified without the server. The nearest things are documented in the <a href="/docs/comparison">comparison doc</a>: Ansible Automation Platform checks signed project files and an OPA policy at launch, separately from its approval node, and Rundeck limits its MCP server with an ACL policy that the operator writes. The rest of the table is controller work, and SwitchTender ships it in the same binary. The comparison doc says row by row where that is ahead, even, or behind, with a source for each cell. Go deeper on any one: <a href="/awx-alternative">AWX</a>, <a href="/aap-alternative">Ansible Automation Platform</a>, <a href="/ascender-alternative">Ascender</a>, and <a href="/semaphore-alternative">Semaphore</a>. <a href="/docs/reliability">How runs execute under load</a> covers the engine underneath.</p>
+					<p>Every product in this table runs jobs and schedules them, and most of them pause a workflow for a click. SwitchTender starts one layer above that. An approval here commits a digest of the inventory snapshot, the resolved container image, the pinned commit, and the saved plan, and the executor recomputes that digest before it runs anything. An AI agent gets one credential and a ceiling below admin, so it can propose a change and never approve one. The audit trail is a signed hash chain that an Apache-2.0 verifier checks offline, without an account on this server or trust in it. No product in this table documents an approval whose digest is recomputed at run time, an agent that cannot approve its own run, or evidence verified without the server. The nearest things are documented in the <a href="/docs/comparison">comparison doc</a>: Ansible Automation Platform checks signed project files and an OPA policy at launch, separately from its approval node, and Rundeck limits its MCP server with an ACL policy that the operator writes. The rest of the table is controller work, and all of it but the Team row is free. The comparison doc says row by row where that is ahead, even, or behind, with a source for each cell. Go deeper on any one: <a href="/awx-alternative">AWX</a>, <a href="/aap-alternative">Ansible Automation Platform</a>, <a href="/ascender-alternative">Ascender</a>, and <a href="/semaphore-alternative">Semaphore</a>. <a href="/docs/reliability">How runs execute under load</a> covers the engine underneath.</p>
 				</div>
 			</div>
 			<div class="table-wrap reveal">
@@ -575,7 +575,7 @@ open http://localhost:8080/ui/</code></pre>
 
 		<section class="cta wrap reveal">
 			<h2>Every finished run leaves a receipt.</h2>
-			<p>Who asked, who approved it when a person had to, what changed on every host, and proof that none of it was edited after the fact. Human or AI agent, the record is the same, and anyone can check it offline without trusting your server or ours.</p>
+			<p>Who asked, who approved it when a person had to, what changed on every host, and proof that none of it was edited after the fact. Human or AI agent, the record is the same, and once the chain is anchored, anyone can check it offline without trusting your server or ours.</p>
 			<p class="cta-note">Self-hosted, nothing phones home, and a lapsed license takes nothing with it. You never bet your operations on our survival.</p>
 			<div class="hero-cta center">
 				<a class="btn big" href="/get-started">Get started</a>
