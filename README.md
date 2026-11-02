@@ -35,7 +35,7 @@ inventory snapshot, its image digest, its commit, and for a Terraform or OpenTof
 plan. People, pipelines, and AI agents go through the same identity checks, policy, approval, and
 evidence, an AI agent's run waits for a person by default, and an agent can never approve.
 SwitchTender runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, takes over from AWX
-with a one-command import, paints every run live as a host-by-task matrix instead of a text scroll,
+with an import you preview before it writes, paints every run live as a host-by-task matrix instead of a text scroll,
 and hands back a signed receipt anyone can verify offline.
 No Kubernetes operator, no Postgres, no Redis, no message bus. One process, one SQLite file.
 
@@ -63,7 +63,9 @@ No Kubernetes operator, no Postgres, no Redis, no message bus. One process, one 
 
     request -> identity -> policy -> risk -> approval -> execution -> evidence -> verification
 
-Eight stages, one gate, no side doors. Five of them are the ones a change-control review asks about:
+Eight stages, one gate. A change made around the gate is not blocked, and
+[the side door](docs/side-door.md) covers how it still turns up. Five of them are the ones a
+change-control review asks about:
 
 **1. Request.** Every change enters through one submission path: the API, the UI, a template launch,
 a schedule, a webhook, a pull request comment, or an AI agent over MCP. The request is recorded on
@@ -93,11 +95,13 @@ run is claimed, fail closed, and the outcome, exit code, per-host results, a dig
 and the spec digest, is committed to the chain by the process that observed it finish.
 
 **5. Evidence.** `switchtender receipt <run-id>` seals the whole story, the request, the decision,
-the execution, the outcome, into one signed file. `switchtender verify` checks it with no database,
-no network, and no trust in the server that produced it: every chain link recomputes, the approver's
-decision provably binds the digest of the spec that executed, and, when anchoring is configured,
-external RFC 3161 timestamps fix the history in time. The same bytes verify under the open [loomseal](https://loomseal.com) verifier
-and its independent Python reference implementation.
+the execution, the outcome, into one signed file. `switchtender verify` checks it with no database
+and no network: every chain link recomputes, the approver's decision provably binds the digest of
+the spec that executed, and, when anchoring is configured, external RFC 3161 timestamps fix the
+history in time. Once the chain is anchored, the check needs no trust in the server that produced
+it. The same bytes verify under the open [loomseal](https://loomseal.com) verifier, which KordLoom
+also publishes, and its separate Python reference implementation, both held to the same
+conformance vectors.
 
 The remaining three stages are load-bearing but not headline: identity resolves who is asking and
 caps what an agent may ever do, risk grades each operation from its command and its reach so
@@ -191,7 +195,7 @@ templates nobody currently has to approve, without writing a thing.
 
 ## Why
 
-Automation controllers ask for a cluster before they run a playbook. A Kubernetes operator,
+AWX asks for a cluster before it runs a playbook. A Kubernetes operator,
 Postgres, Redis, and a mesh to reach your hosts, all standing before the first task does. Then a run
 finishes and hands you a text log to scroll, and across runs nothing flags a flaky host or trends a
 task's duration.
@@ -207,19 +211,19 @@ of scrollback.
 | Big&nbsp;jobs                        | Sharded across hosts, balanced by their measured duration, only failed shards retried. | Sliced round-robin, with no balancing.     | No splitting at all.     |
 | Memory&nbsp;across&nbsp;runs         | Flaky hosts flagged, durations trended, every host's history kept.               | Job history and per-host summaries, no flaky-host flag or trend. | Each task's log, no host tracked across runs. |
 | Pipelines                            | A dependency graph with a drag-and-drop editor, passing Ansible `set_stats` outputs from one step to the next. | A visual workflow builder.       | Basic chaining.          |
-| Leaving&nbsp;your&nbsp;old&nbsp;tool | One command imports AWX, Semaphore, Chef, Puppet, Rundeck, Jenkins, or a crontab. AWX and Semaphore bring projects, inventories, credential shells, templates, surveys, and schedules; Rundeck and Jenkins bring templates, surveys, and schedules, against an inventory you name, and a Rundeck project archive brings one project as well when its source control configuration names a repository this can reach; a crontab brings schedules; Chef and Puppet are desired-state systems rather than control planes, so they bring the fleet as an inventory, grouped by environment and, for Chef, by run-list role. [What each source brings over](docs/migration.md#what-each-source-brings-over). | Not applicable.                     | Not applicable.          |
+| Leaving&nbsp;your&nbsp;old&nbsp;tool | Importers read AWX, Semaphore, Chef, Puppet, Rundeck, Jenkins, and crontabs. AWX and Semaphore bring projects, inventories, credential shells, templates, surveys, and schedules; Rundeck and Jenkins bring templates, surveys, and schedules, against an inventory you name, and a Rundeck project archive brings one project as well when its source control configuration names a repository this can reach; a crontab brings schedules; Chef and Puppet are desired-state systems rather than control planes, so they bring the fleet as an inventory, grouped by environment and, for Chef, by run-list role. [What each source brings over](docs/migration.md#what-each-source-brings-over). | Not applicable.                     | Not applicable.          |
 
 The full head-to-head, including where SwitchTender is behind, is in the
 [comparison](docs/comparison.md).
 
 Checked against vendor documentation on 2026-08-10, for AWX 24.6.1 and Semaphore 2.19.7. Release
-state re-verified 2026-09-07 (AWX still 24.6.1, Semaphore at 2.19.12). These
+state re-verified 2026-11-02 (AWX still 24.6.1, Semaphore at 2.19.18). These
 products ship, and a table like this decays. If a row is out of date, open an issue and it gets
 corrected.
 
 SwitchTender sits above or alongside whatever already runs your changes. It does not ask you to rip
 out Terraform, Jenkins, or GitHub Actions. It governs the changes that flow through it, and the
-one-command AWX import is the on-ramp.
+AWX import is the on-ramp.
 
 ## Already on AWX?
 
