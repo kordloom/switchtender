@@ -18,8 +18,8 @@ default](policy.md#agent-runs-are-held-by-default) describes. The SSH keys, clou
 passwords its runs use are sealed on the server and decrypted only at execution, so the agent never
 sees them.
 
-An agent that holds only its SwitchTender token has no way around the gate. For that actor, the
-recorded history and the actual history are the same thing. The [agent guide](agents.md) walks
+An agent that holds only its SwitchTender token has no way around the gate, so every run it
+asks for is recorded before it runs. The [agent guide](agents.md) walks
 through the setup, and [the red team transcript](agent-red-team.md) is the attempt to break it.
 
 ## People stop needing one

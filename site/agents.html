@@ -143,7 +143,7 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>What the chain does not prove</h2>
-				<p>The chain proves the record was not altered. It does not prove that every change in your infrastructure went through SwitchTender. A person or a process holding its own SSH key can still change a host behind the controller's back, and no audit system can write down what it never saw. For agents, credential scoping is what closes that gap. An agent that holds only a SwitchTender token has no way around the controller, so for that actor, the recorded history and the actual history are the same thing. For people, <a href="/docs/side-door">the side door</a> covers how standing keys go away and how a change made around the gate still turns up.</p>
+				<p>The chain proves the record was not altered. It does not prove that every change in your infrastructure went through SwitchTender. A person or a process holding its own SSH key can still change a host behind the controller's back, and no audit system can write down what it never saw. For agents, credential scoping is what closes that gap. An agent that holds only a SwitchTender token has no way around the controller, so every run it asks for is recorded before it runs. For people, <a href="/docs/side-door">the side door</a> covers how standing keys go away and how a change made around the gate still turns up.</p>
 			</div>
 		</section>
 

@@ -79,8 +79,8 @@ unless a rule with <code>effect: exempt</code> covers it, as <a href="/docs/poli
 default</a> describes. The SSH keys, cloud logins, and vault
 passwords its runs use are sealed on the server and decrypted only at execution, so the agent never
 sees them.</p>
-<p>An agent that holds only its SwitchTender token has no way around the gate. For that actor, the
-recorded history and the actual history are the same thing. The <a href="/docs/agents">agent guide</a> walks
+<p>An agent that holds only its SwitchTender token has no way around the gate, so every run it
+asks for is recorded before it runs. The <a href="/docs/agents">agent guide</a> walks
 through the setup, and <a href="/docs/agent-red-team">the red team transcript</a> is the attempt to break it.</p>
 <h2 id="people-stop-needing-one">People stop needing one</h2>
 <p>A person keeps a side door open by holding a standing credential to production. SwitchTender removes

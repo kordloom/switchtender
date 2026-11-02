@@ -272,7 +272,8 @@ the agent cannot be.
 ### A reader who does not trust this server
 
 They are the design's favorite adversary. Pull the bundle, walk away, and verify it on an
-air-gapped machine with an open verifier this project does not control, against a key fingerprint
+air-gapped machine with the open LoomSeal verifier, which KordLoom also publishes, or with any
+implementation of its spec, against a key fingerprint
 pinned from somewhere other than the server. Nothing in that procedure asks the reader to believe
 anything the server says. The live demo reseeds nightly, which from outside is indistinguishable
 from a rewritten chain, and a witness pointed at it will refuse the rebuilt history the next
