@@ -36,9 +36,12 @@ that snapshot, so an inventory edited after an approval cannot widen or redirect
 constructed inventory is snapshotted the same way, the result it resolved to and every input it drew
 from, so an input edited after an approval, a host variable included, does not reach the run. A
 Terraform or OpenTofu apply that a rule gates or holds, and a drift reconcile, carries out the saved
-plan file its approval bound, and the tool refuses that plan if the infrastructure changed since. A dynamic inventory source is the one input that
-resolves at execution by nature: the approval binds its definition and the outcome records the hosts
-it reached.
+plan file its approval bound, and the tool refuses that plan if the infrastructure changed since. Two inputs resolve at execution time.
+Dynamic inventory is inherently resolved at runtime. Approval binds the inventory source definition,
+while the execution record captures the actual hosts reached. Galaxy roles and collections are
+installed from the project's `requirements.yml` when execution begins. Approval binds that file, but
+an unpinned dependency may resolve to code the approver never reviewed. Pin each dependency to an
+exact version or commit to ensure execution uses the code that was approved.
 
 **"The requester cannot release their own change."** A rule can require a distinct approver, and
 the check runs before anything is recorded, so a refused self-approval leaves no decision entry
