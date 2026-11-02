@@ -43,12 +43,13 @@ test("the hosted demo says it runs open on purpose and a real install does not",
 	assert.match(text, /An install you run never serves open on a network address/);
 });
 
-// The change register is the document an auditor is handed, and on the hosted demo it is one click
-// from the first page a visitor sees rather than three pages deep behind a download.
-test("the hosted demo links to the change register", () => {
+// The hosted demo runs the public Community build, which refuses the change register and every
+// other paid feature, so its banner names that build and never sends a visitor to a paid page.
+test("the hosted demo names the Community build and links no paid page", () => {
 	const { text, links } = bannerOn("demo.switchtender.com", true);
-	assert.ok(links.includes("/ui/audit/register"), "no link to the change register: " + links);
-	assert.match(text, /the change register an auditor would be handed/);
+	assert.match(text, /Community build/);
+	assert.doesNotMatch(text, /Team license|every feature is on/);
+	assert.ok(!links.includes("/ui/audit/register"), "links the paid change register: " + links);
 });
 
 test("a demo on another host does not claim a nightly reset", () => {
