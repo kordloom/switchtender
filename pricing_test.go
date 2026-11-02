@@ -454,9 +454,9 @@ func TestPricingSurfacesDescribeThePaidBuild(t *testing.T) {
 	}, { // Test 8: Team's scope on the pricing FAQ is workers, not the database.
 		File:       "site/pricing.html",
 		WantPhrase: "PostgreSQL, including active-active HA on it, is Community.",
-	}, { // Test 9: The comparison doc names the paid build.
+	}, { // Test 9: The comparison doc says the controller work is Community.
 		File:       "docs/comparison.md",
-		WantPhrase: "ships in the paid build",
+		WantPhrase: "a one-command import from six tools, ships in Community.",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
