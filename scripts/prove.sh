@@ -12,14 +12,16 @@
 #
 #   ./scripts/prove.sh [path-to-switchtender]
 #
-# With no argument it uses the switchtender on PATH. PROVE_PORT picks the loopback port (default
-# 18799). No approval policy is written at any point: the agent's run is held by the hold every
-# install starts with, which is the default this demonstrates. It needs curl and python3, writes
-# only inside its own temporary directory, and removes it on exit.
+# With no argument it uses the switchtender on PATH, then ./.bin/switchtender, and otherwise builds
+# one from this checkout with Go. PROVE_PORT picks the loopback port (default 18799). No approval
+# policy is written at any point: the agent's run is held by the hold every install starts with,
+# which is the default this demonstrates. It needs curl and python3, writes only inside its own
+# temporary directory, and removes it on exit.
 
 set -euo pipefail
 
 BIN="${1:-$(command -v switchtender || echo ./.bin/switchtender)}"
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PORT="${PROVE_PORT:-18799}"
 API="http://127.0.0.1:${PORT}"
 WORK="$(mktemp -d)"
@@ -33,7 +35,12 @@ ok()   { printf '   \033[32mok\033[0m %s\n' "$*"; }
 
 command -v curl    >/dev/null || fail "curl is required"
 command -v python3 >/dev/null || fail "python3 is required"
-[ -x "$BIN" ]                 || fail "no switchtender binary at $BIN (pass one as \$1)"
+if [ ! -x "$BIN" ] && [ -z "${1:-}" ] && command -v go >/dev/null && [ -f "$REPO/go.mod" ]; then
+  step "Building switchtender from this checkout"
+  (cd "$REPO" && go build -o "$WORK/switchtender" .) || fail "go build failed"
+  BIN="$WORK/switchtender"
+fi
+[ -x "$BIN" ] || fail "no switchtender binary at $BIN. Pass one as \$1, put one on PATH, install Go to build one, or run: go install github.com/kordloom/switchtender@latest"
 
 jqp() { python3 -c "import sys,json;d=json.load(sys.stdin);print($1)"; }
 
