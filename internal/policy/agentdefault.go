@@ -8,8 +8,7 @@ import (
 
 // The built-in agent hold. It is the rule every install starts with: a run an AI agent requested
 // waits for a person unless a stored exemption says that run may go ahead. It is not a stored
-// policy, so it cannot be deleted, it is not in the policy list, and it counts against no license's
-// policy limit.
+// policy, so it cannot be deleted and it is not in the policy list.
 const (
 	// AgentDefaultID identifies the built-in agent hold wherever a rule is named by id.
 	AgentDefaultID = "builtin_agent_hold"

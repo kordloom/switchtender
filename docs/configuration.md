@@ -12,8 +12,8 @@ variable.
 
 ## Licensed features
 
-Almost everything on this page runs on Community, which needs no license. Seven features are licensed,
-and separately an install is capped on how many approval policies it holds at once. A flag or request
+Almost everything on this page runs on Community, which needs no license. Seven features are licensed.
+There is no cap on how many approval policies an install holds. A flag or request
 that turns on a licensed feature is refused outright rather than quietly ignored, so an install never
 believes it has a control it does not have.
 
