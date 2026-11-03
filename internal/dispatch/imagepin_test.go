@@ -140,6 +140,79 @@ func TestSubmitPinsTheImageInForce(t *testing.T) {
 	}
 }
 
+// TestSubmitRefusesAnUnpinnedImage covers a dispatcher that refuses unpinned images: a tag the
+// registry does not pin, or any tag when no resolver is set, refuses the submission, while a pinned
+// image, a tag the registry pins, and a run on the host submit as before.
+func TestSubmitRefusesAnUnpinnedImage(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Name labels the case.
+		Name string
+		// RunImage is the image the run names.
+		RunImage string
+		// Down makes the registry unreachable.
+		Down bool
+		// NoResolver leaves the dispatcher without a resolver, as --image-digest-lookup off does.
+		NoResolver bool
+		// WantImage is the image pinned onto the run when it submits.
+		WantImage string
+		// Want is the error the submission ends in.
+		Want error
+	}{{ // Test 0: A registry that does not answer refuses the submission.
+		Name: "registry down", RunImage: "reg.example.com/runner:2", Down: true, Want: ErrImageUnpinned,
+	}, { // Test 1: With no resolver, a tag cannot be pinned and is refused.
+		Name: "no resolver", RunImage: "reg.example.com/runner:2", NoResolver: true,
+		Want: ErrImageUnpinned,
+	}, { // Test 2: A tag the registry pins submits by its digest.
+		Name: "registry pins", RunImage: "reg.example.com/runner:2",
+		WantImage: "reg.example.com/runner:2@" + pinDigest,
+	}, { // Test 3: An image already pinned by digest needs no resolver.
+		Name: "already pinned", RunImage: "reg.example.com/runner@" + pinDigest, NoResolver: true,
+		WantImage: "reg.example.com/runner@" + pinDigest,
+	}, { // Test 4: A run with no image runs on the host and is not refused.
+		Name: "no image", NoResolver: true, WantImage: "",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			f := newPinFixture(t)
+			if err := f.D.projects.Save(ctx, &project.Project{ID: "proj_pin", Name: "infra",
+				RepoURL: f.Repo, Branch: "main"}); err != nil {
+				t.Fatalf("Save(project) error = %v", err)
+			}
+			opts := []Option{WithProjects(f.D.projects, f.D.syncer), WithRefuseUnpinnedImage(true),
+				WithNoJanitor(), WithClaimGate(func() error { return errNoClaim })}
+			if !test.NoResolver {
+				opts = append(opts, WithImageResolver(&fakeImageResolver{Down: test.Down}))
+			}
+			store := run.NewMemStore()
+			d := New(store, dispatchtest.OKRunner(), nil, opts...)
+			t.Cleanup(d.Close)
+			sopts := []run.SubmitOption{run.WithProject("proj_pin"), run.WithTool(run.ToolAnsible)}
+			if test.RunImage != "" {
+				sopts = append(sopts, run.WithImage(test.RunImage, ""))
+			}
+			r, err := d.Submit(ctx, escapeRepoPlaybook, "", sopts...)
+			if !errors.Is(err, test.Want) {
+				t.Fatalf("Submit() error = %v, want %v", err, test.Want)
+			}
+			if test.Want != nil {
+				if !strings.Contains(err.Error(), "--allow-unpinned-image") {
+					t.Errorf("refusal %q does not name the flag that allows it", err)
+				}
+				if runs, lerr := store.List(ctx); lerr != nil || len(runs) != 0 {
+					t.Errorf("stored runs = %d (%v), want none for a refused submission", len(runs), lerr)
+				}
+				return
+			}
+			if r.Image != test.WantImage {
+				t.Errorf("pinned image = %q, want %q", r.Image, test.WantImage)
+			}
+		})
+	}
+}
+
 // TestAnApprovedRunExecutesInTheImageItWasApprovedWith follows a held run whose project names its
 // image. The image is pinned when the run is held, so the project's image changing afterward, which
 // is an ordinary edit and goes through no approval, does not move the approved run into the new one.

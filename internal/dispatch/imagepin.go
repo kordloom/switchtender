@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -24,11 +25,19 @@ func WithImageResolver(r ImageResolver) Option {
 	return func(c *config) { c.imageResolver = r }
 }
 
+// WithRefuseUnpinnedImage makes the dispatcher refuse a submission whose image tag cannot be pinned
+// to a digest, because the registry did not answer or no resolver is set, rather than binding the
+// run to the tag. An approval then always covers the exact image the run executes in.
+func WithRefuseUnpinnedImage(refuse bool) Option {
+	return func(c *config) { c.refuseUnpinnedImage = refuse }
+}
+
 // pinImage resolves the image r will execute in when it is submitted, and pins it onto r: the run's
 // own image, which a template launch has already set from the template, then its project's, then this
 // server's default. When the registry answers, the tag is pinned to the digest it serves and the run
-// executes by that digest. When it does not, the run stays bound to the tag, which the approval view
-// says, and the outcome records the digest that was pulled.
+// executes by that digest. When it does not, or no resolver is set, a dispatcher that refuses
+// unpinned images refuses the submission. One that allows them binds the run to the tag, which the
+// approval view says, and the outcome records the digest that was pulled.
 //
 // The image is part of the spec an approval binds, so it is settled here, before any rule weighs the
 // run and before an approver sees it. An image left to resolve at execution was one an approval never
@@ -50,8 +59,11 @@ func (d *Dispatcher) pinImage(ctx context.Context, r *run.Run) error {
 	if r.Image == "" {
 		r.Image = d.defaultImage
 	}
-	if r.Image == "" || imageref.Pinned(r.Image) || d.imageResolver == nil {
+	if r.Image == "" || imageref.Pinned(r.Image) {
 		return nil
+	}
+	if d.imageResolver == nil {
+		return d.unpinnedImage(r.Image, errNoDigestLookup)
 	}
 	creds, release := d.pullLogin(ctx, r.PullCredentialID)
 	defer release()
@@ -61,17 +73,28 @@ func (d *Dispatcher) pinImage(ctx context.Context, r *run.Run) error {
 		return fmt.Errorf("the request ended while the run's image tag was being resolved: %w", cerr)
 	}
 	if err != nil {
-		d.log.Info("dispatch: image tag not pinned to a digest: "+err.Error(),
-			zap.String("image", r.Image))
-		return nil
+		return d.unpinnedImage(r.Image, err)
 	}
 	pinned, err := imageref.WithDigest(r.Image, digest)
 	if err != nil {
-		d.log.Info("dispatch: image tag not pinned to a digest: "+err.Error(),
-			zap.String("image", r.Image))
-		return nil
+		return d.unpinnedImage(r.Image, err)
 	}
 	r.Image = pinned
+	return nil
+}
+
+// errNoDigestLookup is the cause given when a tag is refused because this server resolves no tags.
+var errNoDigestLookup = errors.New("image digest lookup is off")
+
+// unpinnedImage settles a run whose image tag could not be pinned to a digest. A dispatcher that
+// refuses unpinned images fails the submission, since an approval of a tag covers whatever the tag
+// names when the run executes. One that allows them leaves the run bound to the tag.
+func (d *Dispatcher) unpinnedImage(image string, cause error) error {
+	if d.refuseUnpinnedImage {
+		return fmt.Errorf("%w: %s: %w: pin the image by @sha256 digest, make its registry reachable, "+
+			"or start the server with --allow-unpinned-image", ErrImageUnpinned, image, cause)
+	}
+	d.log.Info("dispatch: image tag not pinned to a digest: "+cause.Error(), zap.String("image", image))
 	return nil
 }
 

@@ -89,9 +89,10 @@ same tampering at verify time; this refuses to perform it in the first place.</p
 <p>The spec covers what decides a run's effect, not only the request. The container image is resolved
 when the run is submitted, from the run, its template, its project, or the server default, and
 pinned onto it by the digest its registry serves, so a project's image changed after an approval
-cannot move the approved run into another container. When the registry does not answer, the run is
-bound to the tag and the approver is told the tag is not pinned to a digest, and the outcome records
-the digest that was pulled. A static inventory is snapshotted at submission and the run executes
+cannot move the approved run into another container. When the registry does not answer, the
+submission is refused, so an approval always covers a digest. A server started with
+<code>--allow-unpinned-image</code> binds such a run to the tag instead, the approver is told the tag is not
+pinned to a digest, and the outcome records the digest that was pulled. A static inventory is snapshotted at submission and the run executes
 that snapshot, so an inventory edited after an approval cannot widen or redirect the run. A smart or
 constructed inventory is snapshotted the same way, the result it resolved to and every input it drew
 from, so an input edited after an approval, a host variable included, does not reach the run. A

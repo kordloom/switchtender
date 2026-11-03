@@ -233,9 +233,14 @@ default, so the server asks the registry when the run is submitted. The approval
 image. A worker's own `--default-image` never applies to an approved run, so a run approved to
 execute on the host is refused there rather than moved into another image.
 
-What to do: set the fallback image with `--default-image` on `serve`, and turn
-`--image-digest-lookup` off where the server cannot reach a registry.
-[serve](configuration.md#serve) describes both flags.
+A tag that cannot be pinned is refused at submission: the registry did not answer, or
+`--image-digest-lookup` is off. Before, such a run was bound to the tag, and its approval covered
+whatever the tag named when it executed.
+
+What to do: set the fallback image with `--default-image` on `serve`. Where the server cannot reach a
+registry, pin each image by `@sha256:` digest in the template or project, or start `serve` with
+`--allow-unpinned-image` to keep binding runs to tags. [serve](configuration.md#serve) describes the
+flags.
 
 ## A plan's submission can wait for its modules
 

@@ -175,6 +175,10 @@ var serveDefaultImage string
 // serveRequireImageDigest holds the value of the --require-image-digest flag.
 var serveRequireImageDigest bool
 
+// serveAllowUnpinnedImage holds the value of the --allow-unpinned-image flag: whether a submitted
+// run whose image tag could not be pinned to a digest is bound to the tag rather than refused.
+var serveAllowUnpinnedImage bool
+
 // serveImageDigestLookup holds the value of the --image-digest-lookup flag: whether a submitted run's
 // image tag is resolved to the digest its registry serves, so the run executes by that digest.
 var serveImageDigestLookup bool
@@ -672,6 +676,9 @@ func init() {
 	serveCmd.Flags().BoolVar(&serveImageDigestLookup, "image-digest-lookup", true,
 		"Resolve a submitted run's image tag to the digest its registry serves, so the run executes "+
 			"by that digest. Turn off where no registry is reachable from this server.")
+	serveCmd.Flags().BoolVar(&serveAllowUnpinnedImage, "allow-unpinned-image", false,
+		"Bind a run to its image tag when the tag cannot be pinned to a digest, rather than refusing "+
+			"the submission. An approval of a tag covers whatever the tag names when the run executes.")
 	registerContainerFlags(serveCmd)
 	registerRunFilesFlag(serveCmd)
 	registerModuleFetchFlags(serveCmd)
@@ -1678,6 +1685,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		dispatch.WithProjects(bundle.Projects(), syncer),
 		dispatch.WithDefaultImage(serveDefaultImage),
 		imageResolverOption(),
+		dispatch.WithRefuseUnpinnedImage(!serveAllowUnpinnedImage),
 		dispatch.WithWebhooks(notifyWebhooks),
 		dispatch.WithSlack(notifySlack),
 		dispatch.WithMattermost(notifyMattermost),

@@ -262,9 +262,13 @@ now chosen when the run is submitted, from the run, its template, its project, o
 default, so the server asks the registry when the run is submitted. The approval covers that exact
 image. A worker's own <code>--default-image</code> never applies to an approved run, so a run approved to
 execute on the host is refused there rather than moved into another image.</p>
-<p>What to do: set the fallback image with <code>--default-image</code> on <code>serve</code>, and turn
-<code>--image-digest-lookup</code> off where the server cannot reach a registry.
-<a href="/docs/configuration#serve">serve</a> describes both flags.</p>
+<p>A tag that cannot be pinned is refused at submission: the registry did not answer, or
+<code>--image-digest-lookup</code> is off. Before, such a run was bound to the tag, and its approval covered
+whatever the tag named when it executed.</p>
+<p>What to do: set the fallback image with <code>--default-image</code> on <code>serve</code>. Where the server cannot reach a
+registry, pin each image by <code>@sha256:</code> digest in the template or project, or start <code>serve</code> with
+<code>--allow-unpinned-image</code> to keep binding runs to tags. <a href="/docs/configuration#serve">serve</a> describes the
+flags.</p>
 <h2 id="a-plans-submission-can-wait-for-its-modules">A plan's submission can wait for its modules</h2>
 <p>A Terraform or OpenTofu dry run whose configuration calls registry or remote modules is read by the
 gate before the submission answers, and the gate downloads those modules first.

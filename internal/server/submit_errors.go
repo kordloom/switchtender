@@ -30,9 +30,10 @@ const (
 	// submitPolicy is a submission a deny rule or the license refused.
 	submitPolicy
 	// submitContent is an inventory whose content could not be read from where it lives, its
-	// content source or ansible-inventory. The same read fails alike for a refusal and for an
-	// outage, so a sender is told where to look and not that the error is its own, since one that
-	// gives up on a refusal would stop retrying an outage.
+	// content source or ansible-inventory, or an image tag its registry did not pin to a digest. The
+	// same read fails alike for a refusal and for an outage, so a sender is told where to look and
+	// not that the error is its own, since one that gives up on a refusal would stop retrying an
+	// outage.
 	submitContent
 	// submitCapacity is a new run refused because the disk its record is written to is nearly full.
 	// Nothing in the request is wrong, and the same request succeeds once space is freed.
@@ -59,7 +60,7 @@ var submitClasses = []struct {
 	}},
 	{class: submitSecret, errs: []error{credential.ErrNoSecret, credential.ErrUnreadable}},
 	{class: submitPolicy, errs: []error{dispatch.ErrPolicyDenied, dispatch.ErrQueueUnlicensed}},
-	{class: submitContent, errs: []error{inventory.ErrContentRead}},
+	{class: submitContent, errs: []error{inventory.ErrContentRead, dispatch.ErrImageUnpinned}},
 	{class: submitCapacity, errs: []error{dispatch.ErrLowSpace}},
 	{class: submitInput, errs: []error{inventory.ErrComposition, inventory.ErrResolve}},
 }
