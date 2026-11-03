@@ -61,8 +61,8 @@ func TestClassifySubmitNamesEveryKnownError(t *testing.T) {
 		WantClass: submitSecret, Errs: []error{credential.ErrNoSecret, credential.ErrUnreadable},
 	}, { // Test 2: A deny rule or the license.
 		WantClass: submitPolicy, Errs: []error{dispatch.ErrPolicyDenied, dispatch.ErrQueueUnlicensed},
-	}, { // Test 3: An inventory whose content could not be read from where it lives.
-		WantClass: submitContent, Errs: []error{inventory.ErrContentRead},
+	}, { // Test 3: An inventory or image tag that could not be read from where it lives.
+		WantClass: submitContent, Errs: []error{inventory.ErrContentRead, dispatch.ErrImageUnpinned},
 	}, { // Test 4: A disk too full to record a new run.
 		WantClass: submitCapacity, Errs: []error{dispatch.ErrLowSpace},
 	}}

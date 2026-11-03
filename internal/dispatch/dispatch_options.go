@@ -122,6 +122,9 @@ type config struct {
 	// imageResolver resolves a run's image tag to the digest its registry serves when the run is
 	// submitted. Nil leaves every image bound to its tag.
 	imageResolver ImageResolver
+	// refuseUnpinnedImage refuses a submission whose image tag could not be pinned to a digest,
+	// rather than binding the run to the tag.
+	refuseUnpinnedImage bool
 	// moduleFetchTimeout bounds how long the gate's module download may run. Zero keeps the default.
 	moduleFetchTimeout time.Duration
 	// moduleFetchMaxBytes bounds what the gate's module download may write. Zero keeps the default.
@@ -420,6 +423,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		decisions:           cfg.decisions,
 		defaultImage:        cfg.defaultImage,
 		imageResolver:       cfg.imageResolver,
+		refuseUnpinnedImage: cfg.refuseUnpinnedImage,
 		claimGate:           cfg.claimGate,
 		presence:            cfg.presence,
 		planScans:           newPlanScanCache(),

@@ -38,6 +38,10 @@ var (
 	// ErrImagePin is returned when a run's container image does not match what was pinned when it was
 	// submitted, or when an image could not be pinned to the run at all.
 	ErrImagePin = errors.New("image pin refused")
+	// ErrImageUnpinned is returned when a run is submitted with an image tag that could not be pinned
+	// to a digest and this server refuses unpinned images. An approval of a tag would cover whatever
+	// the tag names when the run executes, not the image the approver saw.
+	ErrImageUnpinned = errors.New("image not pinned to a digest")
 	// ErrNoHostLister is returned when a split is requested but the runner cannot list hosts.
 	ErrNoHostLister = errors.New("host listing unavailable")
 	// ErrNoSteps aliases the run-package error so callers matching dispatch.ErrNoSteps still match
