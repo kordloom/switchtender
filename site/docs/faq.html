@@ -201,7 +201,7 @@
    "name": "How mature is SwitchTender?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "New, and built so you can check its maturity instead of taking it on reputation. Before any release ships, it is deployed to a fresh Kubernetes cluster and proven against three real machines: a destructive change is held until a person approves it, the receipt is verified offline by a binary that never spoke to the cluster, the previous release upgrades in place and rolls back, and a worker is killed mid-run. The supertest lists every check. The audit trail is hash-chained and signed, and a third party can verify a run offline with a separate open-source verifier, so the claims do not rest on trusting the vendor. The license converts to Apache 2.0 on a fixed schedule and the source is available now, so the project outliving the company is a documented path rather than a hope. The continuity and vendor risk pages cover the rest."
+    "text": "New, and built so you can check its maturity instead of taking it on reputation. Before any release ships, it is deployed to a fresh Kubernetes cluster and proven against three real machines: a destructive change is held until a person approves it, the receipt is verified offline by a binary that never spoke to the cluster, the previous release upgrades in place and rolls back, and a worker is killed mid-run. The supertest lists every check. The audit trail is hash-chained and signed, and a third party can verify a run offline with a separate open-source verifier, so the claims do not rest on trusting the vendor. The public core's license converts to Apache 2.0 on a fixed schedule and its source is available now, so the project outliving the company is a documented path rather than a hope. The continuity and vendor risk pages cover the rest."
    }
   },
   {
@@ -209,7 +209,7 @@
    "name": "What is the license?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Business Source License 1.1: free to self-host, modify, and run in production for your own organization. The one restriction is offering it to third parties as a hosted or managed service that provides its primary functionality, and each release converts to Apache 2.0 two years after it ships. The Community tier is free and complete on its own, with the built-in hold on agent runs and plain rules of your own. Pro adds directory sign-in, deny rules, and risk and reversibility floors. Team adds the full policy engine, the period change register, dedicated workers and named queues, and the relay that runs them inside networks the control node cannot reach, and one-click drift reconcile. Both unlock in the paid build with a signed license file the binary verifies offline, flat per organization by fleet band, and a lapsed license takes nothing: paid features stop while your data, evidence, and every Community feature keep working. There is no license server and nothing ever phones home."
+    "text": "Business Source License 1.1: free to self-host, modify, and run in production for your own organization. The one restriction is offering it to third parties as a hosted or managed service that provides its primary functionality, and each release of the public core converts to Apache 2.0 two years after it ships. The Community tier is free and complete on its own, with the built-in hold on agent runs and plain rules of your own. Pro adds directory sign-in, deny rules, and risk and reversibility floors. Team adds the full policy engine, the period change register, dedicated workers and named queues, and the relay that runs them inside networks the control node cannot reach, and one-click drift reconcile. Both unlock in the paid build with a signed license file the binary verifies offline, flat per organization by fleet band, and a lapsed license takes nothing: paid features stop while your data, evidence, and every Community feature keep working. There is no license server and nothing ever phones home."
    }
   }
  ]
@@ -457,14 +457,14 @@ a destructive change is held until a person approves it, the receipt is verified
 binary that never spoke to the cluster, the previous release upgrades in place and rolls back, and
 a worker is killed mid-run. <a href="/docs/supertest">The supertest</a> lists every check.</p>
 <p>The audit trail is hash-chained and signed, and a third party can verify a run offline with a
-separate open-source verifier, so the claims do not rest on trusting the vendor. The license
-converts to Apache 2.0 on a fixed schedule and the source is available now, so the project
+separate open-source verifier, so the claims do not rest on trusting the vendor. The public core's
+license converts to Apache 2.0 on a fixed schedule and its source is available now, so the project
 outliving the company is a documented path rather than a hope. The <a href="/docs/continuity">continuity</a> and
 <a href="/docs/vendor-risk">vendor risk</a> pages cover the rest.</p>
 <h2 id="what-is-the-license">What is the license?</h2>
 <p>Business Source License 1.1: free to self-host, modify, and run in production for your own
 organization. The one restriction is offering it to third parties as a hosted or managed service
-that provides its primary functionality, and each release converts to Apache 2.0 two years after it
+that provides its primary functionality, and each release of the public core converts to Apache 2.0 two years after it
 ships. The Community tier is free and complete on its own, with the built-in hold on agent runs and
 plain rules of your own. Pro adds directory sign-in, deny rules, and risk and reversibility floors.
 Team adds the full policy engine, the period change register, dedicated workers and named queues,

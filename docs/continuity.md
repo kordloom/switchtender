@@ -22,10 +22,10 @@ ships in the binary itself, so a countersigning witness can be run by anyone, in
 
 Three layers, strongest first:
 
-1. Every release attaches its own source tarball as a release asset, listed in the signed
+1. Every public core release attaches its own source tarball as a release asset, listed in the signed
    `SHA256SUMS` manifest beside the binaries. Keeping a release means keeping its exact source. The
    code of each release before v1.101.0 is kept in this repository as a `snapshot/vX.Y.Z` tag.
-2. The license converts. Each release becomes Apache 2.0 two years after it ships, automatically,
+2. The license converts. Each release of the public core becomes Apache 2.0 two years after it ships, automatically,
    with no trigger event, agent, or dispute. The conversion is written into the license itself,
    and into an irrevocable supplemental grant, `LICENSE-GRANT.md`, covering the versions
    released before the license file carried the two-year wording.
@@ -40,9 +40,12 @@ Under BSL 1.1 you may copy, modify, and run the source in production for your ow
 right now. Continuity does not wait for the conversion date.
 
 This is also the answer to source code escrow. Escrow exists to hand you the code, and the right to
-keep using it, if the vendor goes under. You already have both: the source is public now, and the
-continuity clause makes every published version Apache 2.0 on the day it triggers, with no escrow
-agent in between.
+keep using it, if the vendor goes under. For the public core you already have both: its source is public now, and the
+continuity clause makes every published version of it Apache 2.0 on the day it triggers, with no
+escrow agent in between. The paid build's source is not public and we do not offer source escrow
+for it. Paid features run to the end of your term, and every paid build we delivered keeps running
+in Community mode after that. If your review needs a continuity arrangement for the paid build,
+ask, and we will put one in a signed agreement.
 
 ## What degrades on vendor death
 

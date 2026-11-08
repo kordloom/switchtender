@@ -243,7 +243,7 @@ Pro, Team, and Enterprise add, and what they cost, is under [License](#license) 
 ## If KordLoom stops
 
 An install keeps running as it is. There is no license server and no phone-home, a paid license keeps
-verifying offline through its term, and your data and receipts stay yours. Each release converts to
+verifying offline through its term, and your data and receipts stay yours. Each release of the public core converts to
 Apache 2.0 two years after it ships. [Continuity](docs/continuity.md) is the whole answer in one
 place.
 
@@ -446,7 +446,7 @@ by a signed license file: no license server, no phone-home, flat per org. The pa
 private repository, mounted at internal/paid/impl as a git submodule that public clones do not
 fetch. A Community build refuses each paid feature by naming the tier it needs, and the paid engine
 is not there to patch a key out of. The one reserved right is offering SwitchTender to third parties
-as a hosted or managed service that provides its primary functionality. Each version converts to
+as a hosted or managed service that provides its primary functionality. Each version of the public core converts to
 Apache-2.0 two years after its release.
 
 See `LICENSE` for the exact terms and [`LICENSING.md`](LICENSING.md) for what self-hosting grants,
