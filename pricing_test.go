@@ -467,3 +467,32 @@ func TestPricingSurfacesDescribeThePaidBuild(t *testing.T) {
 		})
 	}
 }
+
+// TestPricingTermsAndProcurementProse holds the approved phrases in and the retired ones
+// out of the terms and procurement pages.
+func TestPricingTermsAndProcurementProse(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		File       string
+		Phrase     string
+		WantAbsent bool
+	}{{ // Test 0: The terms name the paid build.
+		File: "site/terms.html", Phrase: "The paid build",
+	}, { // Test 1: The terms no longer claim one license for both builds.
+		File: "site/terms.html", Phrase: "same license either way", WantAbsent: true,
+	}, { // Test 2: Procurement no longer says the source is public now.
+		File: "site/procurement.html", Phrase: "the source is public now", WantAbsent: true,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			has := strings.Contains(readFlat(t, test.File), test.Phrase)
+			if has && test.WantAbsent {
+				t.Errorf("%s still says %q", test.File, test.Phrase)
+			}
+			if !has && !test.WantAbsent {
+				t.Errorf("%s no longer says %q", test.File, test.Phrase)
+			}
+		})
+	}
+}

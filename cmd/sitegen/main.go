@@ -484,8 +484,9 @@ var landingFAQ = []landingQA{{
 	Question: "What happens if KordLoom stops?",
 	Answer: "An install keeps running as it is. There is no license server and no phone-home, a " +
 		"paid license keeps verifying offline through its term, and your data and receipts stay " +
-		"yours, checked by an open verifier that does not depend on us. Every release converts to " +
-		"Apache 2.0 two years after it ships, and at once if KordLoom ceases business.",
+		"yours, checked by an open verifier that does not depend on us. Every release of the " +
+		"public core converts to Apache 2.0 two years after it ships, and at once if KordLoom " +
+		"ceases business.",
 }}
 
 // landingExtraFAQ holds page-specific questions appended after the shared ones, keyed by the

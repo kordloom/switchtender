@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -104,5 +106,94 @@ func TestLicensingPromiseSaysWherePaidCodeLives(t *testing.T) {
 	if strings.Contains(strings.ToLower(text), "paid features ship in the same binary") {
 		t.Error("LICENSING.md says paid features ship in the same binary, but the paid code is in a " +
 			"private module and the paid build is a separate download")
+	}
+}
+
+// conversionClaim matches a sentence that says every or each release or version converts.
+var conversionClaim = regexp.MustCompile(`(?i)\b(every|each)\b.*\b(release|version)s?\b.*\bconvert`)
+
+// blockClose matches the closing tags that end a sentence in HTML.
+var blockClose = regexp.MustCompile(`(?i)</(p|li|h[1-6]|td|th|div|dd|dt|summary|blockquote)>`)
+
+// anyTag matches any remaining HTML tag, which sits inside a sentence.
+var anyTag = regexp.MustCompile(`<[^>]*>`)
+
+// sentenceEnd matches a sentence terminator followed by space, or a block boundary marker.
+var sentenceEnd = regexp.MustCompile(`[.!?]["']?\s|\x00`)
+
+// sentences splits flattened page text into sentences. Closing block tags end a sentence, other
+// tags become spaces, and a terminator inside a number such as 2.0 does not split.
+func sentences(flat string) []string {
+	flat = blockClose.ReplaceAllString(flat, "\x00")
+	flat = anyTag.ReplaceAllString(flat, " ")
+	flat = whitespaceRun.ReplaceAllString(flat, " ")
+	return sentenceEnd.Split(flat, -1)
+}
+
+// unqualifiedConversions returns each sentence that claims every release converts without
+// saying "public core".
+func unqualifiedConversions(flat string) []string {
+	var bad []string
+	for _, s := range sentences(flat) {
+		if conversionClaim.MatchString(s) && !strings.Contains(strings.ToLower(s), "public core") {
+			bad = append(bad, strings.TrimSpace(s))
+		}
+	}
+	return bad
+}
+
+// TestLicensingPromiseConversionMatcher tests the matcher against literal strings, without touching
+// a page.
+func TestLicensingPromiseConversionMatcher(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		In        string
+		WantCount int
+	}{{ // Test 0: An unqualified every-release claim fails.
+		In: "Every release converts to Apache 2.0.", WantCount: 1,
+	}, { // Test 1: The public core qualifier passes.
+		In: "Each release of the public core also converts to Apache 2.0.", WantCount: 0,
+	}, { // Test 2: A published-release qualifier passes.
+		In: "Note that every published release of the public core converts.", WantCount: 0,
+	}, { // Test 3: A tag inside the sentence does not hide the match.
+		In: "<p>Every <strong>version</strong> converts after two years.</p>", WantCount: 1,
+	}, { // Test 4: A qualifier in a neighboring sentence does not count.
+		In: "The public core is open. Every release converts.", WantCount: 1,
+	}, { // Test 5: A wrapped sentence is still one sentence.
+		In: "<p>Every\n   release\n converts to Apache 2.0.</p>", WantCount: 1,
+	}, { // Test 6: A sentence with no conversion claim passes.
+		In: "Every release is signed.", WantCount: 0,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			flat := whitespaceRun.ReplaceAllString(test.In, " ")
+			if got := len(unqualifiedConversions(flat)); got != test.WantCount {
+				t.Errorf("got %d unqualified sentences, want %d", got, test.WantCount)
+			}
+		})
+	}
+}
+
+// TestLicensingPromiseConversionClaimsNamePublicCore fails on any every-release conversion sentence
+// that does not say "public core", because paid code in the private module does not convert.
+func TestLicensingPromiseConversionClaimsNamePublicCore(t *testing.T) {
+	t.Parallel()
+	var files []string
+	for _, pattern := range []string{"site/*.html", "docs/*.md"} {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			t.Fatalf("glob %s: %v", pattern, err)
+		}
+		files = append(files, matches...)
+	}
+	files = append(files, "README.md", "LICENSING.md")
+	for _, file := range files {
+		t.Run(file, func(t *testing.T) {
+			t.Parallel()
+			for _, s := range unqualifiedConversions(readFlat(t, file)) {
+				t.Errorf("%s: conversion claim without \"public core\": %q", file, s)
+			}
+		})
 	}
 }

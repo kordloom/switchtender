@@ -7,7 +7,7 @@ here is checkable against the source, the signed releases, or your own running i
 ## The vendor
 
 KordLoom LLC, a United States company. SwitchTender is source-available under BSL 1.1: read,
-modify, self-host, and run it in production for your own organization, free. Each release
+modify, self-host, and run it in production for your own organization, free. Each release of the public core
 converts to Apache 2.0 two years after it ships. What happens to your install if KordLoom stops is
 answered in full on the [continuity page](continuity.md): the install keeps running, the evidence stays verifiable
 offline forever, and every release carries its own source tarball inside the signed manifest. The paid module is not published. Its source stays private, the way Semaphore's and Grafana's paid code does, and a paid license keeps working offline until its own expiry whatever happens to KordLoom.

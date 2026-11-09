@@ -16,7 +16,7 @@
 > tool, and the full evidence chain are free to self-host with no seat, host, or run limits. Paid
 > tiers add what an organization needs around it: SSO, deny rules and risk floors, the full policy
 > engine, dedicated workers and named queues and the relay that runs them inside networks the control node cannot reach, drift reconcile, and audit-ready change registers. Each
-> release converts to Apache 2.0 two years after it ships.
+> release of the public core converts to Apache 2.0 two years after it ships.
 
 Install: `go install github.com/kordloom/switchtender@latest`, Homebrew, or release binaries
 with SHA256SUMS for Linux, macOS, and Windows at https://github.com/kordloom/switchtender/releases.

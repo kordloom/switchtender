@@ -1,6 +1,6 @@
 # Licensing
 
-SwitchTender is source-available under the [Business Source License 1.1](LICENSE). This page explains
+SwitchTender is source-available under the [Business Source License 1.1](LICENSE). That is the public core. Paid features ship in a separate proprietary paid build, licensed under the terms. This page explains
 what that means in practice: what you can do for free, the single thing you cannot, and how to
 arrange a commercial license.
 
@@ -80,7 +80,7 @@ the check that found it, a rerun you can also launch by hand on Community.
 Seven commitments, held for every user from day one. What is free today stays free, and the
 Community tier never shrinks. A lapsed license takes nothing: data, evidence, receipts, and every
 Community feature keep working, and only paid features stop. No phone-home, no seat counting, no
-audits, ever. Every receipt verifies without us, forever, with the open verifier. Each release converts
+audits, ever. Every receipt verifies without us, forever, with the open verifier. Each release of the public core converts
 to Apache 2.0 two years after it ships, and the terms accelerate that to immediate if
 KordLoom ceases business. Your price is
 fixed for the term, with 60 days notice before any renewal change. And pricing is flat per
@@ -117,7 +117,7 @@ includes.
 
 ## Conversion to open source
 
-The Business Source License is time-limited. Each released version converts to the Apache License
+The Business Source License is time-limited. Each released version of the public core converts to the Apache License
 2.0 two years after that version's release, the Change Date recorded in `LICENSE`. After a version
 converts, the reserved right no longer applies to it.
 

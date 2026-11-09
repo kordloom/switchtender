@@ -275,8 +275,8 @@ binary that never spoke to the cluster, the previous release upgrades in place a
 a worker is killed mid-run. [The supertest](supertest.md) lists every check.
 
 The audit trail is hash-chained and signed, and a third party can verify a run offline with a
-separate open-source verifier, so the claims do not rest on trusting the vendor. The license
-converts to Apache 2.0 on a fixed schedule and the source is available now, so the project
+separate open-source verifier, so the claims do not rest on trusting the vendor. The public core's
+license converts to Apache 2.0 on a fixed schedule and its source is available now, so the project
 outliving the company is a documented path rather than a hope. The [continuity](continuity.md) and
 [vendor risk](vendor-risk.md) pages cover the rest.
 
@@ -284,7 +284,7 @@ outliving the company is a documented path rather than a hope. The [continuity](
 
 Business Source License 1.1: free to self-host, modify, and run in production for your own
 organization. The one restriction is offering it to third parties as a hosted or managed service
-that provides its primary functionality, and each release converts to Apache 2.0 two years after it
+that provides its primary functionality, and each release of the public core converts to Apache 2.0 two years after it
 ships. The Community tier is free and complete on its own, with the built-in hold on agent runs and
 plain rules of your own. Pro adds directory sign-in, deny rules, and risk and reversibility floors.
 Team adds the full policy engine, the period change register, dedicated workers and named queues,
