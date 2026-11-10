@@ -14,8 +14,8 @@ import (
 )
 
 // TestReasonRequirementComposesAcrossRules pins that the reason a run's decision must carry is the
-// strictest asked by any rule that would hold it, whatever order the rules are in, and that a deny
-// rule, a rule that does not match, and a Rego policy that does not hold the run ask for nothing.
+// strictest asked by any rule that would hold it, whatever order the rules are in, and that a rule
+// that does not match and a Rego policy that does not hold the run ask for nothing.
 func TestReasonRequirementComposesAcrossRules(t *testing.T) {
 	t.Parallel()
 	deploy := &run.Run{Tool: run.ToolBash, Command: "deploy prod"}

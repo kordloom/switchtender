@@ -480,8 +480,7 @@ func TestValidateRefusesEveryTypo(t *testing.T) {
 // TestRequireDistinctIgnoresRulesThatDoNotApply pins the edges of separation of duties.
 //
 // The requirement composes by OR across every matching rule, so the failure to avoid is one where a
-// rule that does not cover this run adds a second approver anyway, or where a deny rule's flag
-// leaks into a hold it has nothing to do with.
+// rule that does not cover this run adds a second approver anyway.
 func TestRequireDistinctIgnoresRulesThatDoNotApply(t *testing.T) {
 	t.Parallel()
 	r := &run.Run{Tool: run.ToolTerraform, Queue: "prod", ActorType: "session"}
