@@ -59,7 +59,10 @@ LINUX_JOBS='
 build       | ci.yml          | checks                | Build
 build       | ci.yml          | checks                | Vet
 build       | ci.yml          | checks                | Public tree holds no paid code
+build       | ci.yml          | checks                | Paid seam holds only the seam files
 build       | ci.yml          | checks                | Public module omits paid-tier dependencies
+build       | ci.yml          | checks                | Public source carries no paid notice or paid build tag
+build       | ci.yml          | checks                | Public tree matches no paid fingerprint
 lint        | ci.yml          | lint                  |
 race        | ci.yml          | test                  |
 crossverify | ci.yml          | crossverify           |
