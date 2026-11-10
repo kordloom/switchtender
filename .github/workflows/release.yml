@@ -39,9 +39,34 @@ jobs:
       contents: read
       actions: read
     steps:
+      # Full depth: the fingerprint list check below compares the history of two paths.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
+
+      # ci checks every push against the committed paid fingerprint list, which only the private
+      # build can regenerate. A seam change means the paid module changed with it, so a list last
+      # committed before the newest seam commit is stale, and the release stops until it is
+      # regenerated and committed.
+      - name: The paid fingerprint list is newer than the seam
+        run: |
+          set -euo pipefail
+          list=internal/wallcheck/paid-fingerprints.txt
+          list_commit="$(git log -1 --format=%H -- "$list")"
+          seam_commit="$(git log -1 --format=%H -- internal/paid/paid.go internal/paid/stubs.go)"
+          if [ -z "$list_commit" ]; then
+            echo "::error title=No paid fingerprint list::$list has no commit on this ref."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$seam_commit" "$list_commit"; then
+            echo "::error title=Paid fingerprint list is stale::$list was last committed in \
+          $list_commit, before the seam change in $seam_commit. Regenerate it with wallcheck gen \
+          against the paid module, commit it, and tag again."
+            exit 1
+          fi
+          echo "fingerprint list $list_commit includes seam commit $seam_commit"
+
       - name: The chart must name the version being released
         run: |
           set -euo pipefail

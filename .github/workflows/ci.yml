@@ -53,15 +53,58 @@ jobs:
             exit 1
           fi
 
+      # The seam is exactly these files and the gitlink. Anything else under internal/paid is either
+      # paid code or a new seam file nobody reviewed as one.
+      - name: Paid seam holds only the seam files
+        run: |
+          set -euo pipefail
+          want="$(printf '%s\n' internal/paid/errors.go internal/paid/impl internal/paid/paid.go \
+            internal/paid/paid_test.go internal/paid/stubs.go)"
+          got="$(git ls-files -- internal/paid | LC_ALL=C sort)"
+          if [ "$got" != "$want" ]; then
+            echo "tracked files under internal/paid differ from the seam:" >&2
+            diff <(echo "$want") <(echo "$got") >&2 || true
+            exit 1
+          fi
+
       # The paid tier owns its heavy dependencies. If one appears in the public module, the code
-      # that needs it is probably public too.
+      # that needs it is probably public too. The paid module itself must never be required, and a
+      # replace directive could point the public build at a local paid checkout.
       - name: Public module omits paid-tier dependencies
         run: |
           set -euo pipefail
-          if grep -nE 'open-policy-agent/opa|coreos/go-oidc|crewjam/saml|go-ldap/ldap' go.mod; then
+          if grep -nE 'open-policy-agent/opa|coreos/go-oidc|crewjam/saml|go-ldap/ldap|switchtender-paid' go.mod; then
             echo "go.mod lists a paid-tier dependency" >&2
             exit 1
           fi
+          if grep -nE '^[[:space:]]*replace([[:space:]]|\(|$)' go.mod; then
+            echo "go.mod has a replace directive" >&2
+            exit 1
+          fi
+
+      # Every paid file carries the paid license sentence and the paid build tag. The release checks
+      # its tarball for the tag, but by then the commit is public and the module proxy has it, so
+      # both are refused on every push. Markdown and license files are skipped, since third-party
+      # license text legitimately carries the sentence. The sentence is split here so this file
+      # does not match itself.
+      - name: Public source carries no paid notice or paid build tag
+        run: |
+          set -euo pipefail
+          notice="All rights"" reserved"
+          if git grep -n -I -F "$notice" -- . ':(exclude)*.md' ':(exclude)**/LICENSE*' ':(exclude)LICENSE*'; then
+            echo "public source carries the paid license sentence" >&2
+            exit 1
+          fi
+          if git grep -nE '^//(go:build| \+build) (.*[^!])?paid' -- '*.go'; then
+            echo "a public Go file builds under the paid tag" >&2
+            exit 1
+          fi
+
+      # Paid code copied anywhere in the public tree with its build tag dropped passes every fence
+      # above. The committed list fingerprints every paid declaration and file, so this catches the
+      # copy itself. Only the private build can regenerate the list; see internal/wallcheck.
+      - name: Public tree matches no paid fingerprint
+        run: go run ./internal/wallcheck/cmd/wallcheck check -root .
       - name: JS unit tests
         run: node --test internal/ui/assets/jstest/*.test.mjs
 
