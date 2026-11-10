@@ -149,7 +149,7 @@ func TestRequires(t *testing.T) {
 // The flag used to be copied from whichever matching rule came first, so a stricter rule later in
 // the list silently did nothing: two admins could reorder policies and lower a control without
 // either of them touching the control itself. If any rule covering the run demands a second
-// person, the run demands a second person, in either order, and a deny rule's flag stays out of it.
+// person, the run demands a second person, in either order.
 func TestRequireDistinctIsOrderIndependent(t *testing.T) {
 	t.Parallel()
 	lax := &policy.Policy{InventoryID: "inv_prod", MaxDestroy: policy.DisabledMaxDestroy}
@@ -238,7 +238,7 @@ func TestPlanGated(t *testing.T) {
 		Policies: []*policy.Policy{{Reversibility: run.Irreversible,
 			MaxDestroy: policy.DisabledMaxDestroy}},
 		Run: run.Run{Tool: "ansible", Playbook: "site.yml"}, Want: false,
-	}, { // Test 11: A deny rule with a floor plans first too, so a destroying apply is refused.
+	}, { // Test 11: A deny rule with a floor plans first too, so a destroying apply is held.
 		Name: "deny floor plans first",
 		Policies: []*policy.Policy{{Effect: policy.EffectDeny, Reversibility: run.Irreversible,
 			MaxDestroy: policy.DisabledMaxDestroy}},
