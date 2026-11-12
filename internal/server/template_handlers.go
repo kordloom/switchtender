@@ -249,8 +249,8 @@ func sealFunc(sealer *credential.Sealer) func(string) (string, error) {
 }
 
 // createTemplateHandler stores a new template.
-func createTemplateHandler(store template.Store, sealer *credential.Sealer, authz *authorizer,
-	log *zap.Logger) http.HandlerFunc {
+func createTemplateHandler(store template.Store, creds credential.Store, sealer *credential.Sealer,
+	authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "templates not enabled")
@@ -272,6 +272,9 @@ func createTemplateHandler(store template.Store, sealer *credential.Sealer, auth
 		objects := append([]string{req.ProjectID, req.InventoryID, req.PullCredentialID,
 			queueObject(req.Queue)}, req.CredentialIDs...)
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
+			return
+		}
+		if denyPullKind(w, r, log, creds, req.PullCredentialID) {
 			return
 		}
 
@@ -337,8 +340,8 @@ func createTemplateHandler(store template.Store, sealer *credential.Sealer, auth
 }
 
 // updateTemplateHandler changes an existing template's fields, keeping its id and creation time.
-func updateTemplateHandler(store template.Store, sealer *credential.Sealer, authz *authorizer,
-	log *zap.Logger) http.HandlerFunc {
+func updateTemplateHandler(store template.Store, creds credential.Store, sealer *credential.Sealer,
+	authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "templates not enabled")
@@ -360,6 +363,9 @@ func updateTemplateHandler(store template.Store, sealer *credential.Sealer, auth
 		objects := append([]string{req.ProjectID, req.InventoryID, req.PullCredentialID,
 			queueObject(req.Queue)}, req.CredentialIDs...)
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
+			return
+		}
+		if denyPullKind(w, r, log, creds, req.PullCredentialID) {
 			return
 		}
 

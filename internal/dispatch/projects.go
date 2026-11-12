@@ -343,12 +343,28 @@ func (d *Dispatcher) resolvePullFrom(ctx context.Context, src secretSource, r *r
 	if id == "" {
 		return cleanup, nil
 	}
+	// The record is read and checked before anything is opened. A credential that is not a registry
+	// login fails the run, and a login bound to another registry than the one serving the image is
+	// left closed and off the spec, so the pull goes ahead without it.
+	c, err := src.record(ctx, id)
+	if err != nil {
+		return cleanup, fmt.Errorf("pull credential %s: %w", id, err)
+	}
+	if err := credential.CheckPull(c); err != nil {
+		return cleanup, err
+	}
+	if pullHost(c, spec.Image) == "" {
+		d.log.Warn("dispatch: pull login left off the run: it is bound to another registry than "+
+			"the image's", zap.String("credential", id),
+			zap.String("registry_host", c.RegistryHost()), zap.String("image", spec.Image))
+		return cleanup, nil
+	}
 	// Opened through the same path a run credential takes, so a credential whose source is an
 	// external engine is resolved rather than used as its own config. Unsealing alone returned the
 	// source configuration, and RegistryLogin read that JSON as a username, so an install keeping
 	// registry logins in a secret store pulled with a garbage login and the run failed on an image
 	// it was entitled to.
-	_, plain, lease, err := src.credential(ctx, id)
+	opened, plain, lease, err := src.credential(ctx, id)
 	if err != nil {
 		return cleanup, fmt.Errorf("pull credential %s: %w", id, err)
 	}
@@ -358,6 +374,11 @@ func (d *Dispatcher) resolvePullFrom(ctx context.Context, src secretSource, r *r
 		if lerr := leases.add(ctx, id, lease); lerr != nil {
 			return cleanup, fmt.Errorf("pull credential %s: %w", id, lerr)
 		}
+	}
+	// The record the secret was opened with decides again, so a credential edited between the check
+	// and the open still reaches only the registry its own record names.
+	if pullHost(opened, spec.Image) == "" {
+		return cleanup, nil
 	}
 	spec.RegistryUsername, spec.RegistryPassword = credential.RegistryLogin(plain)
 	return cleanup, nil

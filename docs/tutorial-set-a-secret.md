@@ -27,7 +27,7 @@ live stream, and events, so the output shows `***` instead of the secret.
    | `network` | a network device login, injected as the `ansible_user`, `ansible_password`, `ansible_network_os`, and `ansible_connection` variables. |
    | `env` | `KEY=VALUE` lines injected into the run, how cloud SDK tokens reach a tool. |
    | `token` | a single API token or JWT, exposed to the run as the `SWITCHTENDER_TOKEN` environment variable. |
-   | `registry` | a container registry login, to pull a pinned execution image. |
+   | `registry` | a container registry login, to pull an execution image. Set `registry_host` under Settings, such as `ghcr.io`. The login goes to that registry and no other. |
    | `aws` | an AWS access key, injected as the standard `AWS_*` environment variables. |
    | `azure` | an Azure service principal, injected as the `ARM_*` variables Terraform reads and the `AZURE_*` variables the Ansible azure collection reads. |
    | `gcp` | a Google Cloud service account JSON, written to a private file bound to `GOOGLE_APPLICATION_CREDENTIALS`. |

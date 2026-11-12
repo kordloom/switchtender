@@ -119,7 +119,10 @@ Open Credentials and add what your runs need. Kinds:
   `ansible_network_os`, and `ansible_connection` variables.
 - `env`: `KEY=VALUE` lines injected into the run, how cloud SDK credentials reach plugins.
 - `token`: a single API token or JWT, exposed to the run as the `SWITCHTENDER_TOKEN` environment variable.
-- `registry`: a container registry login, for pulling a pinned execution image.
+- `registry`: a container registry login, for pulling an execution image. AWX's `host` input
+  becomes its `registry_host`, the one registry the login is sent to. An export with no host, or
+  one written as a URL, imports the login bound to no registry and the import says so. Set the
+  host on it before a run pulls with it.
 - `aws`: an AWS access key, injected as the standard `AWS_*` environment variables.
 - `azure`: an Azure service principal, injected as the `ARM_*` variables Terraform reads and the
   `AZURE_*` variables the Ansible azure collection reads.

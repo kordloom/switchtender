@@ -508,7 +508,7 @@ either licensed or absent.</li>
 <tr>
 <td>POST</td>
 <td><code>/v1/credentials</code></td>
-<td>Store a credential, encrypted at rest. Fifteen built-in kinds, or a custom type via <code>type_id</code> and <code>fields</code>. Non-secret <code>settings</code> ride beside the secret and return from the API. The four federated kinds, <code>aws_oidc</code>, <code>gcp_oidc</code>, <code>azure_oidc</code>, and <code>oidc_token</code>, take <code>settings</code> and no <code>secret</code>.</td>
+<td>Store a credential, encrypted at rest. Fifteen built-in kinds, or a custom type via <code>type_id</code> and <code>fields</code>. Non-secret <code>settings</code> ride beside the secret and return from the API. The four federated kinds, <code>aws_oidc</code>, <code>gcp_oidc</code>, <code>azure_oidc</code>, and <code>oidc_token</code>, take <code>settings</code> and no <code>secret</code>. A <code>registry</code> credential needs <code>settings.registry_host</code>.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -1072,6 +1072,14 @@ inventory is managed outside this product.</p>
 host pattern matches nothing, so a run aimed at a path that does not exist touches no host at all.
 Its recap names no host, and the run is recorded as failed with the reason on its <code>error</code>, since a
 clean exit over nothing is not a success.</p>
+<h2 id="execution-images">Execution images</h2>
+<p>A run, a project, and a template take <code>image</code>, the container image the run executes inside, and
+<code>pull_credential_id</code>, the login that image is pulled with. The pull credential must be a
+<code>registry</code> credential. <code>POST /v1/runs</code>, a template launch, and <code>POST</code> or <code>PUT</code> on <code>/v1/projects</code>
+and <code>/v1/templates</code> answer <code>400</code> naming the rule when it is any other kind. A <code>registry</code> credential
+needs <code>settings.registry_host</code>, and a create or update that would leave one without it is refused
+with <code>400</code>. Its login is sent only to that registry, so an image on another registry is looked up
+with no login. See <a href="/docs/secrets#pull-credentials">Pull credentials</a>.</p>
 <h2 id="ansible-run-controls">Ansible run controls</h2>
 <p>A run submission and a template both accept the Ansible controls that used to require a hand-built
 command. They ride onto a run the same way from the API, a schedule, or a webhook trigger, and a

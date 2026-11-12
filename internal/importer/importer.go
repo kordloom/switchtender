@@ -754,8 +754,9 @@ func jsonScalarString(v any) string {
 }
 
 // settingsKey translates an AWX input name to the settings key the kind's injection reads. The
-// connection kinds rename username and the become inputs to the field names their injectors consume;
-// every other input keeps its AWX name and rides along as reference metadata.
+// connection kinds rename username and the become inputs to the field names their injectors
+// consume, and a registry credential's host becomes the registry host its login is bound to. Every
+// other input keeps its AWX name and rides along as reference metadata.
 func settingsKey(kind credential.Kind, awxKey string) string {
 	switch kind {
 	case credential.KindSSHKey, credential.KindSSHPassword:
@@ -775,6 +776,10 @@ func settingsKey(kind credential.Kind, awxKey string) string {
 			return "method"
 		case "become_username":
 			return "user"
+		}
+	case credential.KindRegistry:
+		if awxKey == "host" {
+			return credential.SettingRegistryHost
 		}
 	}
 	return awxKey
@@ -796,7 +801,7 @@ func credentialSettings(kind credential.Kind, inputs map[string]any) (map[string
 	var refused []string
 	for _, p := range pairs {
 		key := settingsKey(kind, p[0])
-		if credential.ValidateSettings(map[string]string{key: p[1]}) != nil {
+		if credential.ValidateSetting(kind, key, p[1]) != nil {
 			refused = append(refused, p[0])
 			continue
 		}

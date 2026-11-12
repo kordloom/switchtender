@@ -184,3 +184,57 @@ func TestImportSettingsKeepAWXNamesForCloudKinds(t *testing.T) {
 		t.Errorf("stored settings mismatch (-want +got):\n%s", diff)
 	}
 }
+
+// TestImportBindsARegistryLoginToItsHost verifies an AWX registry credential's host becomes the
+// registry host its login is bound to, and that an export with no usable host imports the login
+// bound to nothing and says so, since such a login is sent to no registry until the host is set.
+func TestImportBindsARegistryLoginToItsHost(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Inputs is the credential's AWX inputs object.
+		Inputs string
+		// WantHost is the stored registry host, empty for none.
+		WantHost string
+		// WantWarn reports whether the plan warns that the login is bound to no registry.
+		WantWarn bool
+	}{{ // Test 0: A bare host is stored as the registry host.
+		Inputs:   `{"host":"ghcr.io","username":"bot","password":"$encrypted$"}`,
+		WantHost: "ghcr.io",
+	}, { // Test 1: A host and port is stored as it is.
+		Inputs:   `{"host":"registry.example.com:5000","username":"bot","password":"$encrypted$"}`,
+		WantHost: "registry.example.com:5000",
+	}, { // Test 2: No host imports the login unbound, with a warning.
+		Inputs:   `{"username":"bot","password":"$encrypted$"}`,
+		WantWarn: true,
+	}, { // Test 3: A host written as a URL is refused as a host, with a warning.
+		Inputs:   `{"host":"https://quay.io","username":"bot","password":"$encrypted$"}`,
+		WantWarn: true,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			data := []byte(`{"credentials":[{"name":"quay","credential_type":"Container Registry",` +
+				`"inputs":` + test.Inputs + `}]}`)
+			plan, err := FromAWX(data, time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC))
+			if err != nil {
+				t.Fatalf("FromAWX() error = %v", err)
+			}
+			if len(plan.Credentials) != 1 {
+				t.Fatalf("credentials = %d, want 1", len(plan.Credentials))
+			}
+			got := plan.Credentials[0]
+			if got.Kind != credential.KindRegistry {
+				t.Fatalf("kind = %q, want registry", got.Kind)
+			}
+			if diff := cmp.Diff(test.WantHost, got.RegistryHost()); diff != "" {
+				t.Errorf("registry host mismatch (-want +got):\n%s", diff)
+			}
+			joined := strings.Join(plan.Warnings, "\n")
+			gotWarn := strings.Contains(joined, "sent to no registry")
+			if gotWarn != test.WantWarn {
+				t.Errorf("unbound warning = %v, want %v, warnings:\n%s", gotWarn, test.WantWarn,
+					joined)
+			}
+		})
+	}
+}

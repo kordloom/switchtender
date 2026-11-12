@@ -40,12 +40,20 @@ var manifestAccept = strings.Join([]string{
 // ErrResolve is returned when a registry did not resolve a tag to a digest.
 var ErrResolve = errors.New("image tag not resolved to a digest")
 
-// Credentials is a registry login, empty for an anonymous pull.
+// Credentials is a registry login bound to one registry host, empty for an anonymous pull.
 type Credentials struct {
 	// Username is the registry user.
 	Username string
 	// Password is the registry password or token. It is never logged or returned in an error.
 	Password string `json:"-"`
+	// Host is the one registry host the login may be sent to, with its port when the registry has
+	// one. A login with no host is sent nowhere.
+	Host string
+}
+
+// boundTo reports whether the login may answer a challenge for an image that host serves.
+func (c Credentials) boundTo(host string) bool {
+	return SameRegistry(c.Host, host)
 }
 
 // Resolver asks a registry which digest a tag names, over the distribution API every registry
@@ -69,6 +77,10 @@ type Resolver struct {
 // NewResolver returns a resolver that sends its requests through client and bounds each resolution
 // by timeout, DefaultTimeout when timeout is zero or less. A registry that does not answer is not
 // asked again for DefaultDownFor. It panics on a nil client, a wiring error.
+//
+// The resolver sends through a copy of client whose redirect policy is wrapped by originOnly, so a
+// login never follows a redirect off the address it was sent to. The caller's client is left as
+// it was.
 func NewResolver(client *http.Client, timeout time.Duration) *Resolver {
 	if client == nil {
 		panic("imageref: http client required")
@@ -76,13 +88,43 @@ func NewResolver(client *http.Client, timeout time.Duration) *Resolver {
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
-	return &Resolver{client: client, timeout: timeout, downFor: DefaultDownFor, now: time.Now,
+	guarded := *client
+	guarded.CheckRedirect = originOnly(client.CheckRedirect)
+	return &Resolver{client: &guarded, timeout: timeout, downFor: DefaultDownFor, now: time.Now,
 		down: map[string]time.Time{}}
+}
+
+// maxRedirects is how many redirects one request follows, the standard client's own limit.
+const maxRedirects = 10
+
+// originOnly returns a redirect policy that drops the Authorization value from a redirected request
+// unless the redirect stays on the scheme, host, and port first asked, then defers to next. With a
+// nil next it follows up to maxRedirects redirects. The standard client keeps the value across the
+// ports and schemes of one host name, which would hand a registry's login to whatever else answers
+// there.
+func originOnly(next func(*http.Request, []*http.Request) error) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		first := via[0].URL
+		if req.URL.Scheme != first.Scheme || !strings.EqualFold(req.URL.Host, first.Host) {
+			req.Header.Del("Authorization")
+		}
+		if next != nil {
+			return next(req, via)
+		}
+		if len(via) >= maxRedirects {
+			return fmt.Errorf("stopped after %d redirects", maxRedirects)
+		}
+		return nil
+	}
 }
 
 // Digest returns the digest the registry serves for ref's tag. A reference that already pins a
 // digest returns it without asking. Every failure, an unreachable registry, a refused login, an
 // unknown tag, wraps ErrResolve, and none quotes the password.
+//
+// The login in creds leaves only for the registry host it is bound to. When ref names any other
+// host the lookup goes ahead with no login. The login answers a challenge the bound registry itself
+// sent, either directly or at the https token realm that challenge names, and nothing else.
 //
 // The lookup is bounded by ctx as well as by the resolver's timeout, so it ends when the request
 // that submitted the run ends, and then wraps ctx's error. A registry that did not answer within
@@ -149,28 +191,48 @@ type noAnswerError struct {
 	err error
 }
 
-// Error states who did not answer and why.
+// Error states who did not answer and nothing else. The text is the same for a refused address, a
+// refused connection, a failed handshake, and a timeout, so whoever named the host learns nothing
+// about what sits at an address from the reason a dial failed. NoAnswerDetail carries the reason to
+// the server's own log.
 func (e *noAnswerError) Error() string {
-	return "the " + e.what + " did not answer: " + e.err.Error()
+	return "the " + e.what + " did not answer"
 }
 
 // Unwrap returns the transport's error.
 func (e *noAnswerError) Unwrap() error { return e.err }
 
+// NoAnswerDetail returns the transport's reason when err reports a registry or a token service that
+// did not answer, and the empty string for any other error. It is for the server's log: the reason
+// can describe the server's own network, so it is never shown to whoever submitted the run.
+func NoAnswerDetail(err error) string {
+	var unanswered *noAnswerError
+	if !errors.As(err, &unanswered) {
+		return ""
+	}
+	return unanswered.err.Error()
+}
+
 // lookup asks the registry for ref's manifest digest within ctx.
 func (r *Resolver) lookup(ctx context.Context, parsed Ref, ref string, creds Credentials) (string, error) {
-	manifest := "https://" + parsed.registryHost() + "/v2/" + parsed.Path + "/manifests/" +
-		url.PathEscape(parsed.Tag)
-	status, header, err := r.head(ctx, manifest, "")
+	host := parsed.registryHost()
+	if !creds.boundTo(host) {
+		creds = Credentials{}
+	}
+	manifest := "https://" + host + "/v2/" + parsed.Path + "/manifests/" + url.PathEscape(parsed.Tag)
+	status, header, from, err := r.head(ctx, manifest, "")
 	if err != nil {
 		return "", err
 	}
 	auth := ""
 	if status == http.StatusUnauthorized {
+		if !strings.EqualFold(from, host) {
+			creds = Credentials{}
+		}
 		if auth, err = r.authorize(ctx, header.Get("WWW-Authenticate"), parsed, creds); err != nil {
 			return "", err
 		}
-		if status, header, err = r.head(ctx, manifest, auth); err != nil {
+		if status, header, _, err = r.head(ctx, manifest, auth); err != nil {
 			return "", err
 		}
 	}
@@ -184,11 +246,12 @@ func (r *Resolver) lookup(ctx context.Context, parsed Ref, ref string, creds Cre
 }
 
 // head sends a HEAD for a manifest with the accepted forms and an optional Authorization value, and
-// returns the status and header the registry answered with.
-func (r *Resolver) head(ctx context.Context, manifest, auth string) (int, http.Header, error) {
+// returns the status and header of the answer with the host that sent it. That host differs from
+// the manifest's own when the registry redirected the request.
+func (r *Resolver) head(ctx context.Context, manifest, auth string) (int, http.Header, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, manifest, nil)
 	if err != nil {
-		return 0, nil, fmt.Errorf("%w: %w", ErrResolve, err)
+		return 0, nil, "", fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	req.Header.Set("Accept", manifestAccept)
 	if auth != "" {
@@ -196,10 +259,14 @@ func (r *Resolver) head(ctx context.Context, manifest, auth string) (int, http.H
 	}
 	resp, err := r.client.Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("%w: %w", ErrResolve, &noAnswerError{what: "registry", err: err})
+		return 0, nil, "", fmt.Errorf("%w: %w", ErrResolve, &noAnswerError{what: "registry", err: err})
 	}
 	defer func() { _ = resp.Body.Close() }()
-	return resp.StatusCode, resp.Header, nil
+	from := ""
+	if resp.Request != nil && resp.Request.URL != nil {
+		from = resp.Request.URL.Host
+	}
+	return resp.StatusCode, resp.Header, from, nil
 }
 
 // digestByBody reads a manifest whose registry sent no digest header and digests its bytes, which is

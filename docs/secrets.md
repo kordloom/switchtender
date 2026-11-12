@@ -27,13 +27,27 @@ A credential's kind decides how its value reaches a run.
 | `network` | A network device login, injected as the `ansible_user`, `ansible_password`, `ansible_network_os`, and `ansible_connection` variables. |
 | `env` | `KEY=VALUE` lines injected into the environment, how cloud SDK tokens reach a tool. |
 | `token` | A single API token or JWT, exposed to the run as `SWITCHTENDER_TOKEN`. |
-| `registry` | A container registry login, to pull a pinned execution image. |
+| `registry` | A container registry login, to pull an execution image. It needs the `registry_host` setting, the one registry its login belongs to, such as `ghcr.io`, `registry.example.com:5000`, or `docker.io` for Docker Hub. See [Pull credentials](#pull-credentials). |
 | `aws` | An AWS access key, injected as the standard `AWS_*` environment variables. |
 | `azure` | An Azure service principal, injected as the `ARM_*` variables Terraform reads and the `AZURE_*` variables the Ansible azure collection reads. |
 | `gcp` | A Google Cloud service account JSON, written to a private file bound to `GOOGLE_APPLICATION_CREDENTIALS`. |
 | `vmware` | A vCenter login, injected as the `VMWARE_*` environment variables the community.vmware modules read. |
 | `openstack` | An OpenStack login, injected as the `OS_*` environment variables openstacksdk and the openstack.cloud collection read. Fields: `auth_url`, `username`, `password`, `project_name` required; `user_domain_name` and `project_domain_name` default to `Default`; `region_name` optional. |
 | `kubeconfig` | A Kubernetes kubeconfig document, written to a private file bound to `KUBECONFIG` for kubectl and helm, `K8S_AUTH_KUBECONFIG` for the kubernetes.core collection, and `KUBE_CONFIG_PATH` for Terraform's kubernetes and helm providers. Its tokens, client keys, passwords, and secret exec plugin variables are masked in run output, and its ordinary lines, such as `apiVersion: v1`, are not, so `kubectl get -o yaml` stays readable. |
+
+## Pull credentials
+
+A run, a project, or a template that names an execution image can name a pull credential, the login
+the image is pulled and its tag resolved with. A pull credential must be a `registry` credential.
+Any other kind named there is refused when the project or template is saved and when the run is
+submitted, because the login is handed to the registry the image names.
+
+The login goes only to the registry its `registry_host` names. An image on any other registry is
+looked up and pulled with no login, so a submitter who names an image on a host of their choosing
+gets nothing from the credential. A registry that answers with a token service is sent the login
+only when the bound registry named that service itself, over https. The digest lookup also refuses
+a registry on this server's own loopback address or a link-local address, such as a cloud metadata
+service, and the submitter sees one fixed error while the reason goes to the server log.
 
 ## Federated kinds
 

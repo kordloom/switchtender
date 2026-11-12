@@ -655,7 +655,7 @@ that variable is unset.</p>
 <tr>
 <td><code>--image-digest-lookup</code></td>
 <td><code>true</code></td>
-<td>Resolve a submitted run's image tag to the digest its registry serves, so the run executes by that digest and an approval covers that exact image. A run whose registry does not answer is refused at submission unless <code>--allow-unpinned-image</code> is set. A registry that does not answer within 10 seconds is not asked again for a minute, so a dead registry delays one submission a minute rather than every one. The lookup ends when the request submitting the run ends, and the submission stops with it. Turn off where no registry is reachable from the server.</td>
+<td>Resolve a submitted run's image tag to the digest its registry serves, so the run executes by that digest and an approval covers that exact image. The lookup sends a pull credential's login only to the registry its <code>registry_host</code> names, and refuses a registry on this server's own loopback address or a link-local address. A run whose registry does not answer is refused at submission unless <code>--allow-unpinned-image</code> is set. A registry that does not answer within 10 seconds is not asked again for a minute, so a dead registry delays one submission a minute rather than every one. The lookup ends when the request submitting the run ends, and the submission stops with it. Turn off where no registry is reachable from the server.</td>
 </tr>
 <tr>
 <td><code>--allow-unpinned-image</code></td>

@@ -272,6 +272,9 @@ func TestSettingsKeyRenamesOnlyWhereInjectionReadsADifferentName(t *testing.T) {
 		{Kind: credential.KindAWS, AWXKey: "username", WantKey: "username"}, // Test 10.
 		{Kind: credential.KindAWS, AWXKey: "region", WantKey: "region"},     // Test 11.
 		{Kind: credential.KindEnv, AWXKey: "host", WantKey: "host"},         // Test 12.
+		{Kind: credential.KindRegistry, AWXKey: "host",
+			WantKey: credential.SettingRegistryHost}, // Test 13: the host the login is bound to.
+		{Kind: credential.KindRegistry, AWXKey: "username", WantKey: "username"}, // Test 14.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

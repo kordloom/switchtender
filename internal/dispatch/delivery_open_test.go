@@ -121,7 +121,8 @@ func newOpenFixture(t *testing.T, extra ...Option) *openFixture {
 			Secret: seal(openVaultPassword)},
 		{ID: "cred_kube", Name: "prod kube", TypeID: "ctype_kube", Secret: seal(string(fields))},
 		{ID: "cred_reg", Name: "registry", Kind: credential.KindRegistry,
-			Secret: seal("puller\n" + openRegistryPassword)},
+			Settings: map[string]string{credential.SettingRegistryHost: "registry.example"},
+			Secret:   seal("puller\n" + openRegistryPassword)},
 		{ID: "cred_dyn", Name: "minted", Kind: credential.KindToken, Source: relayDynamicKind,
 			Secret: seal("cfg-" + t.Name())},
 		{ID: "cred_other", Name: "not this run's", Kind: credential.KindToken,
@@ -732,6 +733,108 @@ func TestADeliveredSecretThatIsMissingOrMisplacedFailsTheRun(t *testing.T) {
 			}
 			if received, _ := held.counts("r"); received > 1 {
 				t.Errorf("the delivery was received %d times, want at most once", received)
+			}
+		})
+	}
+}
+
+// TestAPullLoginIsOpenedOnlyForTheRegistryServingTheImage pins the pull login's whole path to an
+// executor. The control node opens it for a relay worker only when it is a registry login bound to
+// the registry that serves the run's image, and an executor puts it on the spec under the same
+// rule, whether it reads the login from its own store or from a delivery. A credential of another
+// kind is refused on both sides, and a login bound to another registry crosses as its record with
+// no value and reaches no spec.
+func TestAPullLoginIsOpenedOnlyForTheRegistryServingTheImage(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Name labels the case.
+		Name string
+		// Pull is the credential the run names to pull its image with.
+		Pull string
+		// Image is the image the run executes in.
+		Image string
+		// Forged is a delivery built by hand for a credential the control node refuses to open, so
+		// the worker's own refusal is exercised.
+		Forged *handoff.Credential
+		// WantValue is the value the control node delivers for the pull credential.
+		WantValue string
+		// WantUser is the registry username the executor's spec carries.
+		WantUser string
+		// WantPassword is the registry password the executor's spec carries.
+		WantPassword string
+		// Want is the error both sides return.
+		Want error
+	}{{ // Test 0: A login bound to the image's registry is delivered and used.
+		Name: "bound to this registry", Pull: "cred_reg", Image: "registry.example/ee:1",
+		WantValue: "puller\n" + openRegistryPassword, WantUser: "puller",
+		WantPassword: openRegistryPassword,
+	}, { // Test 1: A login bound to another registry crosses with no value and reaches no spec.
+		Name: "bound to another registry", Pull: "cred_reg", Image: "ghcr.io/acme/ee:1",
+	}, { // Test 2: An SSH key named as the pull credential is refused.
+		Name: "ssh key", Pull: "cred_ssh", Image: "registry.example/ee:1",
+		Forged: handoff.NewCredential(&credential.Credential{ID: "cred_ssh", Name: "fleet key",
+			Kind: credential.KindSSHKey}, "key-body"),
+		Want: credential.ErrPullKind,
+	}, { // Test 3: An env credential is refused.
+		Name: "env credential", Pull: "cred_env", Image: "registry.example/ee:1",
+		Forged: handoff.NewCredential(&credential.Credential{ID: "cred_env", Name: "cloud env",
+			Kind: credential.KindEnv}, "A=b"),
+		Want: credential.ErrPullKind,
+	}, { // Test 4: A credential of a custom type is refused.
+		Name: "custom type", Pull: "cred_kube", Image: "registry.example/ee:1",
+		Forged: handoff.NewCredential(&credential.Credential{ID: "cred_kube", Name: "prod kube",
+			TypeID: "ctype_kube"}, `{"kubeconfig":"x"}`),
+		Want: credential.ErrPullKind,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			fx := newOpenFixture(t)
+			r := &run.Run{ID: "run_pull", Tool: run.ToolBash, Command: "true", Image: test.Image,
+				PullCredentialID: test.Pull}
+
+			p, _, err := fx.d.OpenSecrets(ctx, r)
+			if !errors.Is(err, test.Want) {
+				t.Fatalf("OpenSecrets() error = %v, want %v", err, test.Want)
+			}
+			if test.Want == nil {
+				dc := p.Credential(test.Pull)
+				if dc == nil {
+					t.Fatalf("the pull credential's record was not delivered")
+				}
+				if dc.Value != test.WantValue {
+					t.Errorf("delivered value = %q, want %q", dc.Value, test.WantValue)
+				}
+			} else {
+				p = &handoff.Payload{RunID: r.ID, Credentials: []*handoff.Credential{test.Forged}}
+			}
+
+			stored := roundhouse.Spec{Image: test.Image}
+			cleanup, err := fx.d.resolvePullCredential(ctx, test.Pull, &stored)
+			cleanup()
+			if !errors.Is(err, test.Want) {
+				t.Errorf("resolvePullCredential() error = %v, want %v", err, test.Want)
+			}
+
+			held := newHeldDeliveries()
+			held.payloads[r.ID] = p
+			worker := New(run.NewMemStore(), roundhouse.RunnerFunc(nil), zap.NewNop(), WithNoJanitor(),
+				WithSecretDelivery(held), WithRunFilesRoot(t.TempDir()))
+			t.Cleanup(worker.Close)
+			delivered := roundhouse.Spec{Image: test.Image}
+			cleanup, err = worker.resolvePullFrom(ctx, worker.secretsFor(r), r, test.Pull, &delivered)
+			cleanup()
+			if !errors.Is(err, test.Want) {
+				t.Errorf("resolvePullFrom() over a delivery error = %v, want %v", err, test.Want)
+			}
+
+			want := [2]string{test.WantUser, test.WantPassword}
+			for side, spec := range map[string]roundhouse.Spec{"stored": stored, "delivered": delivered} {
+				got := [2]string{spec.RegistryUsername, spec.RegistryPassword}
+				if diff := cmp.Diff(want, got); diff != "" {
+					t.Errorf("%s registry login mismatch (-want +got):\n%s", side, diff)
+				}
 			}
 		})
 	}

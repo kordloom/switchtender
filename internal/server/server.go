@@ -874,8 +874,8 @@ func (s *Server) Handler() http.Handler {
 	}
 	mux.Handle("GET /v1/credentials", listCredentialsHandler(s.credentials, s.sealer, refs, authz, s.log))
 	mux.Handle("DELETE /v1/credentials/{id}", deleteCredentialHandler(s.credentials, refs, s.log))
-	mux.Handle("POST /v1/projects", createProjectHandler(s.projects, authz, s.log))
-	mux.Handle("PUT /v1/projects/{id}", updateProjectHandler(s.projects, authz, s.log))
+	mux.Handle("POST /v1/projects", createProjectHandler(s.projects, s.credentials, authz, s.log))
+	mux.Handle("PUT /v1/projects/{id}", updateProjectHandler(s.projects, s.credentials, authz, s.log))
 	mux.Handle("GET /v1/projects", listProjectsHandler(s.projects, authz, s.log))
 	mux.Handle("DELETE /v1/projects/{id}", deleteProjectHandler(s.projects, refs, s.log))
 	mux.Handle("GET /v1/projects/{id}/files", projectTreeHandler(s.projects, s.syncer, authz, s.log))
@@ -933,8 +933,10 @@ func (s *Server) Handler() http.Handler {
 		detachNotificationHandler(s.notifications, authz, s.log))
 	mux.Handle("POST /hooks/{token}", hookHandler(s.triggers, s.templates, s.submitter, s.store,
 		s.sealer, s.audits, s.reviews, s.hooks, s.commentCommands(authz), s.log))
-	mux.Handle("POST /v1/templates", createTemplateHandler(s.templates, s.sealer, authz, s.log))
-	mux.Handle("PUT /v1/templates/{id}", updateTemplateHandler(s.templates, s.sealer, authz, s.log))
+	mux.Handle("POST /v1/templates",
+		createTemplateHandler(s.templates, s.credentials, s.sealer, authz, s.log))
+	mux.Handle("PUT /v1/templates/{id}",
+		updateTemplateHandler(s.templates, s.credentials, s.sealer, authz, s.log))
 	mux.Handle("GET /v1/templates", listTemplatesHandler(s.templates, authz, s.log))
 	mux.Handle("DELETE /v1/templates/{id}", deleteTemplateHandler(s.templates, refs, s.log))
 	mux.Handle("POST /v1/templates/{id}/launch",

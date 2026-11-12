@@ -150,7 +150,7 @@ func TestResolverPinsATagToTheDigestTheRegistryServes(t *testing.T) {
 		Registry *fakeRegistry
 		// Repo is the repository and tag asked for.
 		Repo string
-		// Creds is the login the run names.
+		// Creds is the login the run names. The case binds it to the fake registry's host.
 		Creds Credentials
 		// WantDigest is the digest resolved.
 		WantDigest string
@@ -183,6 +183,9 @@ func TestResolverPinsATagToTheDigestTheRegistryServes(t *testing.T) {
 			base = srv.URL
 			host := strings.TrimPrefix(srv.URL, "https://")
 			r := NewResolver(srv.Client(), 0)
+			if test.Creds.Username != "" {
+				test.Creds.Host = host
+			}
 			got, err := r.Digest(context.Background(), host+"/"+test.Repo, test.Creds)
 			if !errors.Is(err, test.Want) {
 				t.Fatalf("Digest() error = %v, want %v", err, test.Want)

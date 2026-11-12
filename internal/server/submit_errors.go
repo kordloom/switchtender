@@ -50,9 +50,10 @@ var submitClasses = []struct {
 	errs  []error
 }{
 	{class: submitInput, errs: []error{
-		credential.ErrNotFound, credential.ErrNoKey, project.ErrNotFound, inventory.ErrNotFound,
-		inventory.ErrNeedsAnsible, inventory.ErrInvalidInventory, inventory.ErrTooManyHosts,
-		inventory.ErrHostFilter, inventory.ErrSourceVars, dispatch.ErrNoPlaybook,
+		credential.ErrNotFound, credential.ErrNoKey, credential.ErrPullKind, project.ErrNotFound,
+		inventory.ErrNotFound, inventory.ErrNeedsAnsible, inventory.ErrInvalidInventory,
+		inventory.ErrTooManyHosts, inventory.ErrHostFilter, inventory.ErrSourceVars,
+		dispatch.ErrNoPlaybook,
 		dispatch.ErrNoCommand, dispatch.ErrUnknownTool, dispatch.ErrToolCredential,
 		dispatch.ErrNoSteps, dispatch.ErrTooManySteps, dispatch.ErrStepInput, dispatch.ErrUnnamedStep,
 		dispatch.ErrDuplicateStep, dispatch.ErrUnknownDependency, dispatch.ErrDependencyCycle,

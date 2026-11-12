@@ -122,7 +122,7 @@ Two more are enforced somewhere other than the request:
 | GET    | `/v1/notifications/{id}/deliveries` | A target's recent deliveries, newest first. `?status=failed` keeps the failures. Operator role. |
 | POST   | `/v1/notifications/{id}/attachments` | Attach a target to a template, workflow, schedule, project, or organization for one event. Use of the target and management of the object. |
 | DELETE | `/v1/notifications/{id}/attachments/{attachment}` | Detach one attachment, asking what attaching it asked. |
-| POST   | `/v1/credentials`          | Store a credential, encrypted at rest. Fifteen built-in kinds, or a custom type via `type_id` and `fields`. Non-secret `settings` ride beside the secret and return from the API. The four federated kinds, `aws_oidc`, `gcp_oidc`, `azure_oidc`, and `oidc_token`, take `settings` and no `secret`. |
+| POST   | `/v1/credentials`          | Store a credential, encrypted at rest. Fifteen built-in kinds, or a custom type via `type_id` and `fields`. Non-secret `settings` ride beside the secret and return from the API. The four federated kinds, `aws_oidc`, `gcp_oidc`, `azure_oidc`, and `oidc_token`, take `settings` and no `secret`. A `registry` credential needs `settings.registry_host`. |
 | GET    | `/v1/credentials`          | List credentials, secrets never included.               |
 | POST   | `/v1/credential-types`     | Define a custom credential type: fields and how they inject. Admin only. |
 | GET    | `/v1/credential-types`     | List custom credential types. Admin only.               |
@@ -393,6 +393,16 @@ Sending a stored inventory's name in `inventory` is read as a path. Ansible exit
 host pattern matches nothing, so a run aimed at a path that does not exist touches no host at all.
 Its recap names no host, and the run is recorded as failed with the reason on its `error`, since a
 clean exit over nothing is not a success.
+
+## Execution images
+
+A run, a project, and a template take `image`, the container image the run executes inside, and
+`pull_credential_id`, the login that image is pulled with. The pull credential must be a
+`registry` credential. `POST /v1/runs`, a template launch, and `POST` or `PUT` on `/v1/projects`
+and `/v1/templates` answer `400` naming the rule when it is any other kind. A `registry` credential
+needs `settings.registry_host`, and a create or update that would leave one without it is refused
+with `400`. Its login is sent only to that registry, so an image on another registry is looked up
+with no login. See [Pull credentials](secrets.md#pull-credentials).
 
 ## Ansible run controls
 
