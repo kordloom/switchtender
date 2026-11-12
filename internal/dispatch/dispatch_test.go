@@ -1151,6 +1151,7 @@ func TestRunImageReachesSpec(t *testing.T) {
 	creds := credential.NewMemStore()
 	if err := creds.Save(context.Background(), &credential.Credential{
 		ID: "cred_pull", Kind: credential.KindRegistry, Secret: sealed,
+		Settings: map[string]string{credential.SettingRegistryHost: "ghcr.io"},
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}

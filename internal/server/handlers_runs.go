@@ -29,6 +29,55 @@ const maxPipelineSteps = 500
 // caller supplied no key for still cannot fire twice on a double click.
 const dedupeRerun = "rerun"
 
+// pathSplitRefusal tells a caller below admin why a split of an inventory named by path is refused
+// and what to send instead.
+const pathSplitRefusal = "a split of an inventory named by path needs the admin role: listing " +
+	"its hosts reads that path on the server before the run is held or approved. Store the " +
+	"inventory and name it with inventory_id"
+
+// mayPathSplit reports whether the caller may hand in or save a split whose inventory is named by
+// path, which only an admin person may.
+func mayPathSplit(r *http.Request) bool {
+	return adminPerson(r)
+}
+
+// adminPerson reports whether the caller is an admin acting in person: an admin's own token or
+// session, or anybody on an install with no accounts, where every caller is the local admin. An
+// agent never is, whatever role its owner's account holds.
+func adminPerson(r *http.Request) bool {
+	if actor, ok := actorFrom(r.Context()); ok && actor.Agent {
+		return false
+	}
+	return actorIsAdmin(r)
+}
+
+// refusePathSplit answers 403 and reports true when the fields are a split of an inventory named by
+// path and the caller may not ask for one.
+//
+// A split lists its hosts before the run is validated, graded, or held, so the listing opens the
+// path as the server's user for a run nobody has approved yet. Every entry that accepts or saves a
+// run asks here, because the dispatcher is handed the run without the role of whoever sent it.
+func refusePathSplit(w http.ResponseWriter, r *http.Request, log *zap.Logger,
+	tool, path, inventoryID string, shards int) bool {
+	if !run.RawPathSplit(tool, path, inventoryID, shards) || mayPathSplit(r) {
+		return false
+	}
+	respondError(w, log, http.StatusForbidden, pathSplitRefusal)
+	return true
+}
+
+// refuseLimitFile answers with status and reports true when limit holds an at sign, which Ansible
+// reads as a file of hosts. The dispatcher and the inventory listers refuse the same limit. Asking
+// here answers the sender in their own request's terms.
+func refuseLimitFile(w http.ResponseWriter, log *zap.Logger, status int, limit string) bool {
+	err := run.CheckLimitFile(limit)
+	if err == nil {
+		return false
+	}
+	respondError(w, log, status, err.Error())
+	return true
+}
+
 // createRunRequest is the JSON body accepted by POST /runs.
 type createRunRequest struct {
 	// Playbook is the path to the playbook to execute. Required for the Ansible tool.
@@ -136,10 +185,16 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 			respondError(w, log, http.StatusBadRequest, "command is required for the "+req.Tool+" tool")
 			return
 		}
+		if refuseLimitFile(w, log, http.StatusBadRequest, req.Limit) {
+			return
+		}
 
 		objects := append([]string{req.ProjectID, req.InventoryID, req.PullCredentialID,
 			queueObject(req.Queue)}, req.CredentialIDs...)
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
+			return
+		}
+		if refusePathSplit(w, r, log, req.Tool, req.Inventory, req.InventoryID, req.Shards) {
 			return
 		}
 
@@ -635,6 +690,15 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 		// the pieces here instead is how the registry pull credential came to be authorized on some
 		// of them and not others.
 		if authorizeReexecute(w, r, authz, log, rn) {
+			return
+		}
+		// The replay lists the stored run's inventory again, as whoever asks now. A split an admin
+		// ran from a path is not one a caller below admin may run a second time.
+		if rn.Kind == run.KindSplit && rn.ShardCount != nil &&
+			refusePathSplit(w, r, log, rn.Tool, rn.Inventory, rn.InventoryID, *rn.ShardCount) {
+			return
+		}
+		if refuseLimitFile(w, log, http.StatusConflict, rn.Limit) {
 			return
 		}
 		// Rerunning the same run twice inside the dedupe window is one request, not two, so a

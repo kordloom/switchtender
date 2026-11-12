@@ -428,7 +428,8 @@ function wireInventoryForm() {
 		for (const g of form.querySelectorAll("[data-kind-group]")) {
 			g.hidden = g.id !== "inv-kind-" + (kind || "static");
 		}
-		previewBox.hidden = !kind;
+		// The server previews an unsaved definition for an admin only, so nobody else is offered one.
+		previewBox.hidden = !kind || !roleAtLeast("admin");
 		clearPreview();
 	};
 	kindSel.addEventListener("change", syncKind);

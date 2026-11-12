@@ -34,3 +34,23 @@ func CheckLimitNarrows(pinned, requested string) error {
 	}
 	return nil
 }
+
+// CheckLimitFile refuses a limit that holds an at sign anywhere in it.
+//
+// Ansible reads a limit element that begins with an at sign as the path of a file of hosts, and
+// opens that file as the user the server or a worker runs as. What it answers differs by whether
+// the file exists and by what it holds, so such a limit asks about files its sender was never
+// given.
+//
+// The whole character is refused, not only an element that begins with one. Ansible cuts a limit
+// into elements on commas, and with no comma on whitespace and around brackets, and it strips the
+// control characters Python counts as whitespace, which strings.TrimSpace leaves in place. A check
+// that cut on commas and colons alone let "web01 @/path", "web01]@/path", and a limit led by
+// U+001C through to the file read. A host or group pattern has no use for the character.
+func CheckLimitFile(limit string) error {
+	if !strings.Contains(limit, "@") {
+		return nil
+	}
+	return fmt.Errorf("%w: a limit cannot hold an @, which Ansible reads as a file of hosts. "+
+		"Name the hosts or groups themselves", ErrLimitFile)
+}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -97,7 +98,9 @@ func (d *Dispatcher) PreviewInventory(ctx context.Context, inv *inventory.Invent
 //
 // It runs before the policy pass, so a rule scoped to an input inventory sees the run as touching
 // that inventory's hosts, and before the run is stored, so the record the approver reads and the
-// inventory execution runs are the same.
+// inventory execution runs are the same. For a constructed inventory that means Ansible evaluates
+// the admin's expressions before any hold, which is why its inputs are refused when they could
+// carry template text and are handed to Ansible marked as not to be templated.
 func (d *Dispatcher) resolveComposed(ctx context.Context, r *run.Run) error {
 	if r.InventoryResolution != nil && r.InventorySnapshot != nil && r.InventorySealed != "" {
 		return nil
@@ -510,15 +513,40 @@ func filterHosts(ctx context.Context, filter *inventory.HostFilter, inputs []*co
 	return hosts, vars, drawn, nil
 }
 
+// constructedFloor is the oldest ansible-core release a constructed inventory is composed with.
+// Below it a name or key an expression decodes is templated again, and base64 text holds no brace
+// for the name rule to catch, so a constructed inventory on an older release is refused.
+const constructedFloor = "2.19"
+
 // composeConstructed runs the constructed plugin over every input at once, the way AWX runs a
 // constructed inventory update, and applies the limit after the groups are built so the limit may
 // name a group the options construct. Every input read is recorded as drawn from. A constructed
 // inventory is always resolved by Ansible: its options are Jinja expressions, which SwitchTender
 // runs through Ansible rather than reimplements.
+//
+// The options are code an admin wrote, and they run on this server before any policy, hold, or
+// approval. Its inputs are data anyone with the right to an input wrote, so Ansible never reads
+// them as stored: each is read here first and refused when it could hold template text, before any
+// process starts, and Ansible is given a rendering of what was read with every string marked as
+// not to be templated. The marks come off again on the way back, so a play reads plain strings.
 func (d *Dispatcher) composeConstructed(ctx context.Context, inv *inventory.Inventory,
 	inputs []*composeInput, dir string) (*inventory.Listing, []string, string, error) {
 	if len(inputs) == 0 {
 		return inventory.NewHostListing(nil, nil), nil, "", nil
+	}
+	sources := make([]string, 0, len(inputs)+1)
+	for n, in := range inputs {
+		doc, err := inventory.ConstructedInput(in.content)
+		if err != nil {
+			reason := strings.TrimPrefix(err.Error(), inventory.ErrConstructedInput.Error()+": ")
+			return nil, nil, "", fmt.Errorf("%w: constructed inventory %s refuses its input %s: %s",
+				inventory.ErrResolve, quoted(inv.Name), quoted(in.inv.Name), reason)
+		}
+		path := filepath.Join(dir, fmt.Sprintf("constructed-input-%03d.json", n))
+		if err := os.WriteFile(path, doc, 0o600); err != nil {
+			return nil, nil, "", fmt.Errorf("compose %s: write input %s: %w", inv.Name, in.inv.Name, err)
+		}
+		sources = append(sources, path)
 	}
 	config, err := inventory.ConstructedConfig(inv.SourceVars)
 	if err != nil {
@@ -530,6 +558,11 @@ func (d *Dispatcher) composeConstructed(ctx context.Context, inv *inventory.Inve
 	if err != nil {
 		return nil, nil, "", err
 	}
+	if !atLeastRelease(version, constructedFloor) {
+		return nil, nil, "", fmt.Errorf("%w: constructed inventory %s needs ansible-core %s or "+
+			"later, and this server has %s", inventory.ErrResolve, quoted(inv.Name), constructedFloor,
+			quoted(version))
+	}
 	for _, in := range inputs {
 		in.engine = inventory.EngineAnsible
 	}
@@ -539,10 +572,8 @@ func (d *Dispatcher) composeConstructed(ctx context.Context, inv *inventory.Inve
 	if err := os.WriteFile(path, config, 0o600); err != nil {
 		return nil, nil, "", fmt.Errorf("compose %s: write the constructed options: %w", inv.Name, err)
 	}
-	sources := make([]string, 0, len(inputs)+1)
 	drawn := make([]string, 0, len(inputs))
 	for _, in := range inputs {
-		sources = append(sources, in.path)
 		drawn = append(drawn, in.inv.ID)
 	}
 	sources = append(sources, path)
@@ -554,7 +585,35 @@ func (d *Dispatcher) composeConstructed(ctx context.Context, inv *inventory.Inve
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("compose %s: %w", inv.Name, err)
 	}
+	listing.UnwrapUnsafe()
 	return listing, drawn, version, nil
+}
+
+// atLeastRelease reports whether an ansible-core version is floor, a major.minor such as 2.19, or
+// later. A version whose major and minor are not both whole numbers counts as older, since nothing
+// can be said about what it does.
+func atLeastRelease(version, floor string) bool {
+	parse := func(v string) (int, int, bool) {
+		parts := strings.SplitN(v, ".", 3)
+		if len(parts) < 2 {
+			return 0, 0, false
+		}
+		major, err := strconv.Atoi(parts[0])
+		if err != nil {
+			return 0, 0, false
+		}
+		minor, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return 0, 0, false
+		}
+		return major, minor, true
+	}
+	vMajor, vMinor, ok := parse(version)
+	if !ok {
+		return false
+	}
+	fMajor, fMinor, _ := parse(floor)
+	return vMajor > fMajor || vMajor == fMajor && vMinor >= fMinor
 }
 
 // estateFacts returns the facts last gathered for every host, keyed by host name.

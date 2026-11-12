@@ -611,7 +611,8 @@ func TestValidateFederatedCredentials(t *testing.T) {
 
 // TestFederatedCredentialIsNotAStoredSecret pins that a federated credential named where a stored
 // secret is read, a registry login, a project key, or an inventory source, is refused rather than
-// handed over as an empty value.
+// handed over as an empty value. Named as a registry login it is refused by the rule every pull
+// credential faces, since it is not a registry credential.
 func TestFederatedCredentialIsNotAStoredSecret(t *testing.T) {
 	t.Parallel()
 	store := credential.NewMemStore()
@@ -619,10 +620,10 @@ func TestFederatedCredentialIsNotAStoredSecret(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 	d := &Dispatcher{credentials: store, sealer: fedSealer, log: zap.NewNop()}
-	spec := &roundhouse.Spec{}
+	spec := &roundhouse.Spec{Image: "ghcr.io/acme/ee:1"}
 	_, err := d.resolvePullCredential(context.Background(), "cred_oidc", spec)
-	if !errors.Is(err, credential.ErrBadKind) {
-		t.Errorf("resolvePullCredential() error = %v, want %v", err, credential.ErrBadKind)
+	if !errors.Is(err, credential.ErrPullKind) {
+		t.Errorf("resolvePullCredential() error = %v, want %v", err, credential.ErrPullKind)
 	}
 	if spec.RegistryUsername != "" || spec.RegistryPassword != "" {
 		t.Error("a federated credential reached the registry login")

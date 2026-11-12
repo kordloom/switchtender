@@ -114,6 +114,11 @@ func createTriggerHandler(triggers trigger.Store, templates template.Store, cred
 			respondError(w, log, http.StatusInternalServerError, "could not create trigger")
 			return
 		}
+		// The hook fires this template with no caller to ask, so whether its split of a path may
+		// run is asked of whoever attaches the hook.
+		if refuseTemplatePathSplit(w, r, log, tpl) {
+			return
+		}
 		if req.Review != nil && !checkReviewConfig(w, r, req.Review, tpl, creds, authz, log) {
 			return
 		}

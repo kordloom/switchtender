@@ -838,6 +838,14 @@ func fromAWX(data []byte, now time.Time, ids *awxTemplateIDs) (*Plan, error) {
 		default:
 			plan.warn(base, c.Name)
 		}
+		// A registry login is sent only to the one host its settings name. An export with no host,
+		// or one written as a URL, leaves the imported login bound to nothing, and an execution
+		// environment that pulls with it pulls anonymously until the host is set.
+		if kind == credential.KindRegistry && settings[credential.SettingRegistryHost] == "" {
+			plan.warn("credential %q is a registry login with no registry host stored, so its login "+
+				"is sent to no registry. Set %s on it to the one host the login belongs to, such as "+
+				"ghcr.io, with no scheme and no path", c.Name, credential.SettingRegistryHost)
+		}
 	}
 
 	// A project's source control credential is wired once the credentials exist, since the export

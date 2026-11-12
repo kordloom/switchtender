@@ -145,6 +145,15 @@ An AWX smart inventory imports with its host filter, and a constructed inventory
 inputs, options, and limit, wired by id to the inventories the same export carried. Both resolve at
 each launch, as they did in AWX. The [inventories guide](inventories.md) describes what each reads.
 
+A constructed inventory's inputs are checked as they import, the way every launch checks them. An
+input holding template text leaves its constructed inventory out of the import, and the report names
+the input, the host or group, and the variable. AWX's stock
+`ansible_python_interpreter: "{{ ansible_playbook_python }}"` is template text and is refused like
+any other. Put that value in `host_vars` or `group_vars` beside the playbook, or set a literal
+value such as `auto_silent` on the inventory, then import again or create the constructed inventory
+by hand. The input itself still imports. Resolving a constructed inventory needs ansible-core 2.19
+or later on the server.
+
 When the export carries a smart inventory's organization, the smart inventory and every inventory
 imported from that organization are placed in an organization of the same name, created on apply
 or matched to the one already here when exactly one has that name, so its filter reads the same

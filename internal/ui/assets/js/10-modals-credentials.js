@@ -243,7 +243,9 @@ const CRED_KINDS = {
 	registry: {
 		placeholder: "username\nthe password or access token",
 		hint: "Username on the first line, password on every line after it. Used to pull execution " +
-			"images.",
+			"images. Set registry_host under Settings, such as ghcr.io or docker.io. The login is " +
+			"sent to that registry and no other.",
+		settings: "registry_host=ghcr.io",
 	},
 	aws: {
 		placeholder: "access_key=AKIAEXAMPLE\nsecret_key=the secret\nregion=us-east-1",
@@ -311,8 +313,8 @@ const CRED_KINDS = {
 	},
 };
 
-// SETTINGS_PLACEHOLDER is the settings box's example for a kind that stores a secret, where settings
-// are optional metadata.
+// SETTINGS_PLACEHOLDER is the settings box's example for a kind with no example of its own, where
+// settings are optional metadata.
 const SETTINGS_PLACEHOLDER = "user=deploy\nbecome_method=sudo";
 
 // CRED_SOURCES describes where a secret comes from. A source other than local means the stored value
@@ -582,8 +584,9 @@ function syncCredFields() {
 	const sourceHint = document.getElementById("cred-source-hint");
 	if (sourceHint) sourceHint.textContent = sourceSpec.hint || "";
 	// A federated kind has no secret and no source, so both are hidden and the secret box is taken
-	// out of the form's validation, and the settings box shows what that kind needs instead. A custom
-	// type hides them too, since its own fields replace them.
+	// out of the form's validation. A custom type hides them too, since its own fields replace them.
+	// The settings box shows a kind's own example when it has one, which is what a federated kind
+	// and a registry login need, and the general example otherwise.
 	const federated = !!kindSpec.federated;
 	const secretField = document.getElementById("cred-secret-field");
 	if (secretField) secretField.hidden = federated || Boolean(typeID);
@@ -591,7 +594,7 @@ function syncCredFields() {
 	if (sourceField) sourceField.hidden = federated || Boolean(typeID);
 	secret.disabled = federated;
 	const settings = document.getElementById("cred-settings");
-	if (settings) settings.placeholder = federated ? kindSpec.settings : SETTINGS_PLACEHOLDER;
+	if (settings) settings.placeholder = kindSpec.settings || SETTINGS_PLACEHOLDER;
 	toggleCredPassphrase();
 }
 

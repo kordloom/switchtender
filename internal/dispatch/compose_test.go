@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -389,6 +391,16 @@ func TestConstructedWithAnsible(t *testing.T) {
 	}
 	d := New(run.NewMemStore(), roundhouse.NewAnsibleRunner(), zap.NewNop(), WithInventories(invs))
 	t.Cleanup(d.Close)
+	if version := realAnsibleCore(t); !atLeastRelease(version, constructedFloor) {
+		_, err := d.PreviewInventory(ctx, &inventory.Inventory{
+			ID: "inv_k", Kind: inventory.KindConstructed, InputIDs: []string{"inv_ini", "inv_yaml"},
+		})
+		if !errors.Is(err, inventory.ErrResolve) || !strings.Contains(err.Error(), version) {
+			t.Fatalf("PreviewInventory() on ansible-core %s error = %v, want the floor refusal",
+				version, err)
+		}
+		return
+	}
 	options := "strict: false\n" +
 		"compose:\n  resolved_state: state | default('running')\n" +
 		"groups:\n  is_shutdown: resolved_state == 'shutdown'\n" +
@@ -460,5 +472,274 @@ func TestSmartWithAnsible(t *testing.T) {
 	}
 	if !strings.Contains(got.Content, "gold") {
 		t.Errorf("the host's group variable did not reach the rendered inventory:\n%s", got.Content)
+	}
+}
+
+// realAnsibleCore returns the version of the ansible-core installed here.
+func realAnsibleCore(t *testing.T) string {
+	t.Helper()
+	d := New(run.NewMemStore(), roundhouse.NewAnsibleRunner(), zap.NewNop())
+	t.Cleanup(d.Close)
+	version, err := d.AnsibleCore(context.Background())
+	if err != nil {
+		t.Fatalf("AnsibleCoreVersion() error = %v", err)
+	}
+	return version
+}
+
+// taintedInput is an input whose host variable holds a lookup, with a value no message may quote.
+const taintedInput = "all:\n  hosts:\n    h1:\n      v: \"{{ lookup('pipe', 'SECRETCMD') }}\"\n"
+
+// hostListingRunner is a ListingRunner that can also list a split's hosts, counting each call.
+type hostListingRunner struct {
+	*inventorytest.ListingRunner
+	// hostCalls counts the host lists asked for.
+	hostCalls atomic.Int32
+}
+
+// Hosts counts the call and returns two hosts.
+func (r *hostListingRunner) Hosts(context.Context, string, string) ([]string, error) {
+	r.hostCalls.Add(1)
+	return []string{"h1", "web1"}, nil
+}
+
+// TestConstructedInputIsRefusedBeforeAnyProcess pins that an input holding template text is
+// refused before ansible-inventory or the version probe runs, at every entry that composes, and
+// that the refusal names the constructed inventory and the input and quotes no value. The runner
+// reports Ansible as missing, so a refusal that came after the probe would say Ansible is needed.
+func TestConstructedInputIsRefusedBeforeAnyProcess(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Entry string
+	}{{ // Test 0: The preview.
+		Entry: "preview",
+	}, { // Test 1: A launch.
+		Entry: "submit",
+	}, { // Test 2: A split.
+		Entry: "split",
+	}, { // Test 3: The retry of a split's shards, held to a recorded resolution.
+		Entry: "pinned",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			invs := inventory.NewMemStore()
+			k := &inventory.Inventory{ID: "inv_k", Name: "fleet view", Kind: inventory.KindConstructed,
+				InputIDs: []string{"inv_clean", "inv_tainted"}}
+			for _, inv := range []*inventory.Inventory{
+				{ID: "inv_clean", Name: "clean", Content: "[web]\nweb1 tier=gold\n"},
+				{ID: "inv_tainted", Name: "tainted", Content: taintedInput}, k,
+			} {
+				if err := invs.Save(ctx, inv); err != nil {
+					t.Fatalf("Save() error = %v", err)
+				}
+			}
+			runner := &hostListingRunner{ListingRunner: &inventorytest.ListingRunner{Missing: true}}
+			store := run.NewMemStore()
+			d := New(store, runner, zap.NewNop(), WithInventories(invs))
+			t.Cleanup(d.Close)
+			var err error
+			switch test.Entry {
+			case "preview":
+				_, err = d.PreviewInventory(ctx, k)
+			case "submit":
+				_, err = d.Submit(ctx, "site.yml", "", run.WithInventory(k.ID))
+			case "split":
+				_, err = d.SubmitSplit(ctx, "site.yml", "", 2, run.WithInventory(k.ID))
+			case "pinned":
+				_, err = d.composedContent(ctx, k, &run.InventoryResolution{Hosts: []string{"h1"},
+					Inputs: []string{"inv_clean", "inv_tainted"}})
+			}
+			if !errors.Is(err, inventory.ErrResolve) {
+				t.Fatalf("%s error = %v, want ErrResolve", test.Entry, err)
+			}
+			if errors.Is(err, inventory.ErrNeedsAnsible) {
+				t.Errorf("%s error = %v, which says Ansible is needed", test.Entry, err)
+			}
+			for _, want := range []string{`"fleet view"`, `"tainted"`, `variable v of host "h1"`} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("%s error = %q, want it to name %s", test.Entry, err, want)
+				}
+			}
+			if strings.Contains(err.Error(), "SECRETCMD") {
+				t.Errorf("%s error = %q, which quotes the value", test.Entry, err)
+			}
+			if runner.Lists() != 0 || runner.Reads() != 0 || runner.hostCalls.Load() != 0 {
+				t.Errorf("%s ran %d listings, %d reads, and %d host lists, want none", test.Entry,
+					runner.Lists(), runner.Reads(), runner.hostCalls.Load())
+			}
+			if runs, lerr := store.List(ctx); lerr != nil || len(runs) != 0 {
+				t.Errorf("%s stored %d runs (error %v), want none", test.Entry, len(runs), lerr)
+			}
+		})
+	}
+}
+
+// TestConstructedNeedsTheFloorRelease pins that a constructed inventory is composed only with
+// ansible-core 2.19 or later, and that the refusal comes before any listing and names both the
+// installed version and the floor.
+func TestConstructedNeedsTheFloorRelease(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Version string
+		Want    error
+	}{{ // Test 0: 2.16 is refused.
+		Version: "2.16.19", Want: inventory.ErrResolve,
+	}, { // Test 1: 2.17 is refused.
+		Version: "2.17.14", Want: inventory.ErrResolve,
+	}, { // Test 2: 2.18 is refused.
+		Version: "2.18.19", Want: inventory.ErrResolve,
+	}, { // Test 3: A version that cannot be read counts as older.
+		Version: "devel", Want: inventory.ErrResolve,
+	}, { // Test 4: A minor that is not a number counts as older.
+		Version: "2.x.1", Want: inventory.ErrResolve,
+	}, { // Test 5: 2.19 composes.
+		Version: "2.19.13",
+	}, { // Test 6: A later major composes.
+		Version: "3.0.0",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			d, _, _, runner := composeFixture(t)
+			runner.Version = test.Version
+			_, err := d.PreviewInventory(context.Background(), &inventory.Inventory{
+				ID: "inv_k", Name: "fleet view", Kind: inventory.KindConstructed,
+				InputIDs: []string{"inv_a"},
+			})
+			if !errors.Is(err, test.Want) {
+				t.Fatalf("PreviewInventory() error = %v, want %v", err, test.Want)
+			}
+			if err == nil {
+				return
+			}
+			for _, want := range []string{`"` + test.Version + `"`, constructedFloor} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("PreviewInventory() error = %q, want it to name %s", err, want)
+				}
+			}
+			if runner.Lists() != 0 {
+				t.Errorf("PreviewInventory() ran %d listings, want none", runner.Lists())
+			}
+		})
+	}
+}
+
+// TestConstructedInputNeverRunsOnTheServer runs real ansible-inventory over two inputs that try to
+// run a command on the server: one with a lookup written out, refused by the scan, and one with
+// none, whose braces are escapes a definition decodes with from_yaml. Neither command runs. On a
+// release below the floor nothing is listed at all.
+func TestConstructedInputNeverRunsOnTheServer(t *testing.T) {
+	t.Parallel()
+	requireAnsibleInventory(t)
+	tests := []struct {
+		Input      func(marker string) string
+		SourceVars string
+		Want       error
+	}{{ // Test 0: A lookup written out in an input is refused.
+		Input: func(marker string) string {
+			return "all:\n  hosts:\n    h1:\n      v: \"{{ lookup('pipe', 'touch " + marker + "') }}\"\n"
+		},
+		SourceVars: "compose:\n  w: v\n",
+		Want:       inventory.ErrResolve,
+	}, { // Test 1: A lookup with no marker, decoded by the definition, does not run.
+		Input: func(marker string) string {
+			return "all:\n  hosts:\n    h1:\n      y: 'k: \"\\x7b\\x7b lookup(''pipe'', ''touch " +
+				marker + "'') \\x7d\\x7d\"'\n"
+		},
+		SourceVars: "strict: false\ncompose:\n  hn: (y | from_yaml).k\ngroups:\n  ran: \"'x' in hn\"\n",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			marker := filepath.Join(t.TempDir(), "ran")
+			invs := inventory.NewMemStore()
+			if err := invs.Save(ctx, &inventory.Inventory{ID: "inv_in", Name: "input",
+				Content: test.Input(marker)}); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+			d := New(run.NewMemStore(), roundhouse.NewAnsibleRunner(), zap.NewNop(),
+				WithInventories(invs))
+			t.Cleanup(d.Close)
+			want := test.Want
+			if !atLeastRelease(realAnsibleCore(t), constructedFloor) {
+				want = inventory.ErrResolve
+			}
+			_, err := d.PreviewInventory(ctx, &inventory.Inventory{ID: "inv_k", Name: "view",
+				Kind: inventory.KindConstructed, InputIDs: []string{"inv_in"},
+				SourceVars: test.SourceVars})
+			if !errors.Is(err, want) {
+				t.Fatalf("PreviewInventory() error = %v, want %v", err, want)
+			}
+			if _, err := os.Stat(marker); err == nil {
+				t.Errorf("the command in the input ran on the server and made %s", marker)
+			}
+		})
+	}
+}
+
+// TestConstructedHandsThePlayPlainStrings composes with real ansible-inventory and checks the
+// inventory a run is given: an input's strings come back as plain strings at every depth, a
+// composed value that holds template text keeps the form Ansible will not template, and a play over
+// that inventory reads the plain values.
+func TestConstructedHandsThePlayPlainStrings(t *testing.T) {
+	t.Parallel()
+	requireAnsibleInventory(t)
+	if version := realAnsibleCore(t); !atLeastRelease(version, constructedFloor) {
+		t.Skipf("ansible-core %s is below the constructed floor, which another test pins", version)
+	}
+	ctx := context.Background()
+	invs := inventory.NewMemStore()
+	if err := invs.Save(ctx, &inventory.Inventory{ID: "inv_in", Name: "input",
+		Content: "all:\n  hosts:\n    h1:\n      ansible_connection: local\n      tier: gold\n" +
+			"      nested:\n        list: [a, {b: c}]\n"}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	d := New(run.NewMemStore(), roundhouse.NewAnsibleRunner(), zap.NewNop(), WithInventories(invs))
+	t.Cleanup(d.Close)
+	got, err := d.PreviewInventory(ctx, &inventory.Inventory{ID: "inv_k", Name: "view",
+		Kind: inventory.KindConstructed, InputIDs: []string{"inv_in"},
+		SourceVars: "compose:\n  marked: \"'{' ~ '{ x }' ~ '}'\"\n"})
+	if err != nil {
+		t.Fatalf("PreviewInventory() error = %v", err)
+	}
+	for _, want := range []string{`"tier": "gold"`, `"a"`, `"b": "c"`} {
+		if !strings.Contains(got.Content, want) {
+			t.Errorf("the run's inventory lacks %s, a plain string:\n%s", want, got.Content)
+		}
+	}
+	if !strings.Contains(got.Content, `"__ansible_unsafe": "{{ x }}"`) {
+		t.Errorf("the composed template text lost its unsafe form:\n%s", got.Content)
+	}
+	if strings.Count(got.Content, "__ansible_unsafe") != 1 {
+		t.Errorf("the run's inventory holds unsafe objects besides the composed one:\n%s", got.Content)
+	}
+	if _, err := exec.LookPath("ansible-playbook"); err != nil {
+		t.Skip("ansible-playbook not installed")
+	}
+	dir := t.TempDir()
+	invPath := filepath.Join(dir, "inventory.json")
+	playPath := filepath.Join(dir, "play.yml")
+	play := "- hosts: all\n  gather_facts: false\n  tasks:\n" +
+		"    - ansible.builtin.assert:\n        that:\n" +
+		"          - tier == 'gold'\n          - nested.list[0] == 'a'\n" +
+		"          - nested.list[1].b == 'c'\n          - marked | length == 7\n" +
+		"    - ansible.builtin.debug:\n        msg: tier read\n      when: tier == 'gold'\n"
+	if err := os.WriteFile(invPath, []byte(got.Content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(playPath, []byte(play), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, "ansible-playbook", "-i", invPath, playPath)
+	cmd.Env = append(os.Environ(), "ANSIBLE_HOME="+dir, "ANSIBLE_LOCAL_TEMP="+dir)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ansible-playbook error = %v:\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "tier read") {
+		t.Errorf("the task reading the inventory string was skipped:\n%s", out)
 	}
 }

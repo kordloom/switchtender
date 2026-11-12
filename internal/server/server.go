@@ -820,10 +820,10 @@ func (s *Server) Handler() http.Handler {
 		s.canSign, s.runFiles, ansibleCoreOf(s.previewer), s.log,
 		notificationDoctor(s.notifications, s.notificationObjects(), s.log), s.attentionCheck))
 	mux.Handle("GET /v1/attention", attentionHandler(s.attention, authz, s.log))
-	mux.Handle("POST /v1/schedules", createScheduleHandler(s.schedules, authz, s.log))
+	mux.Handle("POST /v1/schedules", createScheduleHandler(s.schedules, s.templates, authz, s.log))
 	mux.Handle("GET /v1/schedules", listSchedulesHandler(s.schedules, authz, s.log))
 	mux.Handle("GET /v1/schedules/{id}", getScheduleHandler(s.schedules, authz, s.log))
-	mux.Handle("PUT /v1/schedules/{id}", updateScheduleHandler(s.schedules, authz, s.log))
+	mux.Handle("PUT /v1/schedules/{id}", updateScheduleHandler(s.schedules, s.templates, authz, s.log))
 	mux.Handle("DELETE /v1/schedules/{id}", deleteScheduleHandler(s.schedules, authz, s.log))
 	mux.Handle("/ui/", s.web.Handler())
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
@@ -874,8 +874,8 @@ func (s *Server) Handler() http.Handler {
 	}
 	mux.Handle("GET /v1/credentials", listCredentialsHandler(s.credentials, s.sealer, refs, authz, s.log))
 	mux.Handle("DELETE /v1/credentials/{id}", deleteCredentialHandler(s.credentials, refs, s.log))
-	mux.Handle("POST /v1/projects", createProjectHandler(s.projects, authz, s.log))
-	mux.Handle("PUT /v1/projects/{id}", updateProjectHandler(s.projects, authz, s.log))
+	mux.Handle("POST /v1/projects", createProjectHandler(s.projects, s.credentials, authz, s.log))
+	mux.Handle("PUT /v1/projects/{id}", updateProjectHandler(s.projects, s.credentials, authz, s.log))
 	mux.Handle("GET /v1/projects", listProjectsHandler(s.projects, authz, s.log))
 	mux.Handle("DELETE /v1/projects/{id}", deleteProjectHandler(s.projects, refs, s.log))
 	mux.Handle("GET /v1/projects/{id}/files", projectTreeHandler(s.projects, s.syncer, authz, s.log))
@@ -933,8 +933,10 @@ func (s *Server) Handler() http.Handler {
 		detachNotificationHandler(s.notifications, authz, s.log))
 	mux.Handle("POST /hooks/{token}", hookHandler(s.triggers, s.templates, s.submitter, s.store,
 		s.sealer, s.audits, s.reviews, s.hooks, s.commentCommands(authz), s.log))
-	mux.Handle("POST /v1/templates", createTemplateHandler(s.templates, s.sealer, authz, s.log))
-	mux.Handle("PUT /v1/templates/{id}", updateTemplateHandler(s.templates, s.sealer, authz, s.log))
+	mux.Handle("POST /v1/templates",
+		createTemplateHandler(s.templates, s.credentials, s.sealer, authz, s.log))
+	mux.Handle("PUT /v1/templates/{id}",
+		updateTemplateHandler(s.templates, s.credentials, s.sealer, authz, s.log))
 	mux.Handle("GET /v1/templates", listTemplatesHandler(s.templates, authz, s.log))
 	mux.Handle("DELETE /v1/templates/{id}", deleteTemplateHandler(s.templates, refs, s.log))
 	mux.Handle("POST /v1/templates/{id}/launch",
