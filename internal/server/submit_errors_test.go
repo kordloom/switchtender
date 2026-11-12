@@ -48,19 +48,21 @@ func TestClassifySubmitNamesEveryKnownError(t *testing.T) {
 		Errs      []error
 	}{{ // Test 0: What a person must change in the request or in what it names.
 		WantClass: submitInput, Errs: []error{
-			credential.ErrNotFound, credential.ErrNoKey, project.ErrNotFound, inventory.ErrNotFound,
-			inventory.ErrNeedsAnsible, inventory.ErrInvalidInventory, inventory.ErrTooManyHosts,
-			inventory.ErrHostFilter, inventory.ErrSourceVars, dispatch.ErrNoPlaybook,
-			dispatch.ErrNoCommand, dispatch.ErrUnknownTool, dispatch.ErrToolCredential,
-			dispatch.ErrNoSteps, dispatch.ErrTooManySteps, dispatch.ErrStepInput,
-			dispatch.ErrUnnamedStep, dispatch.ErrDuplicateStep, dispatch.ErrUnknownDependency,
-			dispatch.ErrDependencyCycle, run.ErrApprovalStep, run.ErrDenyPath, inventory.ErrResolve,
-			inventory.ErrComposition,
+			credential.ErrNotFound, credential.ErrNoKey, credential.ErrPullKind, project.ErrNotFound,
+			inventory.ErrNotFound, inventory.ErrNeedsAnsible, inventory.ErrInvalidInventory,
+			inventory.ErrTooManyHosts, inventory.ErrHostFilter, inventory.ErrSourceVars,
+			dispatch.ErrNoPlaybook, dispatch.ErrNoCommand, dispatch.ErrUnknownTool,
+			dispatch.ErrToolCredential, dispatch.ErrNoSteps, dispatch.ErrTooManySteps,
+			dispatch.ErrStepInput, dispatch.ErrUnnamedStep, dispatch.ErrDuplicateStep,
+			dispatch.ErrUnknownDependency, dispatch.ErrDependencyCycle, run.ErrApprovalStep,
+			run.ErrDenyPath, run.ErrLimitFile, inventory.ErrResolve, inventory.ErrComposition,
 		},
 	}, { // Test 1: A credential this server cannot open.
 		WantClass: submitSecret, Errs: []error{credential.ErrNoSecret, credential.ErrUnreadable},
-	}, { // Test 2: A deny rule or the license.
-		WantClass: submitPolicy, Errs: []error{dispatch.ErrPolicyDenied, dispatch.ErrQueueUnlicensed},
+	}, { // Test 2: A deny rule, the license, or an agent's split of an inventory named by path.
+		WantClass: submitPolicy, Errs: []error{
+			dispatch.ErrPolicyDenied, dispatch.ErrQueueUnlicensed, dispatch.ErrAgentPathSplit,
+		},
 	}, { // Test 3: An inventory or image tag that could not be read from where it lives.
 		WantClass: submitContent, Errs: []error{inventory.ErrContentRead, dispatch.ErrImageUnpinned},
 	}, { // Test 4: A disk too full to record a new run.

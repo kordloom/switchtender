@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // The Ansible commands the host runner starts, by name, from the directory its locator names or
@@ -49,6 +51,9 @@ const maxListingStderr = 2048
 func (a *ansibleRunner) ListInventory(ctx context.Context, sources []string, limit string) ([]byte, error) {
 	if len(sources) == 0 {
 		return nil, ErrNoInventory
+	}
+	if err := run.CheckLimitFile(limit); err != nil {
+		return nil, err
 	}
 	args := make([]string, 0, 2*len(sources)+3)
 	for _, s := range sources {
@@ -105,6 +110,9 @@ func (a *ansibleRunner) Dump(ctx context.Context, source string, env []string) (
 func (a *ansibleRunner) Hosts(ctx context.Context, inventory, limit string) ([]string, error) {
 	if inventory == "" {
 		return nil, ErrNoInventory
+	}
+	if err := run.CheckLimitFile(limit); err != nil {
+		return nil, err
 	}
 
 	args := []string{"-i", inventory, "--list"}

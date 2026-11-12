@@ -13,6 +13,7 @@ import (
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
+	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/user"
 )
 
@@ -66,6 +67,10 @@ func applyComposition(ctx context.Context, store inventory.Store, req createInve
 		req.SourceVars, strings.TrimSpace(req.Limit)
 	i.InputIDs = append([]string(nil), req.InputIDs...)
 	if err := inventory.Validate(i); err != nil {
+		return err.Error(), http.StatusBadRequest
+	}
+	// A constructed inventory's limit is handed to ansible-inventory at every resolution.
+	if err := run.CheckLimitFile(i.Limit); err != nil {
 		return err.Error(), http.StatusBadRequest
 	}
 	for _, id := range i.InputIDs {

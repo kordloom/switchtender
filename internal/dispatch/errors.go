@@ -44,6 +44,9 @@ var (
 	ErrImageUnpinned = errors.New("image not pinned to a digest")
 	// ErrNoHostLister is returned when a split is requested but the runner cannot list hosts.
 	ErrNoHostLister = errors.New("host listing unavailable")
+	// ErrAgentPathSplit is returned when an agent's run asks for a split of an inventory named by a
+	// path. The split lists that path before the run exists, so nothing could hold it first.
+	ErrAgentPathSplit = errors.New("an agent cannot split an inventory named by path")
 	// ErrNoSteps aliases the run-package error so callers matching dispatch.ErrNoSteps still match
 	// what run.ValidatePipeline returns. The pipeline validators moved to the run package, which owns
 	// the step type, so the dispatcher and the template layer validate through one definition.

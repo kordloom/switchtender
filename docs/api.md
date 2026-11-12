@@ -394,6 +394,31 @@ host pattern matches nothing, so a run aimed at a path that does not exist touch
 Its recap names no host, and the run is recorded as failed with the reason on its `error`, since a
 clean exit over nothing is not a success.
 
+### Splitting an inventory named by path
+
+A split lists the inventory's hosts before the run exists, so before any policy, hold, or approval
+sees it, and the listing opens the inventory as the user the server runs as. A stored inventory is
+content somebody with the right to save it put there. A path is whatever the sender wrote. So a
+split of a path, which is `shards` of two or more with `inventory` and no `inventory_id` on the
+Ansible tool, is accepted only from an admin, or on an install with no accounts. Anybody else,
+and every agent token whatever account it is bound to, is answered `403`, and the message says to
+store the inventory and name it with `inventory_id`.
+
+The rule is asked at every place such a run is handed in or saved:
+
+| Request                             | What is refused                                                                                                                 |
+|-------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|
+| `POST /v1/runs`                     | A submission that splits a path.                                                                                                |
+| `POST /v1/runs/{id}/rerun`          | A rerun of a split of a path, whoever submitted the original.                                                                   |
+| `POST` and `PUT` on `/v1/templates` | Saving a split of a path into a template, which includes a caller who holds a manage grant on it.                               |
+| `POST /v1/templates/{id}/launch`    | Launching a template that splits a path. A launch that names a stored inventory in `inventory_id` splits that one and is taken. |
+| `POST` and `PUT` on `/v1/schedules` | A schedule that splits a path, and a schedule that fires a template that does.                                                  |
+| `POST /v1/triggers`                 | A trigger on a template that splits a path.                                                                                     |
+
+A schedule and a webhook fire with nobody present to ask, which is why the rule is asked when they
+are saved. One an admin saved keeps firing. A single run that names a path, a split of a stored
+inventory, and a workflow step, which cannot split, are open to an operator as before.
+
 ## Execution images
 
 A run, a project, and a template take `image`, the container image the run executes inside, and
@@ -437,6 +462,14 @@ curl -X POST https://switchtender.example.com/v1/runs \
 
 These apply to the Ansible tool. The other tools ignore them, so a Bash or Terraform template that
 carries one is unaffected.
+
+A `limit` that holds an `@` anywhere is refused, for every tool. Ansible reads what follows the
+sign as a file of host patterns and opens it on the server, and it does so after a comma, a colon,
+a space, a bracket, or a control character, so the whole limit is refused and not only an element
+that begins with the sign. `POST /v1/runs`, `POST` and `PUT` on `/v1/templates`, a template
+launch that sends its own `limit`, and the `limit` of a constructed inventory on `/v1/inventories`
+answer `400`. A rerun of a run stored with such a limit answers `409`, since nothing in that request
+can be corrected. Name the hosts or groups themselves, as in `web:!canary:&east`.
 
 A run submission also accepts `extra_vars`, an object of variables injected into the run. Ansible
 receives them the way `--extra-vars` supplies them, and a plugin tool reads them as its input. A

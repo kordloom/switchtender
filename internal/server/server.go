@@ -820,10 +820,10 @@ func (s *Server) Handler() http.Handler {
 		s.canSign, s.runFiles, ansibleCoreOf(s.previewer), s.log,
 		notificationDoctor(s.notifications, s.notificationObjects(), s.log), s.attentionCheck))
 	mux.Handle("GET /v1/attention", attentionHandler(s.attention, authz, s.log))
-	mux.Handle("POST /v1/schedules", createScheduleHandler(s.schedules, authz, s.log))
+	mux.Handle("POST /v1/schedules", createScheduleHandler(s.schedules, s.templates, authz, s.log))
 	mux.Handle("GET /v1/schedules", listSchedulesHandler(s.schedules, authz, s.log))
 	mux.Handle("GET /v1/schedules/{id}", getScheduleHandler(s.schedules, authz, s.log))
-	mux.Handle("PUT /v1/schedules/{id}", updateScheduleHandler(s.schedules, authz, s.log))
+	mux.Handle("PUT /v1/schedules/{id}", updateScheduleHandler(s.schedules, s.templates, authz, s.log))
 	mux.Handle("DELETE /v1/schedules/{id}", deleteScheduleHandler(s.schedules, authz, s.log))
 	mux.Handle("/ui/", s.web.Handler())
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {

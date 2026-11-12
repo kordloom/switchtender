@@ -1072,6 +1072,52 @@ inventory is managed outside this product.</p>
 host pattern matches nothing, so a run aimed at a path that does not exist touches no host at all.
 Its recap names no host, and the run is recorded as failed with the reason on its <code>error</code>, since a
 clean exit over nothing is not a success.</p>
+<h3 id="splitting-an-inventory-named-by-path">Splitting an inventory named by path</h3>
+<p>A split lists the inventory's hosts before the run exists, so before any policy, hold, or approval
+sees it, and the listing opens the inventory as the user the server runs as. A stored inventory is
+content somebody with the right to save it put there. A path is whatever the sender wrote. So a
+split of a path, which is <code>shards</code> of two or more with <code>inventory</code> and no <code>inventory_id</code> on the
+Ansible tool, is accepted only from an admin, or on an install with no accounts. Anybody else,
+and every agent token whatever account it is bound to, is answered <code>403</code>, and the message says to
+store the inventory and name it with <code>inventory_id</code>.</p>
+<p>The rule is asked at every place such a run is handed in or saved:</p>
+<table>
+<thead>
+<tr>
+<th>Request</th>
+<th>What is refused</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /v1/runs</code></td>
+<td>A submission that splits a path.</td>
+</tr>
+<tr>
+<td><code>POST /v1/runs/{id}/rerun</code></td>
+<td>A rerun of a split of a path, whoever submitted the original.</td>
+</tr>
+<tr>
+<td><code>POST</code> and <code>PUT</code> on <code>/v1/templates</code></td>
+<td>Saving a split of a path into a template, which includes a caller who holds a manage grant on it.</td>
+</tr>
+<tr>
+<td><code>POST /v1/templates/{id}/launch</code></td>
+<td>Launching a template that splits a path. A launch that names a stored inventory in <code>inventory_id</code> splits that one and is taken.</td>
+</tr>
+<tr>
+<td><code>POST</code> and <code>PUT</code> on <code>/v1/schedules</code></td>
+<td>A schedule that splits a path, and a schedule that fires a template that does.</td>
+</tr>
+<tr>
+<td><code>POST /v1/triggers</code></td>
+<td>A trigger on a template that splits a path.</td>
+</tr>
+</tbody>
+</table>
+<p>A schedule and a webhook fire with nobody present to ask, which is why the rule is asked when they
+are saved. One an admin saved keeps firing. A single run that names a path, a split of a stored
+inventory, and a workflow step, which cannot split, are open to an operator as before.</p>
 <h2 id="execution-images">Execution images</h2>
 <p>A run, a project, and a template take <code>image</code>, the container image the run executes inside, and
 <code>pull_credential_id</code>, the login that image is pulled with. The pull credential must be a
@@ -1141,6 +1187,13 @@ retry keeps them.</p>
 </code></pre>
 <p>These apply to the Ansible tool. The other tools ignore them, so a Bash or Terraform template that
 carries one is unaffected.</p>
+<p>A <code>limit</code> that holds an <code>@</code> anywhere is refused, for every tool. Ansible reads what follows the
+sign as a file of host patterns and opens it on the server, and it does so after a comma, a colon,
+a space, a bracket, or a control character, so the whole limit is refused and not only an element
+that begins with the sign. <code>POST /v1/runs</code>, <code>POST</code> and <code>PUT</code> on <code>/v1/templates</code>, a template
+launch that sends its own <code>limit</code>, and the <code>limit</code> of a constructed inventory on <code>/v1/inventories</code>
+answer <code>400</code>. A rerun of a run stored with such a limit answers <code>409</code>, since nothing in that request
+can be corrected. Name the hosts or groups themselves, as in <code>web:!canary:&amp;east</code>.</p>
 <p>A run submission also accepts <code>extra_vars</code>, an object of variables injected into the run. Ansible
 receives them the way <code>--extra-vars</code> supplies them, and a plugin tool reads them as its input. A
 template carries its own <code>extra_vars</code> and a launch may merge more over them.</p>
