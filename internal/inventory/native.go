@@ -130,6 +130,11 @@ func nativeData(content string) (*invData, error) {
 	if strings.HasPrefix(content, "\ufeff") {
 		return nil, needsAnsible("its content starts with a byte order mark")
 	}
+	// Ansible decrypts a file that starts with the vault header before any plugin reads it, and the
+	// header is matched at the first byte only, so the check here does not trim either.
+	if strings.HasPrefix(content, "$ANSIBLE_VAULT") {
+		return nil, needsAnsible("it is a whole file encrypted with Ansible Vault")
+	}
 	d := newInvData()
 	doc, err := loadInventoryDocument(content)
 	switch {

@@ -36,9 +36,15 @@ const pathSplitRefusal = "a split of an inventory named by path needs the admin 
 	"inventory and name it with inventory_id"
 
 // mayPathSplit reports whether the caller may hand in or save a split whose inventory is named by
-// path: an admin, or anybody on an install with no accounts, where every caller is the local admin.
-// An agent never may, whatever role its owner's account holds.
+// path, which only an admin person may.
 func mayPathSplit(r *http.Request) bool {
+	return adminPerson(r)
+}
+
+// adminPerson reports whether the caller is an admin acting in person: an admin's own token or
+// session, or anybody on an install with no accounts, where every caller is the local admin. An
+// agent never is, whatever role its owner's account holds.
+func adminPerson(r *http.Request) bool {
 	if actor, ok := actorFrom(r.Context()); ok && actor.Agent {
 		return false
 	}

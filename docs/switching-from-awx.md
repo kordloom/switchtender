@@ -27,7 +27,7 @@ just live behind a smaller, faster surface.
 | Organization | Organization. A project, template, inventory, or credential can name its owning `org_id`. Access adds a global role and optional per-object grants.|
 | Project (git) | Project.|
 | Inventory | Stored inventory, or a dynamic inventory source that refreshes into one.|
-| Smart or constructed inventory | Smart or constructed inventory, resolved at each launch. A smart inventory imports into its AWX organization and, as in AWX, carries hosts and their variables but no groups. See [inventories](inventories.md).|
+| Smart or constructed inventory | Smart or constructed inventory, resolved at each launch. A smart inventory imports into its AWX organization and, as in AWX, carries hosts and their variables but no groups. A constructed inventory needs ansible-core 2.19 or later, and one whose input holds template text, such as AWX's stock `ansible_python_interpreter` value, is left out of the import with the input named. See [inventories](inventories.md) and [migration](migration.md).|
 | Job template | Template.|
 | Survey | Template survey, the same typed questions.|
 | Schedule | Schedule, with the same recurrence rule, or a cron expression when one says the same thing.|

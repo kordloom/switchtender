@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -44,10 +45,17 @@ type InventoryLister interface {
 // maxListingStderr bounds how much of ansible-inventory's error output an error carries.
 const maxListingStderr = 2048
 
+// unparsedIsFailed makes ansible-inventory exit with an error when any source it was given is one
+// no plugin parsed, or a plugin failed on. Without it a source Ansible cannot read is a warning and
+// the listing goes on without that source's hosts, and a strict constructed expression that fails
+// exits 0 with every host unfiltered.
+const unparsedIsFailed = "ANSIBLE_INVENTORY_ANY_UNPARSED_IS_FAILED=true"
+
 // ListInventory returns the ansible-inventory --list JSON for every source read together, narrowed
-// to the hosts limit matches when one is given. A failure carries the tail of what Ansible printed,
-// because an unreadable input or a constructed expression that does not evaluate is only ever
-// explained there.
+// to the hosts limit matches when one is given. Every source must parse, so an input Ansible cannot
+// read, or a constructed expression that does not evaluate, is an error and not a listing that
+// quietly lacks it. A failure carries the head and the tail of what Ansible printed, because that
+// is the only place the cause is explained, and the line naming the host and variable comes early.
 func (a *ansibleRunner) ListInventory(ctx context.Context, sources []string, limit string) ([]byte, error) {
 	if len(sources) == 0 {
 		return nil, ErrNoInventory
@@ -69,20 +77,35 @@ func (a *ansibleRunner) ListInventory(ctx context.Context, sources []string, lim
 	}
 	defer release()
 	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Env = a.baseEnv
+	cmd.Env = append(append([]string{}, a.baseEnv...), unparsedIsFailed)
 	out, err := cmd.Output()
 	if err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) && len(exit.Stderr) > 0 {
-			tail := strings.TrimSpace(string(exit.Stderr))
-			if len(tail) > maxListingStderr {
-				tail = tail[len(tail)-maxListingStderr:]
-			}
-			return nil, fmt.Errorf("%w: %w: %s", ErrLaunch, err, tail)
+			return nil, fmt.Errorf("%w: %w: %s", ErrLaunch, err, headAndTail(string(exit.Stderr),
+				maxListingStderr))
 		}
 		return nil, fmt.Errorf("%w: %w", ErrLaunch, err)
 	}
 	return out, nil
+}
+
+// headAndTail returns s trimmed, cut to the first and last half of limit bytes with a marker
+// between them when it is longer, each cut moved back to a whole UTF-8 character.
+func headAndTail(s string, limit int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= limit {
+		return s
+	}
+	half := limit / 2
+	head, tail := s[:half], s[len(s)-half:]
+	for len(head) > 0 && !utf8.ValidString(head) {
+		head = head[:len(head)-1]
+	}
+	for len(tail) > 0 && !utf8.ValidString(tail) {
+		tail = tail[1:]
+	}
+	return head + " [...] " + tail
 }
 
 // Dump returns the raw ansible-inventory --list JSON for a source, with env layered over the base

@@ -37,6 +37,10 @@ var (
 	// ErrDisagreement is returned when Ansible reads an inventory differently from the native
 	// engine, which refuses the run rather than execute against hosts or variables nobody resolved.
 	ErrDisagreement = errors.New("the native engine and Ansible read this inventory differently")
+	// ErrConstructedInput is returned when an input of a constructed inventory is refused before
+	// Ansible reads it: the native engine cannot read it, or a name, key, or value in it could be
+	// read as template code.
+	ErrConstructedInput = errors.New("constructed inventory input refused")
 	// errAliasExpansion marks a YAML document whose aliases expand to more values than its size can
 	// justify, a decompression bomb. It is refused rather than handed to Ansible, which does not
 	// bound alias expansion and hangs on the same document.

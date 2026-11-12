@@ -80,13 +80,38 @@ A constructed inventory names its input inventories in order and the plugin opti
 A limit, such as `is_shutdown:&acct_product_dev`, is applied after the groups are built, so it may
 name a group the options construct. The options accepted are the ones AWX documents for a
 constructed inventory: `strict`, `compose`, `groups`, `keyed_groups`, `leading_separator`, and
-`use_vars_plugins`. Any other option is refused, and so is an expression that calls a lookup,
-because a lookup reads files or runs commands on the server and a constructed expression only needs
-the hosts' variables.
+`use_vars_plugins`. Any other option is refused. An expression that calls `lookup`, `query`, or `q`
+is refused too, as a typo catcher with a plain message. That check is not what keeps the server
+safe, and nothing here relies on it.
+
+A constructed inventory's options are code. Ansible evaluates them on the SwitchTender server when
+the inventory is previewed and at every launch, before any policy, hold, or approval sees the run.
+So only an admin creates, changes, or renames one, and a manage grant does not delegate it. Deleting
+one is still delegable, since it runs nothing.
+
+Its inputs are data, and data that reaches an expression could run as code too, so SwitchTender
+reads every input itself before Ansible does and refuses one that could carry template code. An
+input is refused, naming it, the host or group, and the variable, when:
+
+- any host name, group name, variable name, nested key, or string value holds `{{`, `{%`, `{#`, or
+  `#jinja2:`, including values written as `!unsafe`
+- a host name, group name, variable name, or key holds a brace or a control character, or is
+  `__ansible_unsafe` or `__ansible_vault`
+- SwitchTender cannot read it: it is a whole file encrypted with Ansible Vault, it holds a vault
+  value, or it is one of the forms only Ansible reads, listed under the native engine below
+- it holds only `{}`, which Ansible reads as one host named `{}` and which an inventory source that
+  has not synced yet holds
+
+Ansible is then given what SwitchTender read, never the stored file, with every string marked as
+not to be templated. Values a play reads from the result are plain strings as before. A value an
+expression composes into template text reaches the play as text Ansible will not run.
 
 A constructed inventory is evaluated by `ansible-inventory` with the same plugin AWX runs, so its
-expressions behave exactly as they do there. SwitchTender never evaluates the Jinja in these options
-itself. The server needs Ansible installed to resolve one, which the container image includes. A
+expressions behave as they do there. SwitchTender never evaluates the Jinja in these options itself.
+The server needs ansible-core 2.19 or later to resolve one, which the container image includes.
+Older releases template a name an expression decodes again, so on 2.16, 2.17, or 2.18 a constructed
+inventory is refused with a message naming the installed version. Every source Ansible reads for a
+composed inventory must parse: one that does not is an error, not a listing that lacks its hosts. A
 later input's variables win over an earlier one's for the same host. An input must be a static
 inventory, not another smart or constructed one, and it cannot be deleted while a constructed
 inventory reads it.
@@ -100,7 +125,7 @@ plugins read it.
 | Engine | What it resolves |
 |--------|------------------|
 | Native | A static inventory document stored here, INI, YAML, or JSON, and the host filter of a smart inventory over such documents. No Ansible is needed, so a smart inventory works on a server without it. |
-| Ansible | A constructed inventory, always. An input whose document only Ansible can read: an inventory plugin configuration, a vault-encrypted value, or one of the rare Python values listed below. A dynamic inventory source, which runs its plugin. An inventory named by a path inside a project, whose `group_vars` and `host_vars` directories, vars plugins, inventory directories, and `ansible.cfg` are Ansible's. |
+| Ansible | A constructed inventory, always, over inputs SwitchTender has read itself. For a smart inventory, an input whose document only Ansible can read: an inventory plugin configuration, a vault-encrypted value, or one of the rare Python values listed below. A dynamic inventory source, which runs its plugin. An inventory named by a path inside a project, whose `group_vars` and `host_vars` directories, vars plugins, inventory directories, and `ansible.cfg` are Ansible's. |
 
 What an inventory is decides its engine, never whether Ansible happens to be installed, so the same
 inventory resolves the same way on every server. When the engine is Ansible and Ansible is not
@@ -268,8 +293,9 @@ schedule surfaces.
 ## Preview
 
 The Inventories page previews the hosts a smart or constructed inventory resolves to before it is
-saved, and a saved one can be previewed from its row. A preview resolves exactly as a launch by the
-same person would, and lists host names and inputs without any host variables. It also names the
+saved, and a saved one can be previewed from its row. Previewing one that is not saved is for an
+admin only, since it evaluates a definition nobody stored. A saved one previews for anyone who may
+launch against it. A preview resolves exactly as a launch by the same person would, and lists host names and inputs without any host variables. It also names the
 engine that resolved it, and the ansible-core version when Ansible did. A definition that cannot
 resolve, or content that could not be read, is answered `422` with the reason, and a failure of the
 server's stores is answered `500` with `could not resolve inventory`.

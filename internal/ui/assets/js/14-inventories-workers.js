@@ -93,7 +93,12 @@ function composedInventoryRow(i) {
 	tr.appendChild(sizeCell);
 	tr.appendChild(tdTime(i.created_at));
 	const actions = deleteCell("/inventories/" + i.id, "inventory " + i.name, tr, "No inventories yet.");
-	actions.insertBefore(editButton(() => openInventoryEdit(i), "Click to edit this inventory's definition"), actions.firstChild);
+	// Only an admin writes a constructed definition, since Ansible evaluates it on the server, so the
+	// server refuses everyone else's save and nobody else is offered the edit. A smart one keeps it.
+	const editable = i.kind !== "constructed" || roleAtLeast("admin");
+	if (editable) {
+		actions.insertBefore(editButton(() => openInventoryEdit(i), "Click to edit this inventory's definition"), actions.firstChild);
+	}
 	tr.appendChild(actions);
 	const fields = [{ label: "Kind", value: i.kind }];
 	if (i.kind === "smart") {
@@ -104,11 +109,13 @@ function composedInventoryRow(i) {
 		if (i.source_vars) fields.push({ label: "Plugin options", value: i.source_vars, block: true });
 	}
 	fields.push({ label: "Created", value: fmtTime(i.created_at) }, { label: "ID", value: i.id, copy: true });
-	inspectable(tr, i.name, fields, [
-		{ label: "Edit", primary: true, mutates: true, tip: "Click to edit this inventory", onClick: () => { closeDrill(); openInventoryEdit(i); } },
-		{ label: "Preview hosts", tip: "Resolve it now, as a launch by you would",
-			onClick: () => openInventoryPreview(i) },
-	]);
+	const drillActions = [];
+	if (editable) {
+		drillActions.push({ label: "Edit", primary: true, mutates: true, tip: "Click to edit this inventory", onClick: () => { closeDrill(); openInventoryEdit(i); } });
+	}
+	drillActions.push({ label: "Preview hosts", tip: "Resolve it now, as a launch by you would",
+		onClick: () => openInventoryPreview(i) });
+	inspectable(tr, i.name, fields, drillActions);
 	return tr;
 }
 

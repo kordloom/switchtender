@@ -57,6 +57,9 @@ func (p *Plan) addComposed(inv awxInventory, name string, now time.Time, invento
 		p.refused++
 		return
 	}
+	if kind == inventory.KindConstructed && p.refuseConstructedInputs(obj) {
+		return
+	}
 	if inventoryIDs.set(inv.Organization.Name, inv.Name, obj.ID) {
 		p.warn("inventory %q appears more than once; the later one is what templates naming it "+
 			"will use", name)
@@ -87,4 +90,38 @@ func sourceVarsText(raw json.RawMessage) string {
 		return ""
 	}
 	return string(out)
+}
+
+// refuseConstructedInputs checks each input of a constructed inventory the way composing it does,
+// and reports true when one is refused, warning with the input and the reason. Composing refuses
+// such an input at every preview and launch, so an inventory over it would refuse every launch.
+// AWX's stock ansible_python_interpreter value is template text and is refused like any other: move
+// it to host_vars or group_vars beside the playbook, or set a literal path, and import again.
+func (p *Plan) refuseConstructedInputs(obj *inventory.Inventory) bool {
+	for _, id := range obj.InputIDs {
+		in := p.inventoryByID(id)
+		if in == nil {
+			continue
+		}
+		if _, err := inventory.ConstructedInput(in.Content); err != nil {
+			reason := strings.TrimPrefix(err.Error(), inventory.ErrConstructedInput.Error()+": ")
+			p.warn("constructed inventory %q was not imported: its input %q is refused, since %s. "+
+				"Move such a value to host_vars or group_vars beside the playbook, or set it "+
+				"literally, then import again or create the constructed inventory by hand", obj.Name,
+				in.Name, reason)
+			p.refused++
+			return true
+		}
+	}
+	return false
+}
+
+// inventoryByID returns the planned inventory with id, or nil.
+func (p *Plan) inventoryByID(id string) *inventory.Inventory {
+	for _, inv := range p.Inventories {
+		if inv.ID == id {
+			return inv
+		}
+	}
+	return nil
 }

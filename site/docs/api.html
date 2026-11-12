@@ -798,7 +798,7 @@ either licensed or absent.</li>
 <tr>
 <td>PUT</td>
 <td><code>/v1/inventories/{id}</code></td>
-<td>Update a stored inventory.</td>
+<td>Update a stored inventory. Creating, changing, or renaming a constructed inventory is for an admin only, whatever grant the caller holds, and anyone else is answered <code>403</code>.</td>
 </tr>
 <tr>
 <td>DELETE</td>
@@ -823,12 +823,12 @@ either licensed or absent.</li>
 <tr>
 <td>POST</td>
 <td><code>/v1/inventories/preview</code></td>
-<td>Resolve an unsaved smart or constructed inventory and list the hosts it reaches for the caller, with the <code>engine</code> that resolved it and the <code>ansible_core</code> version when Ansible did. It answers <code>422</code> with the reason for a definition that cannot resolve or content that could not be read, and <code>500</code> for a failure of the server's stores.</td>
+<td>Resolve an unsaved smart or constructed inventory and list the hosts it reaches for the caller, with the <code>engine</code> that resolved it and the <code>ansible_core</code> version when Ansible did. Admin role, and an agent's token is refused whatever its owner's role, since a constructed definition is evaluated on the server. It answers <code>422</code> with the reason for a definition that cannot resolve, an input refused for template text, or content that could not be read, and <code>500</code> for a failure of the server's stores.</td>
 </tr>
 <tr>
 <td>POST</td>
 <td><code>/v1/inventories/{id}/preview</code></td>
-<td>Resolve a stored smart or constructed inventory and list the hosts a launch by the caller would reach, with the same <code>engine</code> and <code>ansible_core</code>.</td>
+<td>Resolve a stored smart or constructed inventory and list the hosts a launch by the caller would reach, with the same <code>engine</code> and <code>ansible_core</code>. Operator role. It answers <code>422</code> as the unsaved preview does.</td>
 </tr>
 <tr>
 <td>POST</td>

@@ -36,6 +36,10 @@ pinned to a digest, and the outcome records the digest that was pulled. A static
 that snapshot, so an inventory edited after an approval cannot widen or redirect the run. A smart or
 constructed inventory is snapshotted the same way, the result it resolved to and every input it drew
 from, so an input edited after an approval, a host variable included, does not reach the run. A
+constructed inventory is the one place an expression runs on the server before the hold: Ansible
+evaluates its options at preview and at launch. Only an admin writes those options, and the inputs
+they read are checked by SwitchTender first, refused when they could carry template code, and handed
+to Ansible with every string marked as not to be templated. A
 Terraform or OpenTofu apply that a rule gates or holds, and a drift reconcile, carries out the saved
 plan file its approval bound, and the tool refuses that plan if the infrastructure changed since. Two inputs resolve at execution time.
 Dynamic inventory is inherently resolved at runtime. Approval binds the inventory source definition,

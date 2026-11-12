@@ -906,10 +906,20 @@ func requiredRole(r *http.Request) user.Role {
 		return user.RoleOperator
 	case strings.HasPrefix(p, "/templates/") && strings.HasSuffix(p, "/launch"):
 		return user.RoleOperator
+	case p == "/inventories/preview":
+		// The unsaved preview composes a definition the caller sends rather than one stored, and a
+		// constructed definition is expressions Ansible evaluates on this server. Only an admin
+		// writes those, so only an admin may have one evaluated.
+		return user.RoleAdmin
 	case strings.HasPrefix(p, "/inventories/") && strings.HasSuffix(p, "/preview"):
-		// Previewing a composed inventory shows the hosts a launch by the caller would reach, drawn
-		// only from inventories the caller may use, so it takes the role that launches. It is a
-		// POST because resolving runs ansible-inventory and may read an input's content source.
+		// Previewing a saved composed inventory shows the hosts a launch by the caller would reach,
+		// drawn only from inventories the caller may use, so it takes the role that launches. It is
+		// a POST because resolving runs ansible-inventory and may read an input's content source.
+		// The operator role covers a saved inventory's own path only.
+		id := strings.TrimSuffix(strings.TrimPrefix(p, "/inventories/"), "/preview")
+		if id == "" || strings.Contains(id, "/") {
+			return user.RoleAdmin
+		}
 		return user.RoleOperator
 	case strings.HasPrefix(p, "/notifications/") && strings.Contains(p, "/attachments"):
 		// Attaching a notification target is decided per object by the handler: use of the target

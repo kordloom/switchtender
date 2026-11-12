@@ -32,7 +32,8 @@ var ErrLimitUnsupported = errors.New("listing runner does not apply limits")
 // reports. Run records the inventory content the executor was handed, so a test can see exactly
 // which hosts a run reached.
 type ListingRunner struct {
-	// Version is the ansible-core version it reports, 2.18.1 when empty.
+	// Version is the ansible-core version it reports, 2.21.4 when empty, a release at or above the
+	// floor a constructed inventory needs.
 	Version string
 	// Missing makes it report Ansible as not installed.
 	Missing bool
@@ -98,7 +99,7 @@ func (l *ListingRunner) AnsibleCoreVersion(context.Context) (string, error) {
 		return "", roundhouse.ErrAnsibleMissing
 	}
 	if l.Version == "" {
-		return "2.18.1", nil
+		return "2.21.4", nil
 	}
 	return l.Version, nil
 }

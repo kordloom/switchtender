@@ -58,13 +58,13 @@ func TestComposedEngineFollowsTheDefinition(t *testing.T) {
 		WantHosts: []string{"web1", "web2"},
 	}, { // Test 2: A plugin configuration input is read by Ansible.
 		Inventory: smart, Plugin: true, WantEngine: inventory.EngineAnsible,
-		WantAnsibleCore: "2.18.1", WantHosts: []string{"ec2-1", "web1", "web2"},
+		WantAnsibleCore: "2.21.4", WantHosts: []string{"ec2-1", "web1", "web2"},
 	}, { // Test 3: A plugin configuration input without Ansible says why, with the install line.
 		Inventory: smart, Plugin: true, Missing: true, Want: inventory.ErrNeedsAnsible,
 		WantMessage: []string{`input inventory "cloud"`, "plugin configuration",
 			inventory.AnsibleInstallHint},
 	}, { // Test 4: A constructed inventory is Ansible's.
-		Inventory: constructed, WantEngine: inventory.EngineAnsible, WantAnsibleCore: "2.18.1",
+		Inventory: constructed, WantEngine: inventory.EngineAnsible, WantAnsibleCore: "2.21.4",
 		WantHosts: []string{"web1", "web2"},
 	}, { // Test 5: A constructed inventory without Ansible says why, with the install line.
 		Inventory: constructed, Missing: true, Want: inventory.ErrNeedsAnsible,
@@ -72,7 +72,7 @@ func TestComposedEngineFollowsTheDefinition(t *testing.T) {
 			inventory.AnsibleInstallHint},
 	}, { // Test 6: Ansible from the managed runtime is recorded as the managed runtime's.
 		Inventory: constructed, Commands: managed, WantEngine: inventory.EngineAnsible,
-		WantAnsibleCore: "2.18.1", WantAnsibleSource: ansibleruntime.SourceManaged,
+		WantAnsibleCore: "2.21.4", WantAnsibleSource: ansibleruntime.SourceManaged,
 		WantHosts: []string{"web1", "web2"},
 	}, { // Test 7: The install line names the runtime directory this server looks in.
 		Inventory: constructed, Missing: true, Want: inventory.ErrNeedsAnsible,
@@ -209,7 +209,7 @@ func TestCrossCheckBeforeAnsibleRuns(t *testing.T) {
 		WantStatus: run.StatusSucceeded, WantChecked: true, WantReads: 1,
 	}, { // Test 1: An input Ansible types differently refuses the run, naming the variable.
 		Rewrite: asString, WantStatus: run.StatusFailed, WantChecked: true, WantReads: 1,
-		WantInError: []string{"variable port", "8080 (int)", `"8080" (string)`, "2.18.1"},
+		WantInError: []string{"variable port", "8080 (int)", `"8080" (string)`, "2.21.4"},
 	}, { // Test 2: A rendered inventory Ansible reads with other hosts refuses the run.
 		Rewrite: dropHost, WantStatus: run.StatusFailed, WantChecked: true, WantReads: 1,
 		WantInError: []string{"handed to the play", "host web2", "host web9"},
@@ -262,7 +262,7 @@ func TestCrossCheckBeforeAnsibleRuns(t *testing.T) {
 			}
 			if c := done.InventoryCheck; c != nil && test.WantStatus == run.StatusSucceeded {
 				res := done.InventoryResolution
-				if c.AnsibleCore != "2.18.1" || c.AnsibleSource != ansibleruntime.SourceManaged ||
+				if c.AnsibleCore != "2.21.4" || c.AnsibleSource != ansibleruntime.SourceManaged ||
 					c.InputDigest != res.InputDigest || c.ResolvedDigest != res.ResolvedDigest {
 					t.Errorf("check %+v does not match the resolution %+v", c, res)
 				}

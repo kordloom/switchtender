@@ -98,7 +98,7 @@ just live behind a smaller, faster surface.</p>
 </tr>
 <tr>
 <td>Smart or constructed inventory</td>
-<td>Smart or constructed inventory, resolved at each launch. A smart inventory imports into its AWX organization and, as in AWX, carries hosts and their variables but no groups. See <a href="/docs/inventories">inventories</a>.</td>
+<td>Smart or constructed inventory, resolved at each launch. A smart inventory imports into its AWX organization and, as in AWX, carries hosts and their variables but no groups. A constructed inventory needs ansible-core 2.19 or later, and one whose input holds template text, such as AWX's stock <code>ansible_python_interpreter</code> value, is left out of the import with the input named. See <a href="/docs/inventories">inventories</a> and <a href="/docs/migration">migration</a>.</td>
 </tr>
 <tr>
 <td>Job template</td>

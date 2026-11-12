@@ -180,6 +180,26 @@ func TestConstructedConfig(t *testing.T) {
 		In: "- a\n- b\n", Want: ErrSourceVars,
 	}, { // Test 9: strict must be a boolean.
 		In: "strict: sometimes\n", Want: ErrSourceVars,
+	}, { // Test 10: A call whose name only ends in query is not a lookup.
+		In: "compose:\n  x: myquery(1)\n", WantPlugin: true,
+	}, { // Test 11: A call whose name only ends in q is not a lookup.
+		In: "compose:\n  x: faq(1)\n", WantPlugin: true,
+	}, { // Test 12: Nor is seq.
+		In: "compose:\n  x: seq(3)\n", WantPlugin: true,
+	}, { // Test 13: A call whose name only ends in lookup is not a lookup.
+		In: "compose:\n  x: relookup('a')\n", WantPlugin: true,
+	}, { // Test 14: Spacing does not join a word to a call it only ends like.
+		In: "groups:\n  g: noquery (1)\n", WantPlugin: true,
+	}, { // Test 15: A variable whose name starts with lookup is not a call.
+		In: "compose:\n  x: lookup_table['a']\n", WantPlugin: true,
+	}, { // Test 16: A lookup in capitals is refused.
+		In: "compose:\n  x: LOOKUP('pipe', 'id')\n", Want: ErrSourceVars,
+	}, { // Test 17: The short q form is refused.
+		In: "compose:\n  x: q('file', '/etc/passwd')\n", Want: ErrSourceVars,
+	}, { // Test 18: A lookup named inside parentheses is refused.
+		In: "compose:\n  x: (lookup)('pipe', 'id')\n", Want: ErrSourceVars,
+	}, { // Test 19: A lookup in a keyed group is refused.
+		In: "keyed_groups:\n  - key: lookup('env', 'HOME')\n", Want: ErrSourceVars,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

@@ -36,7 +36,9 @@ The install tries `python3` on PATH, then `python3.N` for each version in the ra
 `--python` names an interpreter instead. When none fits, the install stops before it builds an
 environment and says which range the release needs and which interpreters it found. The default
 release needs Python 3.12 or newer, so on an older Python pick an older release: `--version 2.19`
-on Python 3.11, and `--version 2.17` on Python 3.10. The `python3` macOS ships is 3.9, which no
+on Python 3.11, and `--version 2.17` on Python 3.10. A constructed inventory needs 2.19 or later,
+so a server on 2.16, 2.17, or 2.18 refuses one and runs everything else
+([Inventories](inventories.md#constructed-inventories)). The `python3` macOS ships is 3.9, which no
 pinned release supports, so install a newer Python there first. On Debian and Ubuntu the `venv`
 module is a separate package, such as `python3.12-venv`, and the install names the package when it
 is missing.
