@@ -86,13 +86,19 @@ for anyone else's plan, the gate downloads them with this server's `tofu get` in
 the configuration, only where the plan runs and only for a plan that runs on this server's host
 rather than in a container image, and reads them where the get installed them. The get is handed
 none of the run's credentials and none of the server's own environment but `PATH`, the proxy
-variables, `SSL_CERT_FILE`, and `SSL_CERT_DIR`, with an empty home directory of its own, so a
-module that needs a credential or the server's own environment to download, such as one in a
-private registry, is not read and the plan stays unclassified and is held. A `.terraform` the gate
-did not install, committed or left in a working directory, is never read, and no setting makes it
-trusted: vendor a module and call it by a local path to have it read from the repository. The get
-installs no provider and runs nothing the configuration names. A module it could not download is
-left unread. The run then executes exactly
+variables, `SSL_CERT_FILE`, and `SSL_CERT_DIR`, with an empty home directory of its own. Git runs
+with no system configuration, over HTTPS only, and with no Kerberos or Windows sign-in, Mercurial
+with no configuration and no SSH, and the AWS and Google libraries with the instance metadata
+service turned off, so the get authenticates as nothing. It reaches what an anonymous client on
+this server reaches, a directory on this server's disk that a module source names included, and
+nothing a credential opens. So a module that needs a credential or the server's own environment to
+download, such as one in a private registry, is not read and the plan stays unclassified and is
+held. On Windows, where the tool reads its own settings from a folder no environment setting
+moves, nothing is downloaded and such a plan is held too. A `.terraform` the gate did not install,
+committed or left in a working directory, is never read, and no setting makes it trusted: vendor a
+module and call it by a local path to have it read from the repository. The get installs no
+provider and runs nothing the configuration names. A module it could not download is left unread.
+The run then executes exactly
 the modules the gate read: their digest is in the scan evidence and the approval, the gate's copy is
 put in place, and `tofu init` runs with `-get=false`, so it resolves no version again. A run that
 cannot get the same modules is refused. Files ending in `.tofu` are read as well as `.tf`, and a

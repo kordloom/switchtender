@@ -131,13 +131,18 @@ OpenTofu plan, the gate downloads the registry and remote modules its configurat
 configuration's author picks every source. So the download runs this server's own binary with
 nothing of the run's: no credential, no credential file, no variable, and no container image. Of
 the server's environment it keeps only <code>PATH</code>, the proxy variables, <code>SSL_CERT_FILE</code>, and
-<code>SSL_CERT_DIR</code>, and its home is an empty directory of its own, so it reaches the module sources
-anyone on the network reaches and nothing a credential or the server's own configuration opens. A
-pull request's pre-check downloads the same way, with none of the template's credentials, so a
-branch nobody merged learns nothing from them. A plan that runs in a container image, its own, its
-project's, or the server's default, is not downloaded for, since the gate starts no image before a
-person approves, and it stays unclassified. So does a plan whose modules need a credential to
-download, unless its modules are vendored into the configuration.</p>
+<code>SSL_CERT_DIR</code>, and its home is an empty directory of its own. Git runs with no system
+configuration, over HTTPS only, and with no Kerberos or Windows sign-in, Mercurial with no
+configuration and no SSH, and the AWS and Google libraries with the instance metadata service
+turned off, so it authenticates as nothing. It reaches what an anonymous client on this server
+reaches, a directory on this server's disk that a module source names included, and nothing a
+credential or the server's own configuration opens. On Windows, where the tool reads its own
+settings from a folder no environment setting moves, nothing is downloaded, and the plan stays
+unclassified. A pull request's pre-check downloads the same way, with none of the template's
+credentials, so a branch nobody merged learns nothing from them. A plan that runs in a container
+image, its own, its project's, or the server's default, is not downloaded for, since the gate
+starts no image before a person approves, and it stays unclassified. So does a plan whose modules
+need a credential to download, unless its modules are vendored into the configuration.</p>
 <h3 id="an-operator-who-wants-to-rewrite-history">An operator who wants to rewrite history</h3>
 <p>Editing an entry breaks its content digest. Replacing an entry breaks the hash link of everything
 after it. Truncating the chain moves the head backward, which is exactly what a witness on another

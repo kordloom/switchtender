@@ -411,6 +411,115 @@ func TestTheGateDownloadsOnlyWhereThePlanRuns(t *testing.T) {
 	}
 }
 
+// TestAWindowsServerDownloadsNothing covers the gate on Windows, where Terraform and OpenTofu read
+// their own settings, the server's registry credentials among them, from a folder no environment
+// moves. Nothing is downloaded there for a person's plan, at the gate or at a pull request's
+// pre-check: a counting get is never reached, and the module stays unread with a fixed reason that
+// names no folder. The gate's and the pre-check's own ways of asking are used, with only the
+// operating system set. Linux and macOS are the control, where the get is reached.
+//
+//nolint:funlen // Test function.
+func TestAWindowsServerDownloadsNothing(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": registryCall("clean")})
+	installed := stubModule{Key: "net", Source: registryHost + "/acme/clean/null", Version: "1.0.0",
+		Files: map[string]string{"main.tf": "output \"o\" {\n  value = 1\n}\n"}}
+	tests := []struct {
+		// Goos is the operating system the server runs.
+		Goos string
+		// Precheck asks the way a pull request review's pre-check does, instead of the gate.
+		Precheck bool
+		// WantFetches is how many times the get is reached.
+		WantFetches int
+		// WantClass is the scan's classification.
+		WantClass string
+		// WantReason is why the module stays unread, empty when it is downloaded.
+		WantReason string
+	}{{ // Test 0: Windows, at the gate.
+		Goos: "windows", WantClass: run.DryRunIncomplete, WantReason: windowsNotDownloaded,
+	}, { // Test 1: Windows, at a pull request's pre-check.
+		Goos: "windows", Precheck: true, WantClass: run.DryRunIncomplete,
+		WantReason: windowsNotDownloaded,
+	}, { // Test 2: Linux downloads at the gate, the control.
+		Goos: "linux", WantFetches: 1, WantClass: run.DryRunChangeFree,
+	}, { // Test 3: macOS downloads at a pull request's pre-check, the control.
+		Goos: "darwin", Precheck: true, WantFetches: 1, WantClass: run.DryRunChangeFree,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			get := &stubGet{modules: []stubModule{installed}}
+			d := New(run.NewMemStore(), fetchingRunner{Runner: dispatchtest.OKRunner(), fetch: get},
+				zap.NewNop(), WithRunFilesRoot(t.TempDir()), WithNoJanitor())
+			t.Cleanup(d.Close)
+			on := func(r *run.Run, checkouts CheckoutReader) run.DryRunScan {
+				return d.scanPlanOn(test.Goos, r, checkouts)
+			}
+			var scans []run.DryRunScan
+			if test.Precheck {
+				probe := &run.Run{ID: run.NewID(), Tool: run.ToolTerraform, Command: dir,
+					DryRun: true, Labels: map[string]string{run.LabelPullRequest: "7"}}
+				if scan, ok := dryRunScan(probe, nil, "", d.checkoutReader(), on); ok {
+					scans = []run.DryRunScan{scan}
+				}
+			} else {
+				scans = gradedFrom(&run.Run{ID: "run_host", Tool: run.ToolTerraform, Command: dir,
+					DryRun: true}, d.checkoutReader(), on).DryRunScans
+			}
+			if n := len(get.handed()); n != test.WantFetches {
+				t.Errorf("the get was reached %d times, want %d", n, test.WantFetches)
+			}
+			if len(scans) != 1 {
+				t.Fatalf("scans = %+v, want one scan", scans)
+			}
+			unread := strings.Join(scans[0].Unread, "\n")
+			if scans[0].Classification != test.WantClass || !strings.Contains(unread,
+				test.WantReason) {
+				t.Errorf("scan %q with unread %q, want %q saying %q", scans[0].Classification,
+					unread, test.WantClass, test.WantReason)
+			}
+			if test.WantReason != "" && scans[0].Fetch != nil {
+				t.Errorf("fetch = %+v, want none recorded where nothing was downloaded",
+					scans[0].Fetch)
+			}
+		})
+	}
+}
+
+// TestHostBarsDownloadOnlyOnWindows covers the decision itself: Windows bars the download with a
+// fixed reason naming no folder, path, image, or queue, and every other operating system does not.
+func TestHostBarsDownloadOnlyOnWindows(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Goos is the operating system the server runs.
+		Goos string
+		// WantResult is why nothing is downloaded, empty when the download goes ahead.
+		WantResult string
+	}{{ // Test 0: Windows.
+		Goos: "windows", WantResult: windowsNotDownloaded,
+	}, { // Test 1: Linux.
+		Goos: "linux",
+	}, { // Test 2: macOS.
+		Goos: "darwin",
+	}, { // Test 3: FreeBSD.
+		Goos: "freebsd",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			if got := hostBarsDownload(test.Goos); got != test.WantResult {
+				t.Errorf("hostBarsDownload(%q) = %q, want %q", test.Goos, got, test.WantResult)
+			}
+		})
+	}
+	if strings.ContainsAny(windowsNotDownloaded, `/\%:"`) || strings.Contains(
+		strings.ToLower(windowsNotDownloaded), "appdata") {
+		t.Errorf("the reason %q names a place, which a refusal comment would repeat",
+			windowsNotDownloaded)
+	}
+}
+
 // stubModule is one module a stubGet installs.
 type stubModule struct {
 	// Key is the module's key in the manifest, its call's name.

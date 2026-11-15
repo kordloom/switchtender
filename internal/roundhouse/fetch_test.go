@@ -10,7 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -265,17 +267,28 @@ func standDown(t *testing.T, format string, args ...any) {
 	t.Skipf(format, args...)
 }
 
+// gateRows is every entry the gate sets itself in a minimal get's environment whose private
+// directory is private, each with the gate's value.
+func gateRows(private string) []string {
+	return []string{"GIT_ALLOW_PROTOCOL=https", "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0",
+		"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.emptyAuth", "GIT_CONFIG_VALUE_0=false",
+		"KRB5CCNAME=FILE:" + filepath.Join(private, "none"), "AWS_EC2_METADATA_DISABLED=true",
+		"GCE_METADATA_HOST=metadata.invalid", "HGRCPATH=" + filepath.Join(private, "hgrc")}
+}
+
 // TestAGetAskedForAMinimalEnvironmentStartsFromItAlone holds the approval gate's module download to
 // what it may see. A get asked for a minimal environment keeps only the search path, the proxy
 // settings, and the trusted certificates' location of the runner's base environment, the server's
 // own, and gets a HOME of its own inside the private directory, so a cloud credential, a registry
 // token, an SSH agent, or a CLI configuration the server's environment carries never reaches it.
-// Those variables come from the server alone: a spec naming its own is not heard. Without the
-// request a get inherits the whole base environment, as the run's own get does. A minimal
-// environment with nowhere to put its home is refused, and so is one asked for inside an image. A
-// stub stands in for the tool and prints what it was handed.
+// The gate adds its own rows, which keep git, Mercurial, and the cloud libraries from signing in
+// by themselves. Those variables and rows come from the server and the gate alone: a spec naming
+// its own, or a base environment setting a gate row to something else, is not heard, and each gate
+// row appears once. Without the request a get inherits the whole base environment and no gate row, as
+// the run's own get does. A minimal environment with nowhere to put its home is refused, and so is
+// one asked for inside an image. A stub stands in for the tool and prints what it was handed.
 //
-//nolint:funlen // Test function.
+//nolint:funlen,gocognit // Test function.
 func TestAGetAskedForAMinimalEnvironmentStartsFromItAlone(t *testing.T) {
 	t.Parallel()
 	stub := filepath.Join(t.TempDir(), "tf")
@@ -285,9 +298,17 @@ func TestAGetAskedForAMinimalEnvironmentStartsFromItAlone(t *testing.T) {
 		"SSL_CERT_FILE=/etc/ssl/server.pem", "SSL_CERT_DIR=/etc/ssl/certs"}
 	left := []string{"HOME=/home/server", "AWS_PROFILE=prod",
 		"GOOGLE_APPLICATION_CREDENTIALS=/etc/gcp.json", "TF_TOKEN_app_terraform_io=token-2468",
-		"TF_CLI_CONFIG_FILE=/etc/cli.tfrc", "SSH_AUTH_SOCK=/tmp/agent.sock"}
+		"TF_CLI_CONFIG_FILE=/etc/cli.tfrc", "SSH_AUTH_SOCK=/tmp/agent.sock",
+		"GIT_SSH_COMMAND=ssh -i /etc/deploy_key", "GIT_ALLOW_PROTOCOL=ssh:https",
+		"GIT_CONFIG_NOSYSTEM=0", "AWS_EC2_METADATA_DISABLED=false",
+		"GCE_METADATA_HOST=169.254.169.254", "HGRCPATH=/etc/mercurial/hgrc"}
 	base := append(slices.Clone(kept), left...)
 	added := []string{"TF_DATA_DIR=.terraform", "CHECKPOINT_DISABLE=1"}
+	theirs := []string{"GIT_ALLOW_PROTOCOL=ssh:https", "GIT_CONFIG_NOSYSTEM=0",
+		"GIT_TERMINAL_PROMPT=1", "GIT_CONFIG_COUNT=2", "GIT_CONFIG_KEY_0=credential.helper",
+		"GIT_CONFIG_VALUE_0=store", "KRB5CCNAME=FILE:/tmp/krb5cc_server",
+		"AWS_EC2_METADATA_DISABLED=false", "GCE_METADATA_HOST=169.254.169.254",
+		"HGRCPATH=/etc/mercurial/hgrc"}
 	tests := []struct {
 		// Minimal asks for the minimal environment.
 		Minimal bool
@@ -297,20 +318,26 @@ func TestAGetAskedForAMinimalEnvironmentStartsFromItAlone(t *testing.T) {
 		Env []string
 		// WantHome is whether the get's HOME is the one inside the private directory.
 		WantHome bool
-		// WantEnv is every entry the get is handed, HOME aside when WantHome is set.
+		// WantGateRows is whether the gate's own rows are handed to the get, each once.
+		WantGateRows bool
+		// WantEnv is every entry the get is handed, HOME and the gate's rows aside.
 		WantEnv []string
 		// Want is the error, nil for none.
 		Want error
 	}{{ // Test 0: The minimal environment keeps the path, proxies, and certificates, and nothing else.
-		Minimal: true, WantHome: true, WantEnv: append(slices.Clone(kept), added...),
-	}, { // Test 1: Without the request the whole base environment is inherited.
+		Minimal: true, WantHome: true, WantGateRows: true,
+		WantEnv: append(slices.Clone(kept), added...),
+	}, { // Test 1: Without the request the whole base environment is inherited, and no gate row.
 		WantEnv: append(slices.Clone(base), added...),
 	}, { // Test 2: A minimal environment with nowhere to put its home is refused.
 		Minimal: true, NoRunDir: true, Want: ErrLaunch,
 	}, { // Test 3: A spec cannot name the kept variables or HOME for a minimal environment.
-		Minimal: true, WantHome: true,
+		Minimal: true, WantHome: true, WantGateRows: true,
 		Env: []string{"SSL_CERT_FILE=/tmp/theirs.pem", "HTTPS_PROXY=http://theirs.example.test",
 			"HOME=/tmp/theirs"},
+		WantEnv: append(slices.Clone(kept), added...),
+	}, { // Test 4: A spec cannot set a gate row to anything else.
+		Minimal: true, WantHome: true, WantGateRows: true, Env: theirs,
 		WantEnv: append(slices.Clone(kept), added...),
 	}}
 	for testNum, test := range tests {
@@ -323,9 +350,9 @@ func TestAGetAskedForAMinimalEnvironmentStartsFromItAlone(t *testing.T) {
 			if test.NoRunDir {
 				spec.RunDir = ""
 			}
+			runner := &terraformRunner{binary: stub, baseEnv: base}
 			var out bytes.Buffer
-			_, err := (&terraformRunner{binary: stub, baseEnv: base}).fetchModules(t.Context(), spec,
-				&out)
+			_, err := runner.fetchModules(t.Context(), spec, &out)
 			if !errors.Is(err, test.Want) {
 				t.Fatalf("fetchModules() error = %v, want %v", err, test.Want)
 			}
@@ -346,13 +373,47 @@ func TestAGetAskedForAMinimalEnvironmentStartsFromItAlone(t *testing.T) {
 				}
 			}
 			slices.Sort(got)
-			want := slices.Sorted(slices.Values(test.WantEnv))
+			wantEnv := slices.Clone(test.WantEnv)
+			if test.WantGateRows {
+				wantEnv = append(wantEnv, gateRows(private)...)
+			}
+			want := slices.Sorted(slices.Values(wantEnv))
 			if diff := cmp.Diff(want, got); diff != "" {
 				t.Errorf("the get's environment mismatch (-want +got):\n%s", diff)
 			}
 			if test.WantHome && home != filepath.Join(private, "home") {
 				t.Errorf("HOME = %q, want the empty directory inside the private directory %q",
 					home, filepath.Join(private, "home"))
+			}
+			if !test.WantGateRows {
+				return
+			}
+			// The process sees one value per name whatever it is handed, so the list itself is
+			// checked for a gate row given twice.
+			env, err := runner.getEnv(spec)
+			if err != nil {
+				t.Fatalf("getEnv() error = %v", err)
+			}
+			for _, row := range gateRows(private) {
+				name, _, _ := strings.Cut(row, "=")
+				var given []string
+				for _, kv := range env {
+					if strings.HasPrefix(kv, name+"=") {
+						given = append(given, kv)
+					}
+				}
+				if diff := cmp.Diff([]string{row}, given); diff != "" {
+					t.Errorf("%s mismatch (-want +got):\n%s", name, diff)
+				}
+			}
+			hgrc := filepath.Join(private, "hgrc")
+			content, err := os.ReadFile(hgrc)
+			if err != nil || string(content) != "[ui]\nssh = false\n" {
+				t.Errorf("%s = %q, %v, want Mercurial told to run false in place of ssh", hgrc,
+					content, err)
+			}
+			if info, err := os.Stat(hgrc); err != nil || info.Mode().Perm() != 0o600 {
+				t.Errorf("%s mode = %v, %v, want 0600", hgrc, info, err)
 			}
 		})
 	}
@@ -367,5 +428,208 @@ func TestAGetAskedForAMinimalEnvironmentStartsFromItAlone(t *testing.T) {
 	if !errors.Is(err, ErrLaunch) {
 		t.Errorf("FetchModules() in an image with a minimal environment = %v, want %v", err,
 			ErrLaunch)
+	}
+}
+
+// gateGetEnv returns the environment the gate's get starts with in a new private directory, on a
+// server whose search path finds a stand-in ssh first, with the entry named without left out. The
+// stand-in writes marker and fails, so a test sees whether anything started ssh.
+func gateGetEnv(t *testing.T, without string) (env []string, private, marker string) {
+	t.Helper()
+	bin := t.TempDir()
+	marker = filepath.Join(bin, "ssh-started")
+	writeStub(t, filepath.Join(bin, "ssh"), "#!/bin/sh\n[ \"$1\" = stub-warmup ] && exit 0\n"+
+		"touch '"+marker+"'\nexit 255\n")
+	private = t.TempDir()
+	runner := &terraformRunner{baseEnv: []string{"PATH=" + bin + string(os.PathListSeparator) +
+		os.Getenv("PATH")}}
+	full, err := runner.getEnv(Spec{MinimalEnv: true, RunDir: private})
+	if err != nil {
+		t.Fatalf("getEnv() error = %v", err)
+	}
+	for _, kv := range full {
+		if name, _, _ := strings.Cut(kv, "="); name != without {
+			env = append(env, kv)
+		}
+	}
+	return env, private, marker
+}
+
+// gitAtLeast reports whether the git on PATH is at least version major.minor.
+func gitAtLeast(major, minor int) bool {
+	out, err := exec.Command("git", "--version").Output()
+	if err != nil {
+		return false
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) < 3 {
+		return false
+	}
+	parts := strings.Split(fields[2], ".")
+	if len(parts) < 2 {
+		return false
+	}
+	gotMajor, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return false
+	}
+	gotMinor, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return false
+	}
+	return gotMajor > major || gotMajor == major && gotMinor >= minor
+}
+
+// TestTheGatesGetSignsInAsNothing holds the real git, started from the environment the gate's get
+// starts with, to what the gate's rows promise, with no network. A credential helper in a system
+// configuration is not read, and the host's own configuration names none at any level. Git tries
+// no sign-in with an empty user name, which is how it reaches Kerberos or Windows sign-in. An ssh
+// source is refused as a transport before ssh starts, and a local repository is refused too. Each
+// row has a control that leaves the gate's entry out and sees what it stops.
+//
+//nolint:funlen // Test function.
+func TestTheGatesGetSignsInAsNothing(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("the gate downloads nothing on Windows, so its get never starts git there")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		standDown(t, "git is not on PATH, so the gate's rows for git cannot be checked")
+	}
+	if !gitAtLeast(2, 32) {
+		standDown(t, "git is older than 2.32, the first to read GIT_CONFIG_SYSTEM and "+
+			"GIT_CONFIG_COUNT, so the gate's rows for git cannot be checked")
+	}
+	repo := fetchModuleRepo(t)
+	system := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(system, []byte("[credential]\n\thelper = leak\n"), 0o600); err != nil {
+		t.Fatalf("write system configuration: %v", err)
+	}
+	clones := t.TempDir()
+	helper := []string{"config", "--get-all", "credential.helper"}
+	overSSH := []string{"ls-remote", "ssh://git@example.invalid/x"}
+	cloneTo := func(name string) []string {
+		return []string{"clone", "-q", "--bare", "file://" + filepath.ToSlash(repo),
+			filepath.Join(clones, name)}
+	}
+	tests := []struct {
+		// Args are git's arguments.
+		Args []string
+		// Without is the gate's entry left out, empty for none.
+		Without string
+		// HostSystem leaves git to find this host's own system configuration.
+		HostSystem bool
+		// WantOut is a line git prints to standard output, among any the host adds, such as the
+		// keychain helper Apple's git sets at the system level. Empty wants nothing printed at all.
+		WantOut string
+		// WantFail is whether git fails.
+		WantFail bool
+		// WantErr is a fragment of what git prints to standard error, empty for any.
+		WantErr string
+		// WantSSH is whether ssh started.
+		WantSSH bool
+	}{{ // Test 0: A credential helper in the system configuration is not read.
+		Args: helper, WantFail: true,
+	}, { // Test 1: Without the gate's entry it is read, the control.
+		Args: helper, Without: "GIT_CONFIG_NOSYSTEM", WantOut: "leak",
+	}, { // Test 2: The host's own configuration names no credential helper at any level.
+		Args:       []string{"config", "--show-origin", "--get-all", "credential.helper"},
+		HostSystem: true, WantFail: true,
+	}, { // Test 3: Git tries no sign-in with an empty user name.
+		Args: []string{"config", "--get", "http.emptyAuth"}, WantOut: "false",
+	}, { // Test 4: Without the gate's entries it would, the control.
+		Args: []string{"config", "--get", "http.emptyAuth"}, Without: "GIT_CONFIG_COUNT",
+		WantFail: true,
+	}, { // Test 5: An ssh source is refused as a transport, and ssh never starts.
+		Args: overSSH, WantFail: true, WantErr: "transport 'ssh' not allowed",
+	}, { // Test 6: Without the gate's entry ssh starts, the control.
+		Args: overSSH, Without: "GIT_ALLOW_PROTOCOL", WantFail: true, WantSSH: true,
+	}, { // Test 7: A local repository is refused as a transport.
+		Args: cloneTo("refused"), WantFail: true, WantErr: "transport 'file' not allowed",
+	}, { // Test 8: Without the gate's entry it is cloned, the control.
+		Args: cloneTo("cloned"), Without: "GIT_ALLOW_PROTOCOL",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			env, _, marker := gateGetEnv(t, test.Without)
+			if !test.HostSystem {
+				env = append(env, "GIT_CONFIG_SYSTEM="+system)
+			}
+			cmd := exec.Command("git", test.Args...)
+			cmd.Dir = t.TempDir()
+			cmd.Env = env
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			err := cmd.Run()
+			if failed := err != nil; failed != test.WantFail {
+				t.Errorf("git %s failed = %v, want %v: %s", strings.Join(test.Args, " "), failed,
+					test.WantFail, stderr.String())
+			}
+			printed := strings.TrimSpace(stdout.String())
+			if test.WantOut == "" && printed != "" || test.WantOut != "" &&
+				!slices.Contains(strings.Split(printed, "\n"), test.WantOut) {
+				t.Errorf("git %s printed %q, want %q", strings.Join(test.Args, " "), printed,
+					test.WantOut)
+			}
+			if !strings.Contains(stderr.String(), test.WantErr) {
+				t.Errorf("git %s said %q, want %q", strings.Join(test.Args, " "), stderr.String(),
+					test.WantErr)
+			}
+			_, serr := os.Stat(marker)
+			if started := serr == nil; started != test.WantSSH {
+				t.Errorf("ssh started = %v, want %v", started, test.WantSSH)
+			}
+		})
+	}
+}
+
+// TestTheGatesGetKeepsMercurialOffSSH holds Mercurial, started from the environment the gate's get
+// starts with, to the file the gate writes for it: it reads that file alone, which runs false in
+// place of ssh, so an ssh source never starts ssh. Leaving the gate's entry out is the control,
+// where ssh starts. With no Mercurial installed only the file is checked, which the minimal
+// environment test does too.
+func TestTheGatesGetKeepsMercurialOffSSH(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("the gate downloads nothing on Windows, so its get never starts Mercurial there")
+	}
+	tests := []struct {
+		// Without is the gate's entry left out, empty for none.
+		Without string
+		// WantSSH is whether ssh started.
+		WantSSH bool
+	}{{ // Test 0: An ssh source never starts ssh.
+		WantSSH: false,
+	}, { // Test 1: Without the gate's entry ssh starts, the control.
+		Without: "HGRCPATH", WantSSH: true,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			env, private, marker := gateGetEnv(t, test.Without)
+			hgrc := filepath.Join(private, "hgrc")
+			if content, err := os.ReadFile(hgrc); err != nil || string(content) != "[ui]\nssh = false\n" {
+				t.Errorf("%s = %q, %v, want Mercurial told to run false in place of ssh", hgrc,
+					content, err)
+			}
+			if named := slices.Contains(env, "HGRCPATH="+hgrc); named != (test.Without == "") {
+				t.Errorf("HGRCPATH names %s = %v, want %v", hgrc, named, test.Without == "")
+			}
+			// Mercurial is optional on a server, and the suite does not require it.
+			if _, err := exec.LookPath("hg"); err != nil {
+				t.Skip("Mercurial is not on PATH, so only the file it would read is checked")
+			}
+			cmd := exec.Command("hg", "identify", "ssh://example.invalid/x")
+			cmd.Dir = t.TempDir()
+			cmd.Env = env
+			if out, err := cmd.CombinedOutput(); err == nil {
+				t.Errorf("hg identify of an ssh source succeeded: %s", out)
+			}
+			_, serr := os.Stat(marker)
+			if started := serr == nil; started != test.WantSSH {
+				t.Errorf("ssh started = %v, want %v", started, test.WantSSH)
+			}
+		})
 	}
 }

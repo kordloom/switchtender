@@ -418,13 +418,18 @@ get downloads modules and nothing else. It installs no provider and runs no prog
 configuration names. It is handed nothing of the run's: no credential, no credential file, no
 variable, and no container image. Of the server's own environment it keeps only `PATH`, the proxy
 variables `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` in either case, `SSL_CERT_FILE`, and
-`SSL_CERT_DIR`, and its `HOME` is an empty directory of its own, so no CLI configuration, token, or
-key the server holds reaches it. It reaches the module sources anyone on the server's network
-reaches, such as the public registries and public repositories, and nothing a credential opens.
-So a plan whose modules need a credential or the server's own environment to download, such as a
-module in a private registry or a private repository, is not read at the gate: it stays
-unclassified and is held, unless its modules are vendored into the configuration and called by a
-local path.
+`SSL_CERT_DIR`, and its `HOME` is an empty directory of its own. Git runs with no system
+configuration, over HTTPS only, and with no Kerberos or Windows sign-in, Mercurial with no
+configuration and no SSH, and the AWS and Google libraries with the instance metadata service
+turned off, so no CLI configuration, token, key, or cloud identity the server holds reaches it. It
+authenticates as nothing. It reaches what an anonymous client on this server reaches, such as the
+public registries and public repositories, and a directory on this server's disk that a module
+source names, which the scan reads like any other module. It reaches nothing a credential opens.
+On Windows, where the tool reads its own settings from a folder no environment setting moves,
+nothing is downloaded. A plan whose modules are not downloaded, on Windows or because they need a
+credential or the server's own environment, such as a module in a private registry or a private
+repository, is not read at the gate: it stays unclassified and is held, unless its modules are
+vendored into the configuration and called by a local path.
 
 The download runs only where the plan itself may run. A plan routed to a named queue runs on a
 worker whose network the server does not share, so its modules are not downloaded for it. A plan

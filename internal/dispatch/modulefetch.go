@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -83,19 +84,24 @@ func WithModuleFetchLimits(timeout time.Duration, maxBytes int64) Option {
 	}
 }
 
-// planFetcher returns what downloads the modules of r's configuration for the gate, or why nothing
-// can, worded as the reason a module stays unread.
+// planFetcher returns what downloads the modules of r's configuration for the gate on a server
+// running the operating system goos, or why nothing can, worded as the reason a module stays
+// unread.
 //
 // Nothing is downloaded for a run an agent asked for. The built-in agent hold decides on such a run
 // whatever its scan finds, so a download buys the decision nothing, and anything fetched for it
-// before a person approves would be work done on an agent's word alone. Otherwise the download runs
-// where the plan itself runs and nowhere else: this server's runner, for a plan this server
-// executes. A plan routed to a worker runs with the worker's network, which this server does not
-// share, so its modules are not downloaded here, where the download would reach what the plan could
-// not. A plan that runs in a container image is left to imageBarsDownload.
-func (d *Dispatcher) planFetcher(r *run.Run) (roundhouse.ModuleFetcher, string) {
+// before a person approves would be work done on an agent's word alone. Nothing is downloaded on
+// Windows either, as hostBarsDownload says. Otherwise the download runs where the plan itself runs
+// and nowhere else: this server's runner, for a plan this server executes. A plan routed to a
+// worker runs with the worker's network, which this server does not share, so its modules are not
+// downloaded here, where the download would reach what the plan could not. A plan that runs in a
+// container image is left to imageBarsDownload.
+func (d *Dispatcher) planFetcher(r *run.Run, goos string) (roundhouse.ModuleFetcher, string) {
 	if policy.AgentRequested(r) {
 		return nil, agentNotDownloaded
+	}
+	if why := hostBarsDownload(goos); why != "" {
+		return nil, why
 	}
 	fetcher, ok := d.runner.(roundhouse.ModuleFetcher)
 	switch {
@@ -115,6 +121,24 @@ func (d *Dispatcher) planFetcher(r *run.Run) (roundhouse.ModuleFetcher, string) 
 // unread.
 const agentNotDownloaded = "not downloaded, since an agent asked for this run and nothing is " +
 	"fetched for it before a person approves"
+
+// windowsNotDownloaded is why the registry and remote modules of every plan stay unread on a
+// Windows server. It names no folder, since a scan's reasons reach a pull request's refusal
+// comment.
+const windowsNotDownloaded = "not downloaded, since on Windows the tool reads its own settings " +
+	"from a folder the gate cannot keep from it"
+
+// hostBarsDownload says why the gate downloads nothing on a server running the operating system
+// goos, and is empty where nothing bars it. On Windows, Terraform and OpenTofu read their own
+// settings, the registry credentials file among them, from the server account's application data
+// folder, which no environment the gate starts the get with moves, so a get there would carry this
+// server's own tokens.
+func hostBarsDownload(goos string) string {
+	if goos == "windows" {
+		return windowsNotDownloaded
+	}
+	return ""
+}
 
 // Why the modules of a plan that runs, or may run, in a container image stay unread. Neither names
 // the image, since a scan's reasons reach a pull request's refusal comment.
@@ -155,14 +179,20 @@ func (d *Dispatcher) imageBarsDownload(r *run.Run) string {
 // this server's binary in a private copy of what the scan read, and handed nothing of the run's: no
 // credential, no credential file, and no image. Of the server's own environment it keeps only the
 // search path, the proxy settings, and where the trusted certificates are, with a home directory
-// of its own, so it reaches the module sources anyone on this network reaches and nothing a
-// credential opens. It installs modules and nothing else: no provider is installed and no program
-// a configuration names runs. Nothing is downloaded for a run an agent asked for, a plan that runs
-// in a container image, or one that runs on a worker. A download that fails, runs too long, writes
-// too much, or cannot run, and a module only a credential reaches, leaves the plan unclassified,
-// with the reason in the record.
+// of its own, and the gate's own entries keep git, Mercurial, and the AWS and Google libraries from
+// signing in by themselves, so it authenticates as nothing: it reaches what an anonymous client on
+// this server reaches and nothing a credential opens. It installs modules and nothing else: no
+// provider is installed and no program a configuration names runs. Nothing is downloaded on a
+// Windows server, for a run an agent asked for, a plan that runs in a container image, or one that
+// runs on a worker. A download that fails, runs too long, writes too much, or cannot run, and a
+// module only a credential reaches, leaves the plan unclassified, with the reason in the record.
 func (d *Dispatcher) scanPlan(r *run.Run, checkouts CheckoutReader) run.DryRunScan {
-	fetcher, why := d.planFetcher(r)
+	return d.scanPlanOn(runtime.GOOS, r, checkouts)
+}
+
+// scanPlanOn is scanPlan on a server running the operating system goos.
+func (d *Dispatcher) scanPlanOn(goos string, r *run.Run, checkouts CheckoutReader) run.DryRunScan {
+	fetcher, why := d.planFetcher(r, goos)
 	opts := tfscan.Options{Tool: r.Tool, NotDownloaded: why}
 	if r.ProjectID == "" {
 		return d.scanLocalPlan(r, fetcher, opts)
@@ -356,9 +386,9 @@ func (d *Dispatcher) pinFetched(r *run.Run, fetch *run.ModuleFetch, modules stri
 
 // runFetch runs the gate's download for a staged configuration and reports how it went. It opens
 // nothing of the run's: no credential, no credential file, and no image. The get is this server's
-// own binary, started from the minimal environment the runner keeps for it, with a home directory
-// inside the staged copy's private directory, so it reaches the module sources anyone on this
-// network reaches and nothing more.
+// own binary, started from the minimal environment the runner builds for it, with a home directory
+// and the gate's own git, Mercurial, and cloud entries inside the staged copy's private directory,
+// so it authenticates as nothing and reaches what an anonymous client on this server reaches.
 func (d *Dispatcher) runFetch(r *run.Run, fetcher roundhouse.ModuleFetcher, staged *stagedPlan,
 	dir string) *run.ModuleFetch {
 	spec := roundhouse.Spec{Tool: r.Tool, Command: dir, Dir: staged.tree, DryRun: true,

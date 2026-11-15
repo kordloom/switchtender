@@ -131,7 +131,7 @@ func (t *terraformRunner) show(ctx context.Context, dir string, env []string, pl
 // fetchModules runs the get of spec's working directory and nothing else: it downloads the modules
 // the configuration calls, installs no provider, and plans nothing. It inherits the same base
 // environment and credential environment Run gives the tool, or the minimal one getEnv builds when
-// spec asks for it, and no variables.
+// spec asks for it, which signs in as nothing, and no variables.
 func (t *terraformRunner) fetchModules(ctx context.Context, spec Spec, out io.Writer) (Result, error) {
 	if spec.Command == "" {
 		return Result{ExitCode: -1}, ErrNoCommand
@@ -169,11 +169,45 @@ var minimalGetEnv = []string{
 	"SSL_CERT_FILE", "SSL_CERT_DIR",
 }
 
+// getHgrcName is the file in a get's private directory that Mercurial reads as its only
+// configuration, and getHgrc is what it holds: run false in place of ssh, so no SSH connection
+// is ever made.
+const (
+	getHgrcName = "hgrc"
+	getHgrc     = "[ui]\nssh = false\n"
+)
+
+// fixedGetEnv returns the entries a get with a minimal environment carries whatever the server's
+// environment or spec says, one for each way a module getter could sign in by itself. Terraform
+// 1.13 and OpenTofu 1.10 compile in getters for HTTP, git, Mercurial, S3, GCS, and a local path,
+// and OpenTofu adds OCI, whose credentials sit under HOME. Git takes HTTPS alone, so ssh never
+// starts and no local repository is cloned, submodules included; reads no system configuration,
+// where a credential helper or token may be set; asks for nothing; and attempts no Kerberos or
+// Windows sign-in, with no ticket cache to find. Mercurial reads only the file getHgrc describes.
+// The AWS and Google libraries never ask the instance metadata service for an identity. runDir is
+// the get's private directory, where the ticket cache that is never there and Mercurial's file are
+// named.
+func fixedGetEnv(runDir string) []string {
+	return []string{
+		"GIT_ALLOW_PROTOCOL=https",
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=http.emptyAuth",
+		"GIT_CONFIG_VALUE_0=false",
+		"KRB5CCNAME=FILE:" + filepath.Join(runDir, "none"),
+		"AWS_EC2_METADATA_DISABLED=true",
+		"GCE_METADATA_HOST=metadata.invalid",
+		"HGRCPATH=" + filepath.Join(runDir, getHgrcName),
+	}
+}
+
 // getEnv returns the environment a get of spec starts with: the runner's base environment, or, for
-// a spec asking for a minimal one, the variables minimalGetEnv names and a HOME inside spec's
-// private directory, created empty. spec's own environment is layered over either, except that a
-// minimal one takes those variables and HOME from the server alone, never from spec. A minimal
-// environment with no private directory to put the home in is refused rather than given the
+// a spec asking for a minimal one, the variables minimalGetEnv names, a HOME inside spec's private
+// directory, created empty, and the entries fixedGetEnv sets, with Mercurial's file written beside
+// the home. spec's own environment is layered over either, except that a minimal one takes those
+// variables, HOME, and the fixed entries from the server and the gate alone, never from spec. A
+// minimal environment with no private directory to put the home in is refused rather than given the
 // server's.
 func (t *terraformRunner) getEnv(spec Spec) ([]string, error) {
 	if !spec.MinimalEnv {
@@ -187,19 +221,24 @@ func (t *terraformRunner) getEnv(spec Spec) ([]string, error) {
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrLaunch, err)
 	}
-	kept := func(kv string) bool {
-		name, _, _ := strings.Cut(kv, "=")
-		return name == "HOME" || slices.Contains(minimalGetEnv, name)
+	if err := os.WriteFile(filepath.Join(spec.RunDir, getHgrcName), []byte(getHgrc),
+		0o600); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrLaunch, err)
 	}
-	env := make([]string, 0, len(minimalGetEnv)+1+len(spec.Env))
+	fixed := fixedGetEnv(spec.RunDir)
+	settled := func(name string) bool {
+		return name == "HOME" || slices.Contains(minimalGetEnv, name) || hasEnvName(fixed, name)
+	}
+	env := make([]string, 0, len(minimalGetEnv)+1+len(fixed)+len(spec.Env))
 	for _, kv := range t.baseEnv {
-		if kept(kv) && !strings.HasPrefix(kv, "HOME=") {
+		if name, _, _ := strings.Cut(kv, "="); slices.Contains(minimalGetEnv, name) {
 			env = append(env, kv)
 		}
 	}
 	env = append(env, "HOME="+home)
+	env = append(env, fixed...)
 	for _, kv := range spec.Env {
-		if !kept(kv) {
+		if name, _, _ := strings.Cut(kv, "="); !settled(name) {
 			env = append(env, kv)
 		}
 	}
