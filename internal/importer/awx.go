@@ -633,6 +633,9 @@ func fromAWX(data []byte, now time.Time, ids *awxTemplateIDs) (*Plan, error) {
 		plan.warn("%s", text)
 		plan.refused++
 	}
+	// Said before anything is mapped, so it leads the items to review and no cap on a long report
+	// can hide it: it is about every workflow in the file rather than one object in it.
+	plan.warnOldAWXClient(data, export)
 
 	projectIDs := awxIDs{}
 	var projectCreds []projectCredential

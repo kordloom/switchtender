@@ -92,7 +92,10 @@ crontab import creates no template either, so an imported cron line has nothing 
 - AWX: `awx export` produces a JSON document of organizations, projects, inventories, inventory
   sources, job templates, credentials without secrets, schedules, surveys, and notification
   templates. Teams, and organizations that own no smart inventory and hold no notification
-  attachments of their own, are counted in the report rather than imported.
+  attachments of their own, are counted in the report rather than imported. The awx client of the
+  Tower 3.8 era, upstream awxkit before 21.4.0, leaves approval nodes out of its export. The
+  preview says when a file looks like one. Check each workflow against the source and add any
+  missing approval back as an approval step.
 - Semaphore: export the project's repositories, inventories, keys, templates, and schedules as
   JSON. Semaphore's own single-project backup file and the multi-project wrapper are both read.
 - Rundeck: either export a project's jobs as YAML or JSON from the project's job list or the API, or
