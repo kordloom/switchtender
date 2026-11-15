@@ -244,6 +244,17 @@ func signedDataOver(t *testing.T, encoded []byte) tsaSignedData {
 	if err != nil {
 		t.Fatalf("build the test authority: %v", err)
 	}
+	return signedDataBy(t, encoded, auth, auth.Cert)
+}
+
+// signedDataBy wraps a DER TSTInfo in a CMS SignedData signed by auth and carrying the given
+// certificates, so a test can present a signer beside the certificate that issued it.
+func signedDataBy(t *testing.T, encoded []byte, auth *authority, carried ...*x509.Certificate) tsaSignedData {
+	t.Helper()
+	var certs []byte
+	for _, c := range carried {
+		certs = append(certs, c.Raw...)
+	}
 	sum := sha256.Sum256(encoded)
 	typeValue, err := asn1.Marshal(tstInfoOID)
 	if err != nil {
@@ -299,7 +310,7 @@ func signedDataOver(t *testing.T, encoded []byte) tsaSignedData {
 		DigestAlgorithms: asn1.RawValue{Class: asn1.ClassUniversal, Tag: asn1.TagSet, IsCompound: true},
 		EncapContentInfo: tsaEncapContentInfo{EContentType: tstInfoOID, EContent: encoded},
 		Certificates: asn1.RawValue{
-			Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: auth.Cert.Raw},
+			Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: certs},
 		SignerInfos: asn1.RawValue{
 			Class: asn1.ClassUniversal, Tag: asn1.TagSet, IsCompound: true, Bytes: infoInner},
 	}

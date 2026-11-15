@@ -135,6 +135,14 @@ func TestAnEmptyPinIsRefusedRatherThanDropped(t *testing.T) {
 		Name:     "empty witness pin",
 		Args:     []string{"witness", "verify-attestation", attestation, "--pubkey", ""},
 		WantCode: CodeError,
+	}, { // Test 5: An empty timestamp authority pin is refused the same way.
+		Name: "empty authority pin", Args: []string{"verify", receipt, "--tsa-cert", ""},
+		WantCode: CodeError,
+	}, { // Test 6: One empty value among several is refused too, not skipped.
+		Name: "empty authority pin beside a real one",
+		Args: []string{"verify", receipt, "--tsa-cert", "sha256:" + strings.Repeat("ab", 32),
+			"--tsa-cert", " "},
+		WantCode: CodeError,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
