@@ -261,7 +261,7 @@ policies and exemptions as it needs. Tiers are at <a href="https://switchtender.
 </tr>
 <tr>
 <td>Inventory engine</td>
-<td>Static INI, YAML, and JSON inventories, and smart inventories over them, resolve inside the binary the way Ansible's own plugins read them, quirks included, so a server without Ansible still reads them. A conformance corpus holds that reading in CI to every ansible-core minor from 2.16 to 2.21, and every Ansible run whose inventory the native engine resolved, at least in part, is checked against the executor's own <code>ansible-inventory</code> before the play starts and refused on any difference (<a href="/docs/inventories">Inventories</a>).</td>
+<td>Static INI, YAML, and JSON inventories, and smart inventories over them, resolve inside the binary the way Ansible's own plugins read them, quirks included, so a server without Ansible still reads them. A conformance corpus holds that reading in CI to every ansible-core minor from 2.16 to 2.21, and every Ansible run whose inventory the native engine resolved, at least in part, is checked against the executor's own <code>ansible-inventory</code> before the play starts and refused on any difference. A constructed inventory is resolved by ansible-core 2.19 or later over inputs the engine has read and checked for template text first (<a href="/docs/inventories">Inventories</a>).</td>
 </tr>
 <tr>
 <td>Dynamic sources</td>

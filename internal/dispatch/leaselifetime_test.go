@@ -89,6 +89,7 @@ func leasedRegistryCredential(t *testing.T, revoked *atomic.Bool) (credential.St
 	creds := credential.NewMemStore()
 	if err := creds.Save(context.Background(), &credential.Credential{
 		ID: "pull_1", Name: "ghcr", Kind: credential.KindRegistry, Source: kind, Secret: sealed,
+		Settings: map[string]string{credential.SettingRegistryHost: "registry.example"},
 	}); err != nil {
 		t.Fatalf("Save() credential error = %v", err)
 	}

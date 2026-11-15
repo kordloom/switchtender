@@ -10,9 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/imageref"
+	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -373,5 +377,118 @@ func TestASubmissionStopsWhenItsRequestEndsDuringTheImageLookup(t *testing.T) {
 	}
 	if len(runs) != 0 {
 		t.Errorf("a submission whose request ended stored %d runs, want none", len(runs))
+	}
+}
+
+// loginRecorder is a registry that records the login each digest lookup carried.
+type loginRecorder struct {
+	// mu guards asked.
+	mu sync.Mutex
+	// asked holds the login each lookup carried, in order.
+	asked []imageref.Credentials
+}
+
+// Digest records the login and answers with pinDigest.
+func (l *loginRecorder) Digest(_ context.Context, _ string, creds imageref.Credentials) (string, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.asked = append(l.asked, creds)
+	return pinDigest, nil
+}
+
+// logins returns the login each lookup carried.
+func (l *loginRecorder) logins() []imageref.Credentials {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]imageref.Credentials(nil), l.asked...)
+}
+
+// TestAPullLoginLeavesOnlyForItsOwnRegistry covers what a submission hands the registry its image
+// names. The digest lookup runs before any rule weighs the run, so it is the one place a secret
+// could leave for a host the submitter chose on a run that is then held. A credential of any kind
+// but registry is refused as a pull credential before the lookup, and a registry login goes only to
+// the host its own settings bind it to.
+func TestAPullLoginLeavesOnlyForItsOwnRegistry(t *testing.T) {
+	t.Parallel()
+	const (
+		image  = "registry.other.example/x:1"
+		secret = "PULL-SECRET-BODY"
+	)
+	tests := []struct {
+		// Name labels the case.
+		Name string
+		// Kind is the kind of the credential the run names as its pull credential.
+		Kind credential.Kind
+		// Host is the registry host the credential's settings bind it to, none when empty.
+		Host string
+		// Deny adds a rule that covers every bash run.
+		Deny bool
+		// WantLogins is the login each registry lookup carried.
+		WantLogins []imageref.Credentials
+		// Want is the error the submission returns.
+		Want error
+	}{{ // Test 0: An agent's run naming an SSH key as its pull credential is refused, nothing sent.
+		Name: "ssh key on an agent run", Kind: credential.KindSSHKey, Want: credential.ErrPullKind,
+	}, { // Test 1: The same run under a rule that covers it is refused the same way.
+		Name: "ssh key under a rule", Kind: credential.KindSSHKey, Deny: true,
+		Want: credential.ErrPullKind,
+	}, { // Test 2: An env credential is no pull credential either.
+		Name: "env credential", Kind: credential.KindEnv, Want: credential.ErrPullKind,
+	}, { // Test 3: A registry login bound to another host stays home and the lookup goes ahead.
+		Name: "bound to another registry", Kind: credential.KindRegistry, Host: "ghcr.io",
+		WantLogins: []imageref.Credentials{{}},
+	}, { // Test 4: A registry login with no host bound is sent nowhere.
+		Name: "bound to nothing", Kind: credential.KindRegistry,
+		WantLogins: []imageref.Credentials{{}},
+	}, { // Test 5: A registry login bound to the image's own registry is sent there, named for it.
+		Name: "bound to this registry", Kind: credential.KindRegistry, Host: "registry.other.example",
+		WantLogins: []imageref.Credentials{{
+			Username: "puller", Password: secret, Host: "registry.other.example",
+		}},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			sealer := credential.NewSealer("pass", "salt")
+			sealed, err := sealer.Seal("puller\n" + secret)
+			if err != nil {
+				t.Fatalf("Seal() error = %v", err)
+			}
+			named := &credential.Credential{ID: "cred_named", Name: "named", Kind: test.Kind,
+				Secret: sealed}
+			if test.Host != "" {
+				named.Settings = map[string]string{credential.SettingRegistryHost: test.Host}
+			}
+			creds := credential.NewMemStore()
+			if err := creds.Save(ctx, named); err != nil {
+				t.Fatalf("Save(credential) error = %v", err)
+			}
+			rules := policy.NewMemStore()
+			if test.Deny {
+				if err := rules.Save(ctx, &policy.Policy{ID: "pol_deny", Name: "no bash",
+					Effect: policy.EffectDeny, Tool: run.ToolBash,
+					MaxDestroy: policy.DisabledMaxDestroy}); err != nil {
+					t.Fatalf("Save(policy) error = %v", err)
+				}
+			}
+			rec := &loginRecorder{}
+			d := New(run.NewMemStore(), dispatchtest.OKRunner(), nil, WithCredentials(creds, sealer),
+				WithPolicies(rules), WithImageResolver(rec), WithRefuseUnpinnedImage(true),
+				WithNoJanitor(), WithClaimGate(func() error { return errNoClaim }))
+			t.Cleanup(d.Close)
+			r, err := d.Submit(ctx, "", "", run.WithTool(run.ToolBash), run.WithCommand("true"),
+				run.WithActor("ci-agent"), run.WithActorType("agent"),
+				run.WithImage(image, named.ID))
+			if !errors.Is(err, test.Want) {
+				t.Fatalf("Submit() error = %v, want %v", err, test.Want)
+			}
+			if test.Want == nil && r.Status != run.StatusPendingApproval {
+				t.Errorf("status = %q, want the agent's run held", r.Status)
+			}
+			if diff := cmp.Diff(test.WantLogins, rec.logins()); diff != "" {
+				t.Errorf("logins sent to the registry mismatch (-want +got):\n%s", diff)
+			}
+		})
 	}
 }

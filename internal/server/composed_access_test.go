@@ -35,6 +35,10 @@ type composedAccessFixture struct {
 	operator string
 	// admin is the admin's bearer token.
 	admin string
+	// agents maps a role to the bearer token of an agent bound to that role's account.
+	agents map[user.Role]string
+	// runner resolves inventories and counts the listings it ran.
+	runner *inventorytest.ListingRunner
 }
 
 // newComposedAccessFixture builds the install, resolving inventories without Ansible.
@@ -48,6 +52,7 @@ func newComposedAccessFixture(t *testing.T) *composedAccessFixture {
 	runs := run.NewMemStore()
 
 	bearer := map[user.Role]string{}
+	agents := map[user.Role]string{}
 	ids := map[user.Role]string{}
 	for _, role := range []user.Role{user.RoleOperator, user.RoleAdmin} {
 		u, err := user.New(string(role), "pw", role)
@@ -66,6 +71,15 @@ func newComposedAccessFixture(t *testing.T) *composedAccessFixture {
 			t.Fatalf("tokens.Save() error = %v", err)
 		}
 		bearer[role], ids[role] = plain, u.ID
+		agentPlain, agentTok, err := auth.New("a-" + string(role))
+		if err != nil {
+			t.Fatalf("auth.New() error = %v", err)
+		}
+		agentTok.UserID, agentTok.Kind = u.ID, auth.KindAgent
+		if err := tokens.Save(ctx, agentTok); err != nil {
+			t.Fatalf("tokens.Save() error = %v", err)
+		}
+		agents[role] = agentPlain
 	}
 	base := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	for n, inv := range []*inventory.Inventory{{
@@ -98,14 +112,15 @@ func newComposedAccessFixture(t *testing.T) *composedAccessFixture {
 		}
 	}
 
-	disp := dispatch.New(runs, &inventorytest.ListingRunner{}, zap.NewNop(),
-		dispatch.WithInventories(invs))
+	runner := &inventorytest.ListingRunner{}
+	disp := dispatch.New(runs, runner, zap.NewNop(), dispatch.WithInventories(invs))
 	t.Cleanup(disp.Close)
 	handler := New(runs, disp, zap.NewNop(), WithTokens(tokens), WithUsers(users),
 		WithGrants(grants, true), WithInventories(invs), WithInventoryPreviewer(disp)).Handler()
 	return &composedAccessFixture{
 		handler: handler, runs: runs,
 		operator: bearer[user.RoleOperator], admin: bearer[user.RoleAdmin],
+		agents: agents, runner: runner,
 	}
 }
 
@@ -200,10 +215,11 @@ func TestComposedInventoryDoesNotWidenAccess(t *testing.T) {
 		if code != http.StatusForbidden {
 			t.Errorf("naming inv_db as an input = %d %s, want 403", code, body)
 		}
+		// A manage grant does not delegate a constructed definition, which runs on the server.
 		code, body = f.call(t, f.operator, http.MethodPut, "/v1/inventories/inv_built",
 			`{"name":"built","kind":"constructed","input_inventory_ids":["inv_web"]}`)
-		if code != http.StatusOK {
-			t.Errorf("naming only inv_web = %d %s, want 200", code, body)
+		if code != http.StatusForbidden {
+			t.Errorf("naming only inv_web = %d %s, want 403", code, body)
 		}
 		code, body = f.call(t, f.operator, http.MethodPost, "/v1/inventories/preview",
 			`{"kind":"constructed","input_inventory_ids":["inv_db"]}`)

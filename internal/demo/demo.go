@@ -1143,7 +1143,9 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
 	creds := []*credential.Credential{
 		{ID: credential.NewID(), Name: "prod-ssh", Kind: credential.KindSSHKey, Secret: "demo-placeholder", CreatedAt: made(72)},
 		{ID: credential.NewID(), Name: "ansible-vault", Kind: credential.KindVaultPassword, VaultID: "prod", Secret: "demo-placeholder", CreatedAt: made(60)},
-		{ID: credential.NewID(), Name: "dockerhub", Kind: credential.KindRegistry, Secret: "demo-placeholder", CreatedAt: made(48)},
+		{ID: credential.NewID(), Name: "dockerhub", Kind: credential.KindRegistry,
+			Settings: map[string]string{credential.SettingRegistryHost: "docker.io"},
+			Secret:   "demo-placeholder", CreatedAt: made(48)},
 		{ID: credential.NewID(), Name: "openstack-prod", Kind: credential.KindOpenStack, Secret: "demo-placeholder", CreatedAt: made(36)},
 	}
 	for _, c := range creds {

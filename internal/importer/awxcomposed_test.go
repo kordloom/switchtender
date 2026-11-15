@@ -171,3 +171,46 @@ func TestAWXComposedInventoriesRefused(t *testing.T) {
 		})
 	}
 }
+
+// TestAWXConstructedInputWithTemplateTextIsRefused pins that the import checks each input of a
+// constructed inventory the way composing does. An input holding template text, AWX's stock
+// interpreter value included, leaves its constructed inventory out with the input, the group or
+// host, and the variable named, while the input itself and a constructed inventory over clean
+// inputs come across.
+func TestAWXConstructedInputWithTemplateTextIsRefused(t *testing.T) {
+	t.Parallel()
+	const export = `{"inventory": [
+	  {"name": "legacy", "variables": {"ansible_python_interpreter": "{{ ansible_playbook_python }}"},
+	   "hosts": [{"name": "old1"}]},
+	  {"name": "noisy", "hosts": [{"name": "old2", "variables": {"motd": "{% raw %}x{% endraw %}"}}]},
+	  {"name": "clean", "hosts": [{"name": "web1", "variables": {"tier": "gold"}}]},
+	  {"name": "legacy view", "kind": "constructed", "input_inventories": ["legacy"]},
+	  {"name": "noisy view", "kind": "constructed", "input_inventories": ["clean", "noisy"]},
+	  {"name": "clean view", "kind": "constructed", "input_inventories": ["clean"]}
+	]}`
+	plan, err := importer.FromAWX([]byte(export), time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("FromAWX() error = %v", err)
+	}
+	var names []string
+	for _, inv := range plan.Inventories {
+		names = append(names, inv.Name)
+	}
+	sorted := cmpopts.SortSlices(func(a, b string) bool { return a < b })
+	if diff := cmp.Diff([]string{"clean", "clean view", "legacy", "noisy"}, names,
+		sorted); diff != "" {
+		t.Errorf("inventories mismatch (-want +got):\n%s", diff)
+	}
+	left := strings.Join(plan.Report().LeftOut, "\n")
+	for _, want := range []string{
+		`constructed inventory "legacy view" was not imported: its input "legacy" is refused`,
+		`variable ansible_python_interpreter of group "all" holds template text`,
+		`constructed inventory "noisy view" was not imported: its input "noisy" is refused`,
+		`variable motd of host "old2" holds template text`,
+		"host_vars or group_vars beside the playbook",
+	} {
+		if !strings.Contains(left, want) {
+			t.Errorf("the report lacks %q:\n%s", want, left)
+		}
+	}
+}

@@ -27,7 +27,7 @@ just live behind a smaller, faster surface.
 | Organization | Organization. A project, template, inventory, or credential can name its owning `org_id`. Access adds a global role and optional per-object grants.|
 | Project (git) | Project.|
 | Inventory | Stored inventory, or a dynamic inventory source that refreshes into one.|
-| Smart or constructed inventory | Smart or constructed inventory, resolved at each launch. A smart inventory imports into its AWX organization and, as in AWX, carries hosts and their variables but no groups. See [inventories](inventories.md).|
+| Smart or constructed inventory | Smart or constructed inventory, resolved at each launch. A smart inventory imports into its AWX organization and, as in AWX, carries hosts and their variables but no groups. A constructed inventory needs ansible-core 2.19 or later, and one whose input holds template text, such as AWX's stock `ansible_python_interpreter` value, is left out of the import with the input named. See [inventories](inventories.md) and [migration](migration.md).|
 | Job template | Template.|
 | Survey | Template survey, the same typed questions.|
 | Schedule | Schedule, with the same recurrence rule, or a cron expression when one says the same thing.|
@@ -119,7 +119,10 @@ Open Credentials and add what your runs need. Kinds:
   `ansible_network_os`, and `ansible_connection` variables.
 - `env`: `KEY=VALUE` lines injected into the run, how cloud SDK credentials reach plugins.
 - `token`: a single API token or JWT, exposed to the run as the `SWITCHTENDER_TOKEN` environment variable.
-- `registry`: a container registry login, for pulling a pinned execution image.
+- `registry`: a container registry login, for pulling an execution image. AWX's `host` input
+  becomes its `registry_host`, the one registry the login is sent to. An export with no host, or
+  one written as a URL, imports the login bound to no registry and the import says so. Set the
+  host on it before a run pulls with it.
 - `aws`: an AWS access key, injected as the standard `AWS_*` environment variables.
 - `azure`: an Azure service principal, injected as the `ARM_*` variables Terraform reads and the
   `AZURE_*` variables the Ansible azure collection reads.

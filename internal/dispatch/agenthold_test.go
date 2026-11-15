@@ -15,6 +15,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/dossier"
+	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/policy"
@@ -306,7 +307,8 @@ func TestAnAgentsDryRunIsHeld(t *testing.T) {
 }
 
 // TestAnAgentsSplitIsHeldWithEveryShard covers a split, whose shards execute under the parent's
-// release. An agent's split waits with every shard it cut, so no shard runs on its own.
+// release. An agent's split waits with every shard it cut, so no shard runs on its own. The split
+// is of a stored inventory, since an agent's split of one named by path is refused outright.
 func TestAnAgentsSplitIsHeldWithEveryShard(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -325,9 +327,15 @@ func TestAnAgentsSplitIsHeldWithEveryShard(t *testing.T) {
 			ctx := context.Background()
 			store := run.NewMemStore()
 			runner := &flakyRunnerLister{hosts: []string{"a", "b", "c", "d"}, failHost: "none"}
-			d := New(store, runner, zap.NewNop(), WithNoJanitor())
+			invs := inventory.NewMemStore()
+			fleet := &inventory.Inventory{ID: "inv_fleet", Name: "fleet", Content: "a\nb\nc\nd\n"}
+			if err := invs.Save(ctx, fleet); err != nil {
+				t.Fatalf("invs.Save() error = %v", err)
+			}
+			d := New(store, runner, zap.NewNop(), WithNoJanitor(), WithInventories(invs))
 			t.Cleanup(d.Close)
-			parent, err := d.SubmitSplit(ctx, "play.yml", "inv", 2, test.Opts...)
+			opts := append(slices.Clone(test.Opts), run.WithInventory(fleet.ID))
+			parent, err := d.SubmitSplit(ctx, "play.yml", "", 2, opts...)
 			if err != nil {
 				t.Fatalf("SubmitSplit() error = %v", err)
 			}

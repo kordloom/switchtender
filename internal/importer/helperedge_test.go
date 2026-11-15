@@ -272,6 +272,9 @@ func TestSettingsKeyRenamesOnlyWhereInjectionReadsADifferentName(t *testing.T) {
 		{Kind: credential.KindAWS, AWXKey: "username", WantKey: "username"}, // Test 10.
 		{Kind: credential.KindAWS, AWXKey: "region", WantKey: "region"},     // Test 11.
 		{Kind: credential.KindEnv, AWXKey: "host", WantKey: "host"},         // Test 12.
+		{Kind: credential.KindRegistry, AWXKey: "host",
+			WantKey: credential.SettingRegistryHost}, // Test 13: the host the login is bound to.
+		{Kind: credential.KindRegistry, AWXKey: "username", WantKey: "username"}, // Test 14.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -403,9 +406,10 @@ func TestSettingsListIsStableAndSorted(t *testing.T) {
 	}
 }
 
-// TestHasInputTreatsAMaskedSecretAsSet pins the one thing hasInput must know: AWX writes a set
-// secret as the literal "$encrypted$", so the field is present and unreadable. Reading it as unset
-// would map a password machine credential to a key one and import the wrong kind.
+// TestHasInputTreatsAMaskedSecretAsSet pins the one thing hasInput must know: AWX keeps a secret
+// input only while it holds a value, so a listed one was set, whether the export wrote it as the
+// literal "$encrypted$", as the empty value upstream awxkit through 23.7.0 writes, or as ASK. Reading
+// it as unset would map a password machine credential to a key one and import the wrong kind.
 func TestHasInputTreatsAMaskedSecretAsSet(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -419,11 +423,17 @@ func TestHasInputTreatsAMaskedSecretAsSet(t *testing.T) {
 		{Name: "masked", Inputs: map[string]any{"password": "$encrypted$"},
 			Key: "password", WantHas: true}, // Test 2.
 		{Name: "empty string", Inputs: map[string]any{"password": ""},
-			Key: "password", WantHas: false}, // Test 3.
+			Key: "password", WantHas: true}, // Test 3: awxkit through 23.7.0 writes a set secret so.
 		{Name: "whitespace", Inputs: map[string]any{"password": "   "},
-			Key: "password", WantHas: false}, // Test 4.
+			Key: "password", WantHas: true}, // Test 4.
 		{Name: "real value", Inputs: map[string]any{"ssh_key_data": "-----BEGIN"},
 			Key: "ssh_key_data", WantHas: true}, // Test 5.
+		{Name: "null", Inputs: map[string]any{"password": nil},
+			Key: "password", WantHas: false}, // Test 6.
+		{Name: "asked at launch", Inputs: map[string]any{"password": "ASK"},
+			Key: "password", WantHas: true}, // Test 7.
+		{Name: "number", Inputs: map[string]any{"password": json.Number("0")},
+			Key: "password", WantHas: false}, // Test 8.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {

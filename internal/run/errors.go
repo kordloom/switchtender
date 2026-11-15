@@ -31,6 +31,9 @@ var (
 	// ErrLimitWidens is returned when a launch limit would widen a template's target rather than
 	// narrow it.
 	ErrLimitWidens = errors.New("limit would widen the template's target")
+	// ErrLimitFile is returned when a limit holds an at sign, which Ansible reads as a file of
+	// hosts to open.
+	ErrLimitFile = errors.New("limit names a file")
 	// ErrKeyTooLong is returned when a caller's idempotency key is longer than MaxClientKeyBytes.
 	ErrKeyTooLong = errors.New("idempotency key too long")
 	// ErrQueueTooLong is returned when a queue name is longer than MaxQueueBytes.

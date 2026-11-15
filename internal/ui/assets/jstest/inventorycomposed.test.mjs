@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { loadPage } from "./pages.mjs";
 import { reply } from "./net.mjs";
 import { fire } from "./dom.mjs";
+import { sandboxOf } from "./loader.mjs";
 
 // STORED are the stored inventories as a read of one returns them: two with hosts of their own and
 // one smart.
@@ -18,6 +19,12 @@ const STORED = [
 		created_at: "2026-09-02T00:00:00Z",
 	},
 ];
+
+// CONSTRUCTED is a stored constructed inventory over the two with hosts.
+const CONSTRUCTED = {
+	id: "inv_built", name: "built", kind: "constructed", input_inventory_ids: ["inv_web", "inv_db"],
+	created_at: "2026-09-03T00:00:00Z",
+};
 
 // INVENTORIES are what the list returns for them: the same inventories without their content, and
 // the size of it.
@@ -161,4 +168,46 @@ test("the list reads no inventory's content until a row is opened", async () => 
 	assert.equal(reads()[0].path, "/v1/inventories/inv_web");
 	assert.match(page.document.getElementById("drill").textContent, /web1/,
 		"the drawer did not show the hosts read from the inventory");
+});
+
+// asRole mounts the inventories page for a session holding role, listing CONSTRUCTED beside the rest.
+function asRole(role) {
+	const page = loadPage("inventories", {
+		routes: [
+			["/v1/inventories/preview", reply({})],
+			["/v1/inventories", reply({ inventories: [...INVENTORIES, CONSTRUCTED] })],
+			["/v1/credentials", reply({ credentials: [] })],
+		],
+	});
+	sandboxOf(page.app).localStorage.setItem("st_role", role);
+	return page;
+}
+
+test("the unsaved preview is offered to an admin only", async () => {
+	for (const [role, wantHidden] of [["operator", true], ["admin", false]]) {
+		const page = asRole(role);
+		page.app.wireInventoryForm();
+		await page.clock.flush();
+		const kind = page.document.getElementById("inv-kind");
+		kind.value = "constructed";
+		fire(kind, "change");
+		assert.equal(page.document.getElementById("inv-preview-box").hidden, wantHidden,
+			"the unsaved preview box for " + role);
+	}
+});
+
+test("a constructed row offers its edit to an admin only, and a smart row to anyone", async () => {
+	for (const [role, wantConstructed] of [["operator", false], ["admin", true]]) {
+		const page = asRole(role);
+		await page.app.loadInventories();
+		await page.clock.flush();
+		const hasEdit = (name) => {
+			const row = [...page.document.querySelectorAll("tbody tr")]
+				.find((r) => r.children[0].textContent === name);
+			assert.ok(row, "no row for " + name);
+			return [...row.querySelectorAll("button")].some((b) => b.textContent === "Edit");
+		};
+		assert.equal(hasEdit("built"), wantConstructed, "the constructed row's edit for " + role);
+		assert.equal(hasEdit("all web"), true, "the smart row's edit for " + role);
+	}
 });

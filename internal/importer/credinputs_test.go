@@ -34,12 +34,25 @@ func TestMachineKindFollowsInputs(t *testing.T) {
 		WantKind: credential.KindSSHKey,
 	}, { // Test 3: No inputs at all keeps the historical default rather than guessing.
 		AWXType: "Machine", Inputs: nil, WantKind: credential.KindSSHKey,
-	}, { // Test 4: An empty value is not a configured value.
+	}, { // Test 4: Both written empty were both held, as AWX never stores an empty secret, so the
+		// key wins.
 		AWXType: "Machine", Inputs: map[string]any{"password": "", "ssh_key_data": ""},
 		WantKind: credential.KindSSHKey,
 	}, { // Test 5: Source control follows the same rule.
 		AWXType: "Source Control", Inputs: map[string]any{"password": "$encrypted$"},
 		WantKind: credential.KindSSHPassword,
+	}, { // Test 6: A password written empty, as awxkit through 23.7.0 writes it, is a password.
+		AWXType: "Machine", Inputs: map[string]any{"username": "deploy", "password": ""},
+		WantKind: credential.KindSSHPassword,
+	}, { // Test 7: A key written empty is a key.
+		AWXType: "Machine", Inputs: map[string]any{"username": "deploy", "ssh_key_data": ""},
+		WantKind: credential.KindSSHKey,
+	}, { // Test 8: A password AWX asks for at launch is a password.
+		AWXType: "Machine", Inputs: map[string]any{"password": "ASK"},
+		WantKind: credential.KindSSHPassword,
+	}, { // Test 9: A null password is unset, so the default holds.
+		AWXType: "Machine", Inputs: map[string]any{"password": nil},
+		WantKind: credential.KindSSHKey,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -182,5 +195,59 @@ func TestImportSettingsKeepAWXNamesForCloudKinds(t *testing.T) {
 	wantSettings := map[string]string{"host": "vc.example.com", "username": "svc-vc"}
 	if diff := cmp.Diff(wantSettings, plan.Credentials[0].Settings); diff != "" {
 		t.Errorf("stored settings mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// TestImportBindsARegistryLoginToItsHost verifies an AWX registry credential's host becomes the
+// registry host its login is bound to, and that an export with no usable host imports the login
+// bound to nothing and says so, since such a login is sent to no registry until the host is set.
+func TestImportBindsARegistryLoginToItsHost(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Inputs is the credential's AWX inputs object.
+		Inputs string
+		// WantHost is the stored registry host, empty for none.
+		WantHost string
+		// WantWarn reports whether the plan warns that the login is bound to no registry.
+		WantWarn bool
+	}{{ // Test 0: A bare host is stored as the registry host.
+		Inputs:   `{"host":"ghcr.io","username":"bot","password":"$encrypted$"}`,
+		WantHost: "ghcr.io",
+	}, { // Test 1: A host and port is stored as it is.
+		Inputs:   `{"host":"registry.example.com:5000","username":"bot","password":"$encrypted$"}`,
+		WantHost: "registry.example.com:5000",
+	}, { // Test 2: No host imports the login unbound, with a warning.
+		Inputs:   `{"username":"bot","password":"$encrypted$"}`,
+		WantWarn: true,
+	}, { // Test 3: A host written as a URL is refused as a host, with a warning.
+		Inputs:   `{"host":"https://quay.io","username":"bot","password":"$encrypted$"}`,
+		WantWarn: true,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			data := []byte(`{"credentials":[{"name":"quay","credential_type":"Container Registry",` +
+				`"inputs":` + test.Inputs + `}]}`)
+			plan, err := FromAWX(data, time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC))
+			if err != nil {
+				t.Fatalf("FromAWX() error = %v", err)
+			}
+			if len(plan.Credentials) != 1 {
+				t.Fatalf("credentials = %d, want 1", len(plan.Credentials))
+			}
+			got := plan.Credentials[0]
+			if got.Kind != credential.KindRegistry {
+				t.Fatalf("kind = %q, want registry", got.Kind)
+			}
+			if diff := cmp.Diff(test.WantHost, got.RegistryHost()); diff != "" {
+				t.Errorf("registry host mismatch (-want +got):\n%s", diff)
+			}
+			joined := strings.Join(plan.Warnings, "\n")
+			gotWarn := strings.Contains(joined, "sent to no registry")
+			if gotWarn != test.WantWarn {
+				t.Errorf("unbound warning = %v, want %v, warnings:\n%s", gotWarn, test.WantWarn,
+					joined)
+			}
+		})
 	}
 }

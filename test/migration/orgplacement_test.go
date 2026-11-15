@@ -50,7 +50,9 @@ func TestImportedSmartInventoryLandsInItsOrganization(t *testing.T) {
 		}
 	}
 	sorted := cmpopts.SortSlices(func(a, b string) bool { return a < b })
-	if diff := cmp.Diff([]string{"edge", "fleet", "shut down", "web everywhere"}, placed,
+	// legacy view is not here: its input carries AWX's stock interpreter value, which is template
+	// text a constructed inventory's input may not hold, so the import refuses it.
+	if diff := cmp.Diff([]string{"edge", "fleet", "legacy", "shut down", "web everywhere"}, placed,
 		sorted); diff != "" {
 		t.Errorf("inventories placed in the organization (-want +got):\n%s", diff)
 	}

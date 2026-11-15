@@ -41,9 +41,10 @@ Two numbers are worth understanding before relying on them.
 **Needs a secret is not a limitation of the importer.** An export never carries secret values, from
 any of these systems, so a credential arrives as a named shell whoever wrote the tool. The count is
 how many credentials need a secret set once before anything uses them. The plan says which of them
-held a secret in the source and which held none, such as an AWX machine credential that only names a
-user. A run refuses a credential with no secret and says which one, so the choice for the second kind
-is to set a secret or to detach the credential from the templates that use it.
+held a secret in the source and which the export lists no secret for, such as an AWX machine
+credential that only names a user. A run refuses a credential with no secret and says which one, so
+the choice for the second kind is to set a secret or to detach the credential from the templates
+that use it.
 
 **Does not come across is itemized, never summarized.** Each entry names the object and the reason,
 because a count with no names cannot be acted on. Nothing is dropped without an entry: a test reads
@@ -92,7 +93,12 @@ crontab import creates no template either, so an imported cron line has nothing 
 - AWX: `awx export` produces a JSON document of organizations, projects, inventories, inventory
   sources, job templates, credentials without secrets, schedules, surveys, and notification
   templates. Teams, and organizations that own no smart inventory and hold no notification
-  attachments of their own, are counted in the report rather than imported.
+  attachments of their own, are counted in the report rather than imported. The awx client of the
+  Tower 3.8 era, upstream awxkit before 21.4.0, leaves approval nodes out of its export. The
+  preview says when a file looks like one. Check each workflow against the source and add any
+  missing approval back as an approval step. Upstream awxkit through 23.7.0 writes every secret as
+  an empty value instead of `$encrypted$`. AWX never stores an empty credential secret, so the
+  importer reads an empty secret input as one AWX held and asks for it like any other.
 - Semaphore: export the project's repositories, inventories, keys, templates, and schedules as
   JSON. Semaphore's own single-project backup file and the multi-project wrapper are both read.
 - Rundeck: either export a project's jobs as YAML or JSON from the project's job list or the API, or
@@ -144,6 +150,15 @@ hosts come from running the plugin rather than from the export.
 An AWX smart inventory imports with its host filter, and a constructed inventory imports with its
 inputs, options, and limit, wired by id to the inventories the same export carried. Both resolve at
 each launch, as they did in AWX. The [inventories guide](inventories.md) describes what each reads.
+
+A constructed inventory's inputs are checked as they import, the way every launch checks them. An
+input holding template text leaves its constructed inventory out of the import, and the report names
+the input, the host or group, and the variable. AWX's stock
+`ansible_python_interpreter: "{{ ansible_playbook_python }}"` is template text and is refused like
+any other. Put that value in `host_vars` or `group_vars` beside the playbook, or set a literal
+value such as `auto_silent` on the inventory, then import again or create the constructed inventory
+by hand. The input itself still imports. Resolving a constructed inventory needs ansible-core 2.19
+or later on the server.
 
 When the export carries a smart inventory's organization, the smart inventory and every inventory
 imported from that organization are placed in an organization of the same name, created on apply
@@ -519,6 +534,13 @@ import has none to re-enter and none to attach.
   does not come across, and a workflow holding only approval nodes is reported as having no work for
   them to release. Who may approve follows your roles and approval policies, not the AWX approval
   role.
+- An Ascender export from 25.5.0 or later can say more about a workflow than a pipeline holds. A
+  workflow with a conditional connector is refused and named, since a step here has no condition to
+  wait on and the node behind the connector would run on every launch. So is a workflow with an
+  approval that waits for more than one approver, since an approval step here is released by one
+  decision. A node's retry count carries as its step's retries. An approval that approves itself
+  when its timeout passes imports as one that takes its deny path instead, and an approval's context
+  template is not imported. The report names both.
 - A workflow's own schedules import onto the workflow template, so a graph that fired nightly in AWX
   keeps firing nightly here. The one case that does not carry is a workflow the import refused: with
   no template to fire, its schedules cannot import either, and the report says so by name and count

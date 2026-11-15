@@ -116,7 +116,8 @@ func proposeRunHandler(submitter Submitter, provider ai.Provider, log *zap.Logge
 }
 
 // parseProposedRun decodes the model reply into a validated proposed run, reporting false when the
-// reply is not a usable run: unparseable, an unknown tool, or a tool missing its required input.
+// reply is not a usable run: unparseable, an unknown tool, a tool missing its required input, or a
+// limit that names a file.
 func parseProposedRun(answer string) (proposedRun, bool) {
 	raw := stripFences(answer)
 	start := strings.IndexByte(raw, '{')
@@ -135,7 +136,7 @@ func parseProposedRun(answer string) (proposedRun, bool) {
 	p.Command = strings.TrimSpace(p.Command)
 	p.Playbook = strings.TrimSpace(p.Playbook)
 	p.Limit = strings.TrimSpace(p.Limit)
-	if !run.ValidTool(p.Tool) {
+	if !run.ValidTool(p.Tool) || run.CheckLimitFile(p.Limit) != nil {
 		return proposedRun{}, false
 	}
 	if run.NormalizeTool(p.Tool) == run.ToolAnsible {

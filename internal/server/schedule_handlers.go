@@ -11,6 +11,7 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/scrub"
+	"github.com/kordloom/switchtender/internal/template"
 )
 
 // createScheduleRequest is the JSON body accepted by POST /schedules.
@@ -105,8 +106,37 @@ type schedulesResponse struct {
 	NextOffset int `json:"next_offset"`
 }
 
+// refuseSchedulePathSplit answers and reports true when sc would fire a split of an inventory named
+// by path and the caller may not save one.
+//
+// A schedule fires with nobody present, so the tick loop has no caller to ask and the question is
+// put to whoever saves it. An inline schedule is read on its own fields. One that names a template
+// fires that template's saved run, so the template is read here: authorizing its use says the
+// caller may launch it, not that the caller may have its path listed on a timetable.
+func refuseSchedulePathSplit(w http.ResponseWriter, r *http.Request, log *zap.Logger,
+	templates template.Store, sc *schedule.Schedule) bool {
+	if sc.TemplateID == "" {
+		return len(sc.Steps) == 0 &&
+			refusePathSplit(w, r, log, run.ToolAnsible, sc.Inventory, "", sc.Shards)
+	}
+	if templates == nil || mayPathSplit(r) {
+		return false
+	}
+	t, err := templates.Get(r.Context(), sc.TemplateID)
+	if errors.Is(err, template.ErrNotFound) {
+		return false
+	}
+	if err != nil {
+		log.Error("server: read schedule template: " + err.Error())
+		respondError(w, log, http.StatusInternalServerError, "could not read the schedule's template")
+		return true
+	}
+	return refuseTemplatePathSplit(w, r, log, t)
+}
+
 // createScheduleHandler creates a recurring schedule.
-func createScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+func createScheduleHandler(store schedule.Store, templates template.Store, authz *authorizer,
+	log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "scheduling not enabled")
@@ -159,6 +189,9 @@ func createScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 			respondError(w, log, http.StatusBadRequest, scheduleInvalid(err))
 			return
 		}
+		if refuseSchedulePathSplit(w, r, log, templates, sc) {
+			return
+		}
 		next, err := sc.NextFire(time.Now())
 		if err != nil {
 			// A bad zone and a bad expression are different mistakes, and reporting one as the
@@ -181,7 +214,8 @@ func createScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 // updateScheduleHandler replaces a schedule, keeping its creation time and last-run record, and
 // recomputes the next fire from the new cron. A request that names the enabled flag pauses or resumes
 // the schedule; one that omits it leaves the flag as it stands.
-func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+func updateScheduleHandler(store schedule.Store, templates template.Store, authz *authorizer,
+	log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "scheduling not enabled")
@@ -268,6 +302,9 @@ func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 		sc.PinZone(schedule.UnnamedZone)
 		if err := sc.Validate(); err != nil {
 			respondError(w, log, http.StatusBadRequest, scheduleInvalid(err))
+			return
+		}
+		if refuseSchedulePathSplit(w, r, log, templates, sc) {
 			return
 		}
 		next, err := sc.NextFire(time.Now())

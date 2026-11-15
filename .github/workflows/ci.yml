@@ -328,9 +328,11 @@ jobs:
         # another version either keeps the runner's or cannot replace it. The venv's ansible
         # commands go first on the PATH and nothing else of it does: its python3 has no botocore,
         # and putting it first hid the runner's from the test that probes the AWS SDK's caches.
+        # The release is at or above the floor constructed inventories need, so the tests that
+        # compose one with real Ansible run here rather than check the refusal.
         run: |
           python3 -m venv "$RUNNER_TEMP/ansible"
-          "$RUNNER_TEMP/ansible/bin/pip" install --quiet "ansible-core==2.18.1"
+          "$RUNNER_TEMP/ansible/bin/pip" install --quiet "ansible-core==2.21.4"
           mkdir -p "$RUNNER_TEMP/ansible-commands"
           ln -s "$RUNNER_TEMP"/ansible/bin/ansible* "$RUNNER_TEMP/ansible-commands/"
           echo "$RUNNER_TEMP/ansible-commands" >> "$GITHUB_PATH"
@@ -582,9 +584,10 @@ jobs:
         # another version either keeps the runner's or cannot replace it. The venv's ansible
         # commands go first on the PATH and nothing else of it does: its python3 has no botocore,
         # and putting it first hid the runner's from the test that probes the AWS SDK's caches.
+        # The release is at or above the floor constructed inventories need.
         run: |
           python3 -m venv "$RUNNER_TEMP/ansible"
-          "$RUNNER_TEMP/ansible/bin/pip" install --quiet "ansible-core==2.18.1"
+          "$RUNNER_TEMP/ansible/bin/pip" install --quiet "ansible-core==2.21.4"
           mkdir -p "$RUNNER_TEMP/ansible-commands"
           ln -s "$RUNNER_TEMP"/ansible/bin/ansible* "$RUNNER_TEMP/ansible-commands/"
           echo "$RUNNER_TEMP/ansible-commands" >> "$GITHUB_PATH"

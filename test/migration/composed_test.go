@@ -1,11 +1,15 @@
 package migration
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+
+	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/inventory"
 )
 
 // holdAnsible is a policy file that holds every Ansible run for a person, so a scenario can change
@@ -52,6 +56,16 @@ func TestImportedComposedInventoriesRunOnTheHostsResolvedAtLaunch(t *testing.T) 
 		WantHosts: []string{"db1", "edge-canary"}, WantInputs: []string{fleet, edge},
 		WantEngine: "ansible",
 	}}
+	// Below the floor a constructed inventory is refused at launch, with the release it needs, and
+	// the scenario goes on with the smart inventory alone.
+	if version := ansibleCoreOnPath(t); !dispatch.ConstructedSupported(version) {
+		r := in.launch(s, "operator", "constructed mark", nil)
+		if r.Status != 400 || !strings.Contains(string(r.Body), "needs ansible-core 2.19 or later") {
+			t.Fatalf("launch \"constructed mark\" on ansible-core %s = %d: %s, want 400 naming the "+
+				"release it needs", version, r.Status, r.Body)
+		}
+		tests = tests[:1]
+	}
 
 	var ids []string
 	resolutions := map[string]map[string]any{}
@@ -168,6 +182,21 @@ func TestImportedComposedInventoriesRunOnTheHostsResolvedAtLaunch(t *testing.T) 
 		t.Errorf("hosts a fresh launch reached (-want +got):\n%s", diff)
 	}
 	in.checkEvidence(s, again.ID)
+}
+
+// ansibleCoreOnPath returns the ansible-core version of the ansible-inventory on PATH, which is the
+// one an install's server runs.
+func ansibleCoreOnPath(t *testing.T) string {
+	t.Helper()
+	out, err := exec.Command("ansible-inventory", "--version").Output()
+	if err != nil {
+		t.Fatalf("ansible-inventory --version: %v", err)
+	}
+	version := inventory.ParseAnsibleCoreVersion(string(out))
+	if version == "" {
+		t.Fatalf("ansible-inventory --version reports no ansible-core version: %s", out)
+	}
+	return version
 }
 
 // addHosts adds hosts to a stored inventory, each pair naming a host line and the group it joins.

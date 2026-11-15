@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -27,10 +28,12 @@ var keyedGroupKeys = []string{
 // constructedPlugins are the names the plugin option may carry.
 var constructedPlugins = []string{"constructed", "ansible.builtin.constructed"}
 
-// lookupMarkers are the Jinja calls that reach outside the inventory: a lookup can read a file or
-// run a command on the server. The constructed plugin's expressions only need host variables, so an
-// option holding one is refused.
-var lookupMarkers = []string{"lookup(", "query(", "q("}
+// lookupCall matches a call of a Jinja function that reaches outside the inventory, lookup, query,
+// or q, as a whole word, so a variable whose name only contains one of them is not mistaken for it.
+// It catches a mistyped expression early with a plain message. It is not what keeps an expression
+// from reaching the server: only an admin writes a constructed inventory's options, and its inputs
+// are checked and marked as not to be templated before Ansible reads them.
+var lookupCall = regexp.MustCompile(`(?i)\b(lookup|query|q)\b[\s)]*\(`)
 
 // maxSourceVarsLen bounds the plugin options so a pasted or imported document stays a config.
 const maxSourceVarsLen = 64 << 10
@@ -126,12 +129,9 @@ func checkOption(key string, value any) error {
 func checkExpression(where string, expr any) error {
 	switch v := expr.(type) {
 	case string:
-		compact := strings.ReplaceAll(strings.ToLower(v), " ", "")
-		for _, marker := range lookupMarkers {
-			if strings.Contains(compact, marker) {
-				return fmt.Errorf("%w: %s calls a lookup, which reads outside the inventory",
-					ErrSourceVars, where)
-			}
+		if lookupCall.MatchString(v) {
+			return fmt.Errorf("%w: %s calls a lookup, which reads outside the inventory",
+				ErrSourceVars, where)
 		}
 	case bool, int, float64, nil:
 	default:

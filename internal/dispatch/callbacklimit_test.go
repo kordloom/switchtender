@@ -75,3 +75,38 @@ func TestLimitHostsNeedsAnsibleInventory(t *testing.T) {
 		t.Errorf("LimitHosts() error = %v, want ErrResolve", err)
 	}
 }
+
+// TestLimitHostsRefusesALimitThatNamesAFile pins that a limit holding an at sign is refused before
+// the inventory is written out or listed, whatever lister the dispatcher holds.
+func TestLimitHostsRefusesALimitThatNamesAFile(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Want         error
+		Limit        string
+		WantListings int
+	}{{ // Test 0: A group pattern is listed.
+		Limit: "web:!canary", WantListings: 1,
+	}, { // Test 1: A file after a comma.
+		Limit: "nosuchhost,@/etc/shells", Want: run.ErrLimitFile,
+	}, { // Test 2: A file after a space.
+		Limit: "web01 @/nonexistent/x", Want: run.ErrLimitFile,
+	}, { // Test 3: A file behind U+001C.
+		Limit: "\x1c@/nonexistent/x", Want: run.ErrLimitFile,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			lister := &pathLister{}
+			d := New(run.NewMemStore(), lister, zap.NewNop(), WithNoJanitor())
+			t.Cleanup(d.Close)
+			_, err := d.LimitHosts(context.Background(), limitInventory, test.Limit)
+			if !errors.Is(err, test.Want) {
+				t.Fatalf("LimitHosts(%q) error = %v, want %v", test.Limit, err, test.Want)
+			}
+			listings, _ := lister.listed("")
+			if diff := cmp.Diff(test.WantListings, listings); diff != "" {
+				t.Errorf("listings mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}

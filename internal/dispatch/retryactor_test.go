@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/kordloom/switchtender/internal/dispatchtest"
+	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -59,9 +60,16 @@ func TestARetryOfSomebodyElsesRunIsJudgedOnWhoRetried(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
 	policies := policy.NewMemStore()
-	d := New(store, &failingLister{hosts: []string{"web01", "web02"}}, nil, WithPolicies(policies))
+	invs := inventory.NewMemStore()
+	d := New(store, &failingLister{hosts: []string{"web01", "web02"}}, nil, WithPolicies(policies),
+		WithInventories(invs))
 	defer d.Close()
 	ctx := context.Background()
+	// The agent splits a stored inventory, since its split of one named by path is refused.
+	fleet := &inventory.Inventory{ID: "inv_fleet", Name: "fleet", Content: "web01\nweb02\n"}
+	if err := invs.Save(ctx, fleet); err != nil {
+		t.Fatalf("invs.Save() error = %v", err)
+	}
 
 	// The agent's own run goes ahead under an exemption, since an agent's run is otherwise held by
 	// default and this one has to fail for a retry to exist.
@@ -73,8 +81,8 @@ func TestARetryOfSomebodyElsesRunIsJudgedOnWhoRetried(t *testing.T) {
 	}
 
 	// An agent submits and the run fails.
-	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2, run.WithActor("release-bot"),
-		run.WithActorType("agent"), run.WithAccount("release-owner"))
+	parent, err := d.SubmitSplit(ctx, "site.yml", "", 2, run.WithActor("release-bot"),
+		run.WithActorType("agent"), run.WithAccount("release-owner"), run.WithInventory(fleet.ID))
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}

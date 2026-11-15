@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
+	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/user"
 )
 
@@ -66,6 +68,10 @@ func applyComposition(ctx context.Context, store inventory.Store, req createInve
 		req.SourceVars, strings.TrimSpace(req.Limit)
 	i.InputIDs = append([]string(nil), req.InputIDs...)
 	if err := inventory.Validate(i); err != nil {
+		return err.Error(), http.StatusBadRequest
+	}
+	// A constructed inventory's limit is handed to ansible-inventory at every resolution.
+	if err := run.CheckLimitFile(i.Limit); err != nil {
 		return err.Error(), http.StatusBadRequest
 	}
 	for _, id := range i.InputIDs {
@@ -156,6 +162,29 @@ func denyNonAdminInventoryCommand(w http.ResponseWriter, r *http.Request, log *z
 	return denyNonAdminCommandSource(w, r, log, source, "an inventory")
 }
 
+// constructedRefusal tells a caller who is not an admin person why a constructed definition is not
+// theirs to write or evaluate.
+const constructedRefusal = "only an admin may write a constructed inventory or preview one that " +
+	"is not saved: its options are expressions Ansible evaluates on this server before any run is " +
+	"held or approved"
+
+// denyNonAdminConstructed refuses a caller who is not an admin person when any of kinds is
+// constructed, and reports true when it has answered. kinds are the kind the request sends and, on
+// an update, the kind stored, so a constructed inventory cannot be turned into another kind, or
+// another kind into one, below admin either.
+//
+// A manage grant delegates an inventory's upkeep, and the route's admin floor gives way to it. A
+// constructed definition is code that runs on this server at preview and at every launch, so no
+// write to one is delegated, a rename included. Delete stays delegable, since it runs nothing.
+func denyNonAdminConstructed(w http.ResponseWriter, r *http.Request, log *zap.Logger,
+	kinds ...string) bool {
+	if !slices.Contains(kinds, inventory.KindConstructed) || adminPerson(r) {
+		return false
+	}
+	respondError(w, log, http.StatusForbidden, constructedRefusal)
+	return true
+}
+
 // listInventoriesResponse wraps the inventory list. Its entries carry no content, so reading the list
 // never reads, masks or sends an inventory's text.
 type listInventoriesResponse struct {
@@ -178,6 +207,9 @@ func createInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 		}
 		if req.Name == "" {
 			respondError(w, log, http.StatusBadRequest, "name is required")
+			return
+		}
+		if denyNonAdminConstructed(w, r, log, req.Kind) {
 			return
 		}
 		source, sealed, msg, status := credential.SourceLocal, "", "", 0
@@ -259,6 +291,9 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 		if err != nil {
 			log.Error("server: read inventory: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read inventory")
+			return
+		}
+		if denyNonAdminConstructed(w, r, log, req.Kind, existing.Kind) {
 			return
 		}
 		source, sealed, msg, status := credential.SourceLocal, "", "", 0
@@ -537,6 +572,11 @@ func previewInventoryHandler(store inventory.Store, previewer InventoryPreviewer
 		}
 		if !req.composed() {
 			respondError(w, log, http.StatusBadRequest, errNotComposed)
+			return
+		}
+		// The route is admin only. An agent's token carries its owner's role, so it is asked again
+		// here: an unsaved constructed definition is evaluated only for an admin in person.
+		if denyNonAdminConstructed(w, r, log, req.Kind) {
 			return
 		}
 		inv := &inventory.Inventory{Name: req.Name}

@@ -115,7 +115,7 @@ when you configure them, and each is optional:</p>
 <tr>
 <td>Terraform and OpenTofu modules</td>
 <td>A plan's configuration calls registry or remote modules</td>
-<td>The module sources the configuration names, from where the plan runs, with the run's own credentials</td>
+<td>The module sources the configuration names, from where the plan runs. The approval gate's download carries no credential and none of the server's environment but <code>PATH</code>, the proxy variables, <code>SSL_CERT_FILE</code>, and <code>SSL_CERT_DIR</code>, and runs for no plan an agent asked for. A run downloading at execution carries the run's own credentials</td>
 </tr>
 </tbody>
 </table>

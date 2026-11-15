@@ -611,7 +611,8 @@ func TestValidateFederatedCredentials(t *testing.T) {
 
 // TestFederatedCredentialIsNotAStoredSecret pins that a federated credential named where a stored
 // secret is read, a registry login, a project key, or an inventory source, is refused rather than
-// handed over as an empty value.
+// handed over as an empty value. Named as a registry login it is refused by the rule every pull
+// credential faces, since it is not a registry credential.
 func TestFederatedCredentialIsNotAStoredSecret(t *testing.T) {
 	t.Parallel()
 	store := credential.NewMemStore()
@@ -619,10 +620,10 @@ func TestFederatedCredentialIsNotAStoredSecret(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 	d := &Dispatcher{credentials: store, sealer: fedSealer, log: zap.NewNop()}
-	spec := &roundhouse.Spec{}
+	spec := &roundhouse.Spec{Image: "ghcr.io/acme/ee:1"}
 	_, err := d.resolvePullCredential(context.Background(), "cred_oidc", spec)
-	if !errors.Is(err, credential.ErrBadKind) {
-		t.Errorf("resolvePullCredential() error = %v, want %v", err, credential.ErrBadKind)
+	if !errors.Is(err, credential.ErrPullKind) {
+		t.Errorf("resolvePullCredential() error = %v, want %v", err, credential.ErrPullKind)
 	}
 	if spec.RegistryUsername != "" || spec.RegistryPassword != "" {
 		t.Error("a federated credential reached the registry login")
@@ -685,11 +686,10 @@ func TestAShardNamesItsParentsLaunch(t *testing.T) {
 	}
 }
 
-// TestAFederatedTokenSaysWhyItWasMinted covers the tokens minted for a module download, which
-// happen before a run is recorded or when none will be. The gate's download names the run it is
-// judging and says it was the gate's download, so a run id no run was recorded under, because the
-// gate refused it, comes with why. A pull request review's pre-check names no run at all: it names
-// the pull request and the commit it read.
+// TestAFederatedTokenSaysWhyItWasMinted covers when a federated token is minted at all. The
+// gate's module download and a pull request review's pre-check both run before anyone approves,
+// and neither opens the run's credentials, so neither mints a token: the get they run is handed
+// none. The run itself, once it executes, mints one that says it is for the run and names it.
 func TestAFederatedTokenSaysWhyItWasMinted(t *testing.T) {
 	t.Parallel()
 	issuer, err := federation.NewIssuer("https://st.example.com", federation.NewMemKeyStore(),
@@ -703,65 +703,79 @@ func TestAFederatedTokenSaysWhyItWasMinted(t *testing.T) {
 	}
 	var mu sync.Mutex
 	var minted []federation.Claims
-	fetch := roundhouse.ModuleFetcherFunc(func(_ context.Context, spec roundhouse.Spec,
-		_ io.Writer) (roundhouse.Result, error) {
-		for _, e := range spec.Env {
+	tokensIn := func(env []string) []federation.Claims {
+		var out []federation.Claims
+		for _, e := range env {
 			if path, ok := strings.CutPrefix(e, federation.TokenFileEnvVar+"="); ok {
 				token, err := os.ReadFile(path)
 				if err != nil {
 					t.Errorf("read the token file: %v", err)
 					continue
 				}
-				c := tokenClaims(t, issuer, string(token))
-				mu.Lock()
-				minted = append(minted, c)
-				mu.Unlock()
+				out = append(out, tokenClaims(t, issuer, string(token)))
 			}
 		}
+		return out
+	}
+	executes := roundhouse.RunnerFunc(func(_ context.Context, spec roundhouse.Spec,
+		_ io.Writer) (roundhouse.Result, error) {
+		found := tokensIn(spec.Env)
+		mu.Lock()
+		minted = append(minted, found...)
+		mu.Unlock()
 		return roundhouse.Result{ExitCode: 0}, nil
 	})
-	d := New(run.NewMemStore(), fetchingRunner{Runner: dispatchtest.OKRunner(), fetch: fetch}, zap.NewNop(),
+	source := "https://modules.example.test/clean.tar.gz"
+	get := &stubGet{modules: []stubModule{{Key: "net", Source: source,
+		Files: map[string]string{"main.tf": "output \"o\" {\n  value = 1\n}\n"}}}}
+	store := run.NewMemStore()
+	d := New(store, fetchingRunner{Runner: executes, fetch: get}, zap.NewNop(),
 		WithNoJanitor(), WithCredentials(creds, fedSealer), WithFederation(issuer),
 		WithPolicies(dispatchtest.RulesHolding(t, excludePlans(run.ToolTerraform))),
-		WithRunFilesRoot(t.TempDir()))
+		WithRunFilesRoot(t.TempDir()), WithClaimInterval(5*time.Millisecond))
 	t.Cleanup(d.Close)
 	dir := t.TempDir()
-	dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": registryCall("clean")})
+	call := "module \"net\" {\n  source = \"" + source + "\"\n}\n"
+	dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": call})
 	ctx := context.Background()
 	d.DryRunScansAt(ctx, &run.Run{Tool: run.ToolTerraform, Command: dir, DryRun: true,
 		CredentialIDs: []string{"cred_oidc"}, PinnedCommit: "0123456789abcdef",
 		Labels: map[string]string{run.LabelPullRequest: "7"}})
 	// Another configuration, so the gate downloads for the submission rather than reusing the
 	// pre-check's download.
-	dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": registryCall("clean") + "\n# next push\n"})
+	dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": call + "\n# next push\n"})
 	submitted, err := d.Submit(ctx, "", "", run.WithTool(run.ToolTerraform),
 		run.WithCommand(dir), run.WithDryRun(true), run.WithCredentialIDs([]string{"cred_oidc"}))
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
+	final := dispatchtest.WaitTerminal(t, store, submitted.ID)
+	if final.Status != run.StatusSucceeded {
+		t.Fatalf("the plan ended %q: %s", final.Status, final.Error)
+	}
+	handed := get.handed()
+	if len(handed) != 2 {
+		t.Fatalf("the get was reached %d times, want once for the pre-check and once for the gate",
+			len(handed))
+	}
+	for i, spec := range handed {
+		if found := tokensIn(spec.Env); len(found) != 0 {
+			t.Errorf("download %d was handed %d tokens, want none before anyone approved", i,
+				len(found))
+		}
+	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(minted) != 2 {
-		t.Fatalf("minted %d tokens, want one for the pre-check and one for the gate", len(minted))
-	}
 	type why struct {
 		// Purpose is the purpose claim.
 		Purpose string
 		// RunID is the run_id claim.
 		RunID string
-		// PullRequest is the pull_request claim.
-		PullRequest string
-		// CommitSHA is the commit_sha claim.
-		CommitSHA string
 	}
-	want := []why{
-		{Purpose: federation.PurposeReviewPrecheck, PullRequest: "7", CommitSHA: "0123456789abcdef"},
-		{Purpose: federation.PurposeGateDownload, RunID: submitted.ID},
-	}
+	want := []why{{Purpose: federation.PurposeRun, RunID: submitted.ID}}
 	var got []why
 	for _, c := range minted {
-		got = append(got, why{Purpose: c.Purpose, RunID: c.RunID, PullRequest: c.PullRequest,
-			CommitSHA: c.CommitSHA})
+		got = append(got, why{Purpose: c.Purpose, RunID: c.RunID})
 	}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("token purposes mismatch (-want +got):\n%s", diff)

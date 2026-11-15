@@ -2313,13 +2313,20 @@ func dbFromEnv(cmd *cobra.Command, flagValue string) string {
 }
 
 // imageResolverOption returns the dispatch option that resolves each submitted run's image tag to
-// the digest its registry serves, through a client that refuses the addresses a server-side request
-// forgery aims at. With --image-digest-lookup off it sets none, and every image stays bound to its
-// tag.
+// the digest its registry serves. With --image-digest-lookup off it sets none, and every image
+// stays bound to its tag.
 func imageResolverOption() dispatch.Option {
 	if !serveImageDigestLookup {
 		return dispatch.WithImageResolver(nil)
 	}
-	client := &http.Client{Transport: safedial.Transport(), Timeout: imageref.DefaultTimeout}
-	return dispatch.WithImageResolver(imageref.NewResolver(client, imageref.DefaultTimeout))
+	return dispatch.WithImageResolver(newImageResolver())
+}
+
+// newImageResolver returns the resolver the server asks registries through. Whoever submits a run
+// names its image, so the registry host is a caller-supplied address, and the client refuses what a
+// server-side request forgery aims at: the metadata endpoints and this server's own loopback
+// interface. A registry on a private address stays reachable.
+func newImageResolver() *imageref.Resolver {
+	client := &http.Client{Transport: safedial.OffHostTransport(), Timeout: imageref.DefaultTimeout}
+	return imageref.NewResolver(client, imageref.DefaultTimeout)
 }

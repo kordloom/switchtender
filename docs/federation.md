@@ -91,9 +91,7 @@ The settings shared by every kind:
 | `delivery` | `file` | `file` or `exchange`, for `aws_oidc` and `gcp_oidc`. |
 
 The AWS settings: `role_arn` is the role to assume in any partition. `session_name` names the session in
-CloudTrail and defaults to `switchtender-` followed by the run id, `switchtender-gate-` followed by
-the run id for the approval gate's module download, and `switchtender-review-` followed by the pull
-request number for a review's pre-check, which no run exists for. `session_duration` is the session
+CloudTrail and defaults to `switchtender-` followed by the run id. `session_duration` is the session
 length in seconds from 900 to 43200 and applies to the exchange delivery. `sts_endpoint` overrides the
 STS endpoint, for a FIPS, GovCloud, China, or VPC endpoint. With the exchange delivery SwitchTender sends
 the token there itself. With the file delivery the tool makes the exchange, and the setting reaches it
@@ -161,9 +159,9 @@ not apply, so a policy condition never meets a missing claim.
 | `aud` | The audience the credential sets. |
 | `exp`, `iat`, `nbf` | Expiry, issue time, and not-before time, in seconds since the epoch. |
 | `jti` | A unique token id. |
-| `run_id` | The run the token was minted for, empty for a review's pre-check, which no run exists for. |
-| `purpose` | Why the token was minted: `run` for a run executing, `gate_download` for the module download the approval gate runs with the run's credentials before it records the run, or `review_precheck` for the module download a pull request review runs before it plans. |
-| `pull_request` | The pull or merge request number a review's plan or pre-check is for, empty otherwise. |
+| `run_id` | The run the token was minted for. |
+| `purpose` | Why the token was minted: always `run`, for a run executing. |
+| `pull_request` | The pull or merge request number a review's plan is for, empty otherwise. |
 | `parent_run_id` | The pipeline or split run this run is a step or shard of, empty for a top-level run. |
 | `org_id` | The organization that owns the run. |
 | `project_id` | The git project the run reads from. |
@@ -180,14 +178,11 @@ not apply, so a policy condition never meets a missing claim.
 | `approved_by`, `approved_by_type` | The approver the audit chain recorded, and how they authenticated. |
 | `approval_policy` | The approval rule that held the run. |
 
-A token can be minted before a run exists. The approval gate downloads the modules a Terraform or
-OpenTofu plan calls with the run's own credentials before it records the run, and a pull request
-review does the same before it plans, to learn whether the plan is safe to run at all. The gate's
-token carries `purpose` `gate_download` and the id the run will be recorded under, so a run id with
-no run behind it, because the gate refused the run, says why. A review's pre-check carries `purpose`
-`review_precheck`, names no run, and names the pull request in `pull_request` and the commit it read
-in `commit_sha`. Both carry the subject the run itself would, so a trust policy grants the download
-exactly the access the run would have.
+A token is minted only for a run executing, never before. The approval gate downloads the modules
+a Terraform or OpenTofu plan calls before it records the run, and a pull request review does the
+same before it plans, but neither opens the run's credentials, so neither mints a token. No token
+exists for a run the gate refuses, and none for a held run until a person releases it and it
+executes.
 
 A shard or a pipeline step reads `launcher_type`, the actor, and the approval from the run that was
 launched, since that run's requester and that run's approval are what released it. `approved` is true

@@ -76,8 +76,7 @@
   ],
   "inventory": [
     {"name": "fleet", "organization": {"name": "Platform"},
-     "variables": {"ansible_connection": "local",
-                   "ansible_python_interpreter": "{{ ansible_playbook_python }}"},
+     "variables": {"ansible_connection": "local", "ansible_python_interpreter": "auto_silent"},
      "related": {
        "hosts": [
          {"name": "web1", "variables": {"ansible_host": "10.20.0.11"}},
@@ -90,8 +89,7 @@
        ]
      }},
     {"name": "edge", "organization": {"name": "Platform"},
-     "variables": {"ansible_connection": "local",
-                   "ansible_python_interpreter": "{{ ansible_playbook_python }}"},
+     "variables": {"ansible_connection": "local", "ansible_python_interpreter": "auto_silent"},
      "related": {
        "hosts": [
          {"name": "edge1", "variables": {"ansible_host": "10.30.0.11"}},
@@ -101,14 +99,26 @@
          {"name": "web", "related": {"hosts": [{"name": "edge1"}, {"name": "edge-canary"}]}}
        ]
      }},
+    {"name": "legacy", "organization": {"name": "Platform"},
+     "variables": {"ansible_connection": "local",
+                   "ansible_python_interpreter": "{{ ansible_playbook_python }}"},
+     "related": {
+       "hosts": [{"name": "old1", "variables": {"ansible_host": "10.40.0.11"}}]
+     }},
     {"name": "web everywhere", "kind": "smart", "organization": {"name": "Platform"},
      "host_filter": "groups__name=web and not name__icontains=canary"},
     {"name": "shut down", "kind": "constructed", "organization": {"name": "Platform"},
      "related": {
        "input_inventories": [{"name": "fleet"}, {"name": "edge"}],
        "inventory_sources": [{"name": "shut down", "source": "constructed",
-         "source_vars": "strict: false\ngroups:\n  off: state | default('running') == 'shutdown'\n",
-         "limit": "off"}]
+         "source_vars": "strict: false\ngroups:\n  halted: state | default('running') == 'shutdown'\n",
+         "limit": "halted"}]
+     }},
+    {"name": "legacy view", "kind": "constructed", "organization": {"name": "Platform"},
+     "related": {
+       "input_inventories": [{"name": "legacy"}],
+       "inventory_sources": [{"name": "legacy view", "source": "constructed",
+         "source_vars": "strict: false\n"}]
      }}
   ],
   "job_templates": [

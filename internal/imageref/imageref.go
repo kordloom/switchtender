@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -15,6 +16,11 @@ const (
 	dockerHubDomain   = "docker.io"
 	dockerHubRegistry = "registry-1.docker.io"
 )
+
+// dockerHubHosts lists every host name that stands for Docker Hub's registry, so a login bound to
+// docker.io matches an image the hub serves under any of them. The list is fixed: no other registry
+// has an alias here.
+var dockerHubHosts = []string{dockerHubDomain, "index.docker.io", dockerHubRegistry}
 
 // ErrReference is returned for an image reference this package cannot read.
 var ErrReference = errors.New("invalid image reference")
@@ -110,4 +116,32 @@ func (r Ref) registryHost() string {
 		return dockerHubRegistry
 	}
 	return r.Domain
+}
+
+// RegistryHost returns the host that serves the registry API for ref, with its port when ref names
+// one. It is the host a pull login for the image would be sent to.
+func RegistryHost(ref string) (string, error) {
+	r, err := Parse(ref)
+	if err != nil {
+		return "", err
+	}
+	return r.registryHost(), nil
+}
+
+// SameRegistry reports whether a and b name one registry host. Hosts compare without regard to
+// case and a port is part of the host, so registry.example.com and registry.example.com:5000 are
+// two registries. Docker Hub's host names all stand for one registry. An empty host matches
+// nothing.
+func SameRegistry(a, b string) bool {
+	a, b = canonicalHost(a), canonicalHost(b)
+	return a != "" && a == b
+}
+
+// canonicalHost lowers host and folds Docker Hub's host names into docker.io.
+func canonicalHost(host string) string {
+	host = strings.ToLower(host)
+	if slices.Contains(dockerHubHosts, host) {
+		return dockerHubDomain
+	}
+	return host
 }

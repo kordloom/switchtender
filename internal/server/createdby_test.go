@@ -31,7 +31,7 @@ func TestScheduleAndTriggerRecordWhoCreatedThem(t *testing.T) {
 	t.Run("schedule", func(t *testing.T) {
 		t.Parallel()
 		store := schedule.NewMemStore()
-		handler := createScheduleHandler(store, nil, zap.NewNop())
+		handler := createScheduleHandler(store, nil, nil, zap.NewNop())
 
 		body := `{"name":"nightly","cron":"0 2 * * *","playbook":"site.yml","inventory":"hosts"}`
 		rec := httptest.NewRecorder()

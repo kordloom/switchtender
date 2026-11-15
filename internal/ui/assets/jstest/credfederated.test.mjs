@@ -46,6 +46,24 @@ test("a federated kind hides the secret and source and asks for settings", async
 	assert.equal(document.getElementById("cred-secret").disabled, false);
 });
 
+test("a registry login shows the host it must name, and a plain kind the general example", () => {
+	const { app, document } = mount();
+	app.wireCredentialForm();
+	const kind = document.getElementById("cred-kind");
+	kind.value = "registry";
+	fire(kind, "change");
+	assert.match(document.getElementById("cred-settings").placeholder, /^registry_host=/,
+		"the registry kind did not show the host its login is bound to");
+	assert.match(document.getElementById("cred-kind-hint").textContent, /no other/,
+		"the registry hint did not say where the login goes");
+	assert.equal(document.getElementById("cred-secret-field").hidden, false,
+		"a registry login stores a secret, so the box must stay");
+
+	kind.value = "env";
+	fire(kind, "change");
+	assert.match(document.getElementById("cred-settings").placeholder, /^user=deploy/);
+});
+
 test("a federated credential is saved with settings and no secret or source", async () => {
 	const { app, document, clock, posted } = mount();
 	app.wireCredentialForm();

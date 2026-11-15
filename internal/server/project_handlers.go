@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/project"
 )
@@ -43,7 +44,8 @@ type listProjectsResponse struct {
 }
 
 // createProjectHandler stores a new project.
-func createProjectHandler(store project.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+func createProjectHandler(store project.Store, creds credential.Store, authz *authorizer,
+	log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "projects not enabled")
@@ -74,6 +76,9 @@ func createProjectHandler(store project.Store, authz *authorizer, log *zap.Logge
 			req.CredentialID, req.PullCredentialID)) {
 			return
 		}
+		if denyPullKind(w, r, log, creds, req.PullCredentialID) {
+			return
+		}
 		p := &project.Project{
 			ID: project.NewID(), Name: req.Name, RepoURL: req.RepoURL,
 			Branch: req.Branch, CredentialID: req.CredentialID,
@@ -91,7 +96,8 @@ func createProjectHandler(store project.Store, authz *authorizer, log *zap.Logge
 }
 
 // updateProjectHandler changes an existing project's fields, keeping its id and creation time.
-func updateProjectHandler(store project.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+func updateProjectHandler(store project.Store, creds credential.Store, authz *authorizer,
+	log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "projects not enabled")
@@ -137,6 +143,9 @@ func updateProjectHandler(store project.Store, authz *authorizer, log *zap.Logge
 		}
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse,
 			req.CredentialID, req.PullCredentialID)) {
+			return
+		}
+		if denyPullKind(w, r, log, creds, req.PullCredentialID) {
 			return
 		}
 		p := &project.Project{

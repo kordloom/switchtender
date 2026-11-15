@@ -35,6 +35,9 @@ func (d *Dispatcher) validateRun(ctx context.Context, r *run.Run) error {
 	if err := validateGitRef(r); err != nil {
 		return err
 	}
+	if err := run.CheckLimitFile(r.Limit); err != nil {
+		return err
+	}
 	return d.validateProject(ctx, r.ProjectID)
 }
 
@@ -290,6 +293,16 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	}
 	if shards < 2 {
 		return d.Submit(ctx, playbook, inventory, opts...)
+	}
+	// The listing below runs before the run is validated, graded, or held, and with no stored
+	// inventory it opens the path the caller typed. Who may hand in such a path is decided where the
+	// caller's role is known. This refuses the one case the run itself shows: an agent's.
+	if probe.ActorType == agentActorType &&
+		run.RawPathSplit(probe.Tool, inventory, probe.InventoryID, shards) {
+		return nil, fmt.Errorf("%w: store the inventory and name it by its id", ErrAgentPathSplit)
+	}
+	if err := run.CheckLimitFile(probe.Limit); err != nil {
+		return nil, err
 	}
 	if d.hostLister == nil {
 		return nil, ErrNoHostLister

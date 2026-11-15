@@ -288,20 +288,20 @@ func (s *seeingRunner) Run(_ context.Context, spec roundhouse.Spec, _ io.Writer)
 }
 
 // TestAPlanRunsTheModulesTheGateRead proves a held plan executes the module code the gate read and
-// an approver released, or nothing, when a newer version of a module appears while it waits. The
-// gate downloads version 1.0.0 with real terraform and keeps it. 1.1.0 is then published, which the
-// configuration's constraint allows, so a fresh init would install it. Approved, the plan runs the
-// kept 1.0.0 with init told to install nothing. With the kept copy gone, as after it expires or on
-// another executor, the run downloads again, finds 1.1.0, and is refused with why. With nothing
-// published, the fresh download matches and the plan runs.
+// an approver released, or nothing, when the code at a module's address changes while it waits.
+// The gate downloads the module with real terraform and keeps it. The same address then serves
+// changed code, so a fresh download would install that. Approved, the plan runs the kept copy with
+// init told to install nothing. With the kept copy gone, as after it expires or on another
+// executor, the run downloads again, finds the changed code, and is refused with why. With nothing
+// changed, the fresh download matches and the plan runs.
 //
 //nolint:funlen // Test function.
 func TestAPlanRunsTheModulesTheGateRead(t *testing.T) {
 	t.Parallel()
 	one := "output \"o\" {\n  value = \"one\"\n}\n"
 	tests := []struct {
-		// Publish publishes 1.1.0 after the gate read 1.0.0.
-		Publish bool
+		// Change serves changed code at the module's address after the gate read it.
+		Change bool
 		// Forget drops the copy the gate kept.
 		Forget bool
 		// WantStatus is how the run ends.
@@ -310,12 +310,12 @@ func TestAPlanRunsTheModulesTheGateRead(t *testing.T) {
 		WantSeen string
 		// WantError is a fragment of why the run was refused.
 		WantError string
-	}{{ // Test 0: A newer release published while the plan waited is not what runs.
-		Publish: true, WantStatus: run.StatusSucceeded, WantSeen: one,
-	}, { // Test 1: With the kept copy gone, the newer release is found and the run refused.
-		Publish: true, Forget: true, WantStatus: run.StatusFailed,
+	}{{ // Test 0: Code changed at the module's address while the plan waited is not what runs.
+		Change: true, WantStatus: run.StatusSucceeded, WantSeen: one,
+	}, { // Test 1: With the kept copy gone, the changed code is found and the run refused.
+		Change: true, Forget: true, WantStatus: run.StatusFailed,
 		WantError: "refused: the modules this run would use are not the ones the gate read",
-	}, { // Test 2: With the kept copy gone and nothing newer, the same modules download and run.
+	}, { // Test 2: With the kept copy gone and nothing changed, the same modules download and run.
 		Forget: true, WantStatus: run.StatusSucceeded, WantSeen: one,
 	}}
 	for testNum, test := range tests {
@@ -324,8 +324,7 @@ func TestAPlanRunsTheModulesTheGateRead(t *testing.T) {
 			ctx := context.Background()
 			reg := newTestRegistry(t, map[string]registryModule{
 				"drifts": {Files: map[string]string{"main.tf": one}}})
-			creds, sealer := cliCredential(t, reg.cliConfig(t))
-			repo := newTreeRepo(t, map[string]string{"infra/main.tf": registryCall("drifts")})
+			repo := newTreeRepo(t, map[string]string{"infra/main.tf": reg.call("drifts")})
 			syncer, err := project.NewSyncer(t.TempDir())
 			if err != nil {
 				t.Fatalf("NewSyncer() error = %v", err)
@@ -344,8 +343,7 @@ func TestAPlanRunsTheModulesTheGateRead(t *testing.T) {
 				WithPolicies(dispatchtest.RulesHolding(t, &policy.Policy{ID: "pol_all", Name: "hold plans",
 					Tool: run.ToolTerraform, Effect: policy.EffectRequireApproval,
 					MaxDestroy: policy.DisabledMaxDestroy})),
-				WithCredentials(creds, sealer), WithRunFilesRoot(files), WithNoJanitor(),
-				WithClaimInterval(5*time.Millisecond))
+				WithRunFilesRoot(files), WithNoJanitor(), WithClaimInterval(5*time.Millisecond))
 			t.Cleanup(d.Close)
 			wt, err := syncer.Sync(p, "")
 			if err != nil {
@@ -354,8 +352,7 @@ func TestAPlanRunsTheModulesTheGateRead(t *testing.T) {
 			wt.Cleanup()
 
 			held, err := d.Submit(ctx, "", "", run.WithTool(run.ToolTerraform),
-				run.WithCommand("infra"), run.WithProject(p.ID), run.WithDryRun(true),
-				run.WithCredentialIDs([]string{"cred_tf"}))
+				run.WithCommand("infra"), run.WithProject(p.ID), run.WithDryRun(true))
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
@@ -364,8 +361,8 @@ func TestAPlanRunsTheModulesTheGateRead(t *testing.T) {
 				t.Fatalf("submitted %q with modules %q, want held with the gate's digest: %+v",
 					held.Status, held.ModulesDigest(), held.DryRunScans)
 			}
-			if test.Publish {
-				reg.publish("drifts", map[string]string{"main.tf": "output \"o\" {\n  value = " +
+			if test.Change {
+				reg.replace("drifts", map[string]string{"main.tf": "output \"o\" {\n  value = " +
 					"\"two\"\n}\n"})
 			}
 			if test.Forget {
@@ -482,24 +479,23 @@ func TestTheGateDownloadsEveryModuleAfresh(t *testing.T) {
 			"files/template.txt": "a file the module reads"}},
 		"other": {Files: map[string]string{"main.tf": "output \"p\" {\n  value = 2\n}\n"}},
 	})
-	creds, sealer := cliCredential(t, reg.cliConfig(t))
+	clean := reg.srv.URL + "/archive/clean-1.0.0.tar.gz"
+	other := reg.srv.URL + "/archive/other-1.0.0.tar.gz"
 	dir := t.TempDir()
 	dispatchtest.WriteFiles(t, dir, map[string]string{
-		"main.tf": fmt.Sprintf("module \"a\" {\n  source  = \"%s/acme/clean/null\"\n"+
-			"  version = \"1.0.0\"\n}\nmodule \"b\" {\n  source  = \"%s/acme/other/null\"\n"+
-			"  version = \"1.0.0\"\n}\n", registryHost, registryHost),
+		"main.tf": fmt.Sprintf("module \"a\" {\n  source = %q\n}\nmodule \"b\" {\n  source = %q\n}\n",
+			clean, other),
 		".terraform/modules/modules.json": `{"Modules":[{"Key":"","Source":"","Dir":"."},` +
-			`{"Key":"a","Source":"` + registryHost + `/acme/clean/null","Version":"1.0.0",` +
-			`"Dir":".terraform/modules/a"}]}`,
+			`{"Key":"a","Source":"` + clean + `","Dir":".terraform/modules/a"}]}`,
 		".terraform/modules/a/main.tf": "output \"o\" {\n  value = 1\n}\n",
 	})
 	files := t.TempDir()
 	d := New(run.NewMemStore(), newFetchingRunner(t), zap.NewNop(),
 		WithPolicies(dispatchtest.RulesHolding(t, excludePlans(run.ToolTerraform))),
-		WithCredentials(creds, sealer), WithRunFilesRoot(files), WithNoJanitor())
+		WithRunFilesRoot(files), WithNoJanitor())
 	t.Cleanup(d.Close)
 	got, err := d.Submit(ctx, "", "", run.WithTool(run.ToolTerraform), run.WithCommand(dir),
-		run.WithDryRun(true), run.WithCredentialIDs([]string{"cred_tf"}))
+		run.WithDryRun(true))
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}

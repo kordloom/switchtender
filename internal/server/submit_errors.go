@@ -50,16 +50,19 @@ var submitClasses = []struct {
 	errs  []error
 }{
 	{class: submitInput, errs: []error{
-		credential.ErrNotFound, credential.ErrNoKey, project.ErrNotFound, inventory.ErrNotFound,
-		inventory.ErrNeedsAnsible, inventory.ErrInvalidInventory, inventory.ErrTooManyHosts,
-		inventory.ErrHostFilter, inventory.ErrSourceVars, dispatch.ErrNoPlaybook,
+		credential.ErrNotFound, credential.ErrNoKey, credential.ErrPullKind, project.ErrNotFound,
+		inventory.ErrNotFound, inventory.ErrNeedsAnsible, inventory.ErrInvalidInventory,
+		inventory.ErrTooManyHosts, inventory.ErrHostFilter, inventory.ErrSourceVars,
+		dispatch.ErrNoPlaybook,
 		dispatch.ErrNoCommand, dispatch.ErrUnknownTool, dispatch.ErrToolCredential,
 		dispatch.ErrNoSteps, dispatch.ErrTooManySteps, dispatch.ErrStepInput, dispatch.ErrUnnamedStep,
 		dispatch.ErrDuplicateStep, dispatch.ErrUnknownDependency, dispatch.ErrDependencyCycle,
-		run.ErrApprovalStep, run.ErrDenyPath,
+		run.ErrApprovalStep, run.ErrDenyPath, run.ErrLimitFile,
 	}},
 	{class: submitSecret, errs: []error{credential.ErrNoSecret, credential.ErrUnreadable}},
-	{class: submitPolicy, errs: []error{dispatch.ErrPolicyDenied, dispatch.ErrQueueUnlicensed}},
+	{class: submitPolicy, errs: []error{
+		dispatch.ErrPolicyDenied, dispatch.ErrQueueUnlicensed, dispatch.ErrAgentPathSplit,
+	}},
 	{class: submitContent, errs: []error{inventory.ErrContentRead, dispatch.ErrImageUnpinned}},
 	{class: submitCapacity, errs: []error{dispatch.ErrLowSpace}},
 	{class: submitInput, errs: []error{inventory.ErrComposition, inventory.ErrResolve}},

@@ -43,6 +43,9 @@ type secretSource interface {
 	// credentialIDs returns the credentials the execution materializes, in order, or why this
 	// executor cannot materialize them.
 	credentialIDs(ctx context.Context, r *run.Run) ([]string, error)
+	// record returns the credential with id as stored, without opening its secret, so its kind and
+	// settings can be checked before a value is opened or minted.
+	record(ctx context.Context, id string) (*credential.Credential, error)
 	// credential returns the credential with id and its resolved value, with a lease when the value
 	// was minted for this run. A federated credential comes back with errFederatedCredential.
 	credential(ctx context.Context, id string) (*credential.Credential, string, *secretsource.Lease,
@@ -96,6 +99,18 @@ func (s storeSource) credentialIDs(ctx context.Context, r *run.Run) ([]string, e
 		return nil, credential.ErrNoKey
 	}
 	return ids, nil
+}
+
+// record reads one credential from the store and opens nothing.
+func (s storeSource) record(ctx context.Context, id string) (*credential.Credential, error) {
+	if s.d.credentials == nil || s.d.sealer == nil {
+		return nil, credential.ErrNoKey
+	}
+	c, err := s.d.credentials.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("credential %s: %w", id, err)
+	}
+	return c, nil
 }
 
 // credential opens one credential from the store.
@@ -191,6 +206,22 @@ func (s *deliveredSource) credentialIDs(ctx context.Context, r *run.Run) ([]stri
 		}
 	}
 	return p.CredentialIDs, nil
+}
+
+// record returns a delivered credential's record, which the control node sent with its kind and
+// settings as stored.
+func (s *deliveredSource) record(ctx context.Context, id string) (*credential.Credential, error) {
+	p, err := s.load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	dc := p.Credential(id)
+	if dc == nil {
+		return nil, fmt.Errorf("%w: credential %s was not delivered with this run's claim",
+			ErrNotDelivered, id)
+	}
+	c := dc.Record
+	return &c, nil
 }
 
 // credential returns a delivered credential and its value. Its source was already resolved on the
@@ -343,6 +374,33 @@ func (s *deliveredSource) wipe() {
 	s.payload, s.wiped = nil, true
 }
 
+// openPull returns the pull credential of a run executing in image, in the form delivered to a
+// relay worker. A credential that is not a registry login is refused. One bound to another registry
+// than the image's is delivered as its record with no value and is never opened, since the worker
+// would not use its login for that image either. A minted login's lease joins leases.
+func (d *Dispatcher) openPull(ctx context.Context, leases *runLeases, id, image string) (*handoff.Credential, error) {
+	c, err := storeSource{d: d}.record(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("pull credential %s: %w", id, err)
+	}
+	if err := credential.CheckPull(c); err != nil {
+		return nil, err
+	}
+	if pullHost(c, image) == "" {
+		return handoff.NewCredential(c, ""), nil
+	}
+	opened, plain, lease, err := d.openCredential(ctx, id)
+	if lease != nil {
+		if lerr := leases.add(ctx, id, lease); lerr != nil {
+			return nil, lerr
+		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("pull credential %s: %w", id, err)
+	}
+	return handoff.NewCredential(opened, plain), nil
+}
+
 // NeedsSecrets reports whether r carries a secret its executor would open: a credential of its own
 // or of the inventory it targets, the registry login its image is pulled with, or a secret survey
 // answer. The relay asks it at claim to decide whether there is anything to deliver at all.
@@ -426,16 +484,11 @@ func (d *Dispatcher) OpenSecrets(ctx context.Context, r *run.Run) (*handoff.Payl
 		}
 	}
 	if pull != "" && p.Credential(pull) == nil {
-		c, plain, lease, err := d.openCredential(ctx, pull)
-		if lease != nil {
-			if lerr := leases.add(ctx, pull, lease); lerr != nil {
-				return fail(lerr)
-			}
-		}
+		dc, err := d.openPull(ctx, leases, pull, r.Image)
 		if err != nil {
-			return fail(fmt.Errorf("pull credential %s: %w", pull, err))
+			return fail(err)
 		}
-		p.Credentials = append(p.Credentials, handoff.NewCredential(c, plain))
+		p.Credentials = append(p.Credentials, dc)
 	}
 	answers, err := d.openSecretVars(r)
 	if err != nil {

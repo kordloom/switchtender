@@ -159,8 +159,8 @@ func (d *Dispatcher) DryRunScansAt(ctx context.Context, r *run.Run) []run.DryRun
 	}
 	probe := *r
 	probe.DryRun = true
-	// The probe stands for the run about to be submitted, and a module download for it opens
-	// credentials and private files labeled by a run id, so it carries one of its own.
+	// The probe stands for the run about to be submitted, and a module download for it writes its
+	// private copy into a directory labeled by a run id, so it carries one of its own.
 	if probe.ID == "" {
 		probe.ID = run.NewID()
 	}
@@ -169,7 +169,7 @@ func (d *Dispatcher) DryRunScansAt(ctx context.Context, r *run.Run) []run.DryRun
 	}
 	checkouts := d.checkoutReader()
 	pb, unread := scanRunPlaybook(&probe, checkouts)
-	scan, ok := dryRunScan(&probe, pb, unread, checkouts, d.precheckPlan)
+	scan, ok := dryRunScan(&probe, pb, unread, checkouts, d.scanPlan)
 	if !ok {
 		return nil
 	}

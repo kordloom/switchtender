@@ -41,6 +41,26 @@ func denyNonAdminCommandSource(w http.ResponseWriter, r *http.Request, log *zap.
 	return false
 }
 
+// denyPullKind refuses a request that names a credential of any kind but registry as a pull
+// credential, and reports true when it has already answered the request. A pull credential's login
+// is handed to the registry an image names, so a registry login is the only thing that may be one.
+// The submission checks the same rule again, which is what covers a credential this cannot read.
+func denyPullKind(w http.ResponseWriter, r *http.Request, log *zap.Logger, creds credential.Store,
+	id string) bool {
+	if id == "" || creds == nil {
+		return false
+	}
+	c, err := creds.Get(r.Context(), id)
+	if err != nil {
+		return false
+	}
+	if err := credential.CheckPull(c); err != nil {
+		respondError(w, log, http.StatusBadRequest, err.Error())
+		return true
+	}
+	return false
+}
+
 // sealableSecret builds the plaintext to seal, folding an ssh_key passphrase into a structured
 // secret. It rejects a passphrase on anything but a locally stored ssh_key, where the passphrase
 // would otherwise be silently ignored at run time.
@@ -188,7 +208,7 @@ func createCredentialHandler(store credential.Store, types credential.TypeStore,
 			return
 		}
 
-		if err := credential.ValidateSettings(req.Settings); err != nil {
+		if err := credential.ValidateSettings(req.Kind, req.Settings); err != nil {
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -419,7 +439,7 @@ func createFederatedCredential(w http.ResponseWriter, r *http.Request, store cre
 		respondError(w, log, http.StatusBadRequest, "vault_id applies only to vault_password credentials")
 		return
 	}
-	if err := credential.ValidateSettings(req.Settings); err != nil {
+	if err := credential.ValidateSettings(req.Kind, req.Settings); err != nil {
 		respondError(w, log, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -572,28 +592,35 @@ func updateCredentialHandler(store credential.Store, types credential.TypeStore,
 		}
 		// A nil map means the field was omitted and the stored settings stay; a present map, empty
 		// included, replaces them, so clearing is a deliberate act rather than a side effect.
-		if req.Settings != nil {
-			if err := credential.ValidateSettings(req.Settings); err != nil {
-				respondError(w, log, http.StatusBadRequest, err.Error())
-				return
-			}
-			if credential.Federated(finalKind) {
-				if _, err := federation.ParseSettings(finalKind, req.Settings); err != nil {
-					respondError(w, log, http.StatusBadRequest, err.Error())
-					return
-				}
-			}
-			c.Settings = req.Settings
-			if len(c.Settings) == 0 {
-				c.Settings = nil
-			}
-		} else if finalKind != c.Kind {
+		settings := c.Settings
+		switch {
+		case req.Settings != nil:
+			settings = req.Settings
+		case finalKind != c.Kind:
 			// The same settings key means different things across kinds: user is the connection user
 			// on ssh_password but the escalation target on become. So a kind change that carries no
 			// new settings drops the stored ones rather than silently reinterpreting them, the same
 			// way the vault label is dropped when the kind leaves vault_password.
-			c.Settings = nil
+			settings = nil
 		}
+		// The settings that will persist are checked against the kind that will persist on every
+		// update, whether or not the request carried settings. A registry credential's login is bound
+		// to the host its settings name, so no edit may leave one without that host: not a kind
+		// change that drops the old settings, and not a rename of one stored before the rule.
+		if err := credential.ValidateSettings(finalKind, settings); err != nil {
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		}
+		if req.Settings != nil && credential.Federated(finalKind) {
+			if _, err := federation.ParseSettings(finalKind, req.Settings); err != nil {
+				respondError(w, log, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		if len(settings) == 0 {
+			settings = nil
+		}
+		c.Settings = settings
 		c.Name = req.Name
 		c.OrgID = orgForUpdate(req.OrgID, c.OrgID)
 		if secret != "" {

@@ -167,13 +167,26 @@ what was found, or what could not be read, and an `error` status.
 
 The pull request's commit does not hold the registry and remote modules its configuration calls, so
 the review downloads them first, the same way the approval gate does. It runs `terraform get` or
-`tofu get` in a private copy of the configuration at the pull request's head, with the template's
-own credentials, only where the plan would run, and within the gate's time and size bounds, then
-reads what the get installed. The get installs no provider and runs no program. A module hiding one
-of those data sources is refused by its address like any other, and a download that fails leaves the
-configuration unread, so the plan is refused and the comment says why. A plan that goes ahead
-records the download, its exit status, and the digest of the modules it read in the plan run's
-`dry_run_scans`, and the plan executes exactly those modules.
+`tofu get` with this server's binary in a private copy of the configuration at the pull request's
+head, only where the plan would run, and within the gate's time and size bounds, then reads what
+the get installed. The get is handed none of the template's credentials and none of the server's
+own environment but `PATH`, the proxy variables, `SSL_CERT_FILE`, and `SSL_CERT_DIR`, with an empty
+home directory of its own. Git runs with no system configuration, over HTTPS only, and with no
+Kerberos or Windows sign-in, Mercurial with no configuration and no SSH, and the AWS and Google
+libraries with the instance metadata service turned off, so it authenticates as nothing. It
+reaches what an anonymous client on this server reaches, a directory on this server's disk that a
+module source names included, and nothing a credential opens. It installs no provider and runs no
+program. A module hiding one of those data sources is refused by its address like any other, and a
+download that fails leaves the configuration unread, so the plan is refused and the comment says
+why. A module that needs a credential or the server's own environment to download, such as one in
+a private registry or a private repository, is not read, so its plan is refused unless the module
+is vendored into the repository and called by a local path. A plan that runs in a container image,
+the template's project's or the server's `--default-image`, is not downloaded for and is refused
+the same way: vendor its modules, or plan on the host with no default image. On Windows, where the
+tool reads its own settings from a folder no environment setting moves, nothing is downloaded, so
+a plan calling registry or remote modules is refused unless they are vendored. A plan that goes
+ahead records the download, its exit status, and the digest of the modules it read in the plan
+run's `dry_run_scans`, and the plan executes exactly those modules.
 
 A template that cannot launch for something its owner must fix, such as an inventory that is not a
 valid inventory or a project that no longer exists, is not planned either. The forge is answered

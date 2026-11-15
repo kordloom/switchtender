@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/kordloom/switchtender/internal/inventory"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // LimitHosts returns the hosts of an inventory document that an Ansible limit pattern selects, as
@@ -24,6 +25,9 @@ func (d *Dispatcher) LimitHosts(ctx context.Context, content, limit string) ([]s
 	if d.invLister == nil {
 		return nil, fmt.Errorf("%w: evaluating a host limit needs ansible-inventory on this server",
 			inventory.ErrResolve)
+	}
+	if err := run.CheckLimitFile(limit); err != nil {
+		return nil, fmt.Errorf("%w: %w", inventory.ErrResolve, err)
 	}
 	dir, err := os.MkdirTemp("", "switchtender-limit-*")
 	if err != nil {

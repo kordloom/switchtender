@@ -249,8 +249,8 @@ func sealFunc(sealer *credential.Sealer) func(string) (string, error) {
 }
 
 // createTemplateHandler stores a new template.
-func createTemplateHandler(store template.Store, sealer *credential.Sealer, authz *authorizer,
-	log *zap.Logger) http.HandlerFunc {
+func createTemplateHandler(store template.Store, creds credential.Store, sealer *credential.Sealer,
+	authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "templates not enabled")
@@ -274,9 +274,21 @@ func createTemplateHandler(store template.Store, sealer *credential.Sealer, auth
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
 			return
 		}
+		if denyPullKind(w, r, log, creds, req.PullCredentialID) {
+			return
+		}
 
 		if msg := templateToolError(req); msg != "" {
 			respondError(w, log, http.StatusBadRequest, msg)
+			return
+		}
+		if refuseLimitFile(w, log, http.StatusBadRequest, req.Limit) {
+			return
+		}
+		// A template is launched later by people who never typed its inventory path, and fired by
+		// schedules and webhooks with nobody present, so who may save a split of a path is asked
+		// here. A manage grant on the template is not the admin role.
+		if refusePathSplit(w, r, log, req.Tool, req.Inventory, req.InventoryID, req.Shards) {
 			return
 		}
 		// A secret field's default is sealed before anything else reads the survey, so it is never
@@ -337,8 +349,8 @@ func createTemplateHandler(store template.Store, sealer *credential.Sealer, auth
 }
 
 // updateTemplateHandler changes an existing template's fields, keeping its id and creation time.
-func updateTemplateHandler(store template.Store, sealer *credential.Sealer, authz *authorizer,
-	log *zap.Logger) http.HandlerFunc {
+func updateTemplateHandler(store template.Store, creds credential.Store, sealer *credential.Sealer,
+	authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "templates not enabled")
@@ -362,9 +374,21 @@ func updateTemplateHandler(store template.Store, sealer *credential.Sealer, auth
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
 			return
 		}
+		if denyPullKind(w, r, log, creds, req.PullCredentialID) {
+			return
+		}
 
 		if msg := templateToolError(req); msg != "" {
 			respondError(w, log, http.StatusBadRequest, msg)
+			return
+		}
+		if refuseLimitFile(w, log, http.StatusBadRequest, req.Limit) {
+			return
+		}
+		// The update writes the record whole, so asking about the request is asking about what is
+		// stored afterward. A caller below admin who may manage this template cannot save a split
+		// of a path into it, and cannot carry one an admin saved through an edit of their own.
+		if refusePathSplit(w, r, log, req.Tool, req.Inventory, req.InventoryID, req.Shards) {
 			return
 		}
 		id := r.PathValue("id")
@@ -684,6 +708,14 @@ func templateLaunchObjects(t *template.Template, inventoryID string, credIDs []s
 		credIDs...)
 }
 
+// refuseTemplatePathSplit answers 403 and reports true when t fires as a split of an inventory
+// named by path and the caller may not ask for one. A schedule or a webhook fires its template with
+// nobody present, so the caller who attaches one is asked when it is saved.
+func refuseTemplatePathSplit(w http.ResponseWriter, r *http.Request, log *zap.Logger, t *template.Template) bool {
+	return len(t.Steps) == 0 &&
+		refusePathSplit(w, r, log, t.Tool, t.Inventory, t.InventoryID, t.Shards)
+}
+
 // launchTemplateHandler submits a run from a saved template in one action.
 func launchTemplateHandler(store template.Store, submitter Submitter, sealer *credential.Sealer, authz *authorizer,
 	log *zap.Logger) http.HandlerFunc {
@@ -761,6 +793,15 @@ func launchTemplateHandler(store template.Store, submitter Submitter, sealer *cr
 		// somebody who may launch it but may not reach the queue.
 		objects := templateLaunchObjects(t, inventoryID, credIDs)
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
+			return
+		}
+		// The template's path was typed by whoever saved it, and the listing a split does opens it
+		// for whoever launches. A launch that names a stored inventory lists that one instead.
+		if len(t.Steps) == 0 &&
+			refusePathSplit(w, r, log, t.Tool, t.Inventory, inventoryID, t.Shards) {
+			return
+		}
+		if launchReq.Limit != nil && refuseLimitFile(w, log, http.StatusBadRequest, *launchReq.Limit) {
 			return
 		}
 

@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -95,6 +97,10 @@ const (
 // TokenEnvVar is the environment variable a token credential is exposed under at run time.
 const TokenEnvVar = "SWITCHTENDER_TOKEN"
 
+// SettingRegistryHost is the settings key that binds a registry credential to the one registry its
+// login is sent to: a host, with a port when the registry listens on one, such as ghcr.io.
+const SettingRegistryHost = "registry_host"
+
 var (
 	// ErrNotFound is returned when a credential does not exist in the store.
 	ErrNotFound = errors.New("credential not found")
@@ -106,6 +112,10 @@ var (
 	ErrBadField = errors.New("credential missing required field")
 	// ErrBadSetting is returned when a credential setting has an invalid key or value.
 	ErrBadSetting = errors.New("invalid credential setting")
+	// ErrPullKind is returned when a pull credential is named that is not a registry credential.
+	// Only a registry login is ever sent to a registry, so a key, a token, or a password named in
+	// its place is refused rather than read as a login.
+	ErrPullKind = errors.New("pull credential must be a registry credential")
 	// ErrNoKey is returned when encryption is attempted without an encryption key configured.
 	ErrNoKey = errors.New("no encryption key: set SWITCHTENDER_ENCRYPTION_KEY")
 	// ErrNoSecret is returned when a run needs a credential whose secret was never set, which every
@@ -215,32 +225,103 @@ func DecodeSettings(text string) (map[string]string, error) {
 	return out, nil
 }
 
-// ValidateSettings checks a settings map's shape: entry count, key pattern and length, and values
-// that are non-empty, bounded, and free of control characters. A value carrying a newline could
-// append an extra line to an env or extra-vars injection, the same trick a multi-line token pulls,
-// so it is refused here rather than trusted downstream.
-func ValidateSettings(settings map[string]string) error {
+// hostNamePattern is a host name or an IPv4 address: labels of letters, digits, and inner hyphens,
+// joined by dots.
+var hostNamePattern = regexp.MustCompile(
+	`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$`)
+
+// maxHostNameLen is the longest host name the domain name system allows, in bytes.
+const maxHostNameLen = 253
+
+// ValidateSettings checks the settings of a credential of kind: the entry count, each pair the way
+// ValidateSetting checks one, and what the kind cannot work without. A registry credential must
+// name the registry host its login is bound to, since a login bound to no registry is sent to none.
+func ValidateSettings(kind Kind, settings map[string]string) error {
 	if len(settings) > maxSettings {
 		return fmt.Errorf("%w: at most %d entries, got %d", ErrBadSetting, maxSettings, len(settings))
 	}
 	for k, v := range settings {
-		if len(k) > maxSettingKeyLen || !settingKeyPattern.MatchString(k) {
-			return fmt.Errorf("%w: key %q must be a letter followed by letters, digits, or "+
-				"underscores, at most %d bytes", ErrBadSetting, k, maxSettingKeyLen)
-		}
-		if strings.TrimSpace(v) == "" {
-			return fmt.Errorf("%w: key %q has an empty value", ErrBadSetting, k)
-		}
-		if len(v) > maxSettingValueLen {
-			return fmt.Errorf("%w: key %q value exceeds %d bytes", ErrBadSetting, k, maxSettingValueLen)
-		}
-		for _, r := range v {
-			if r < 0x20 || r == 0x7f {
-				return fmt.Errorf("%w: key %q value contains a control character", ErrBadSetting, k)
-			}
+		if err := ValidateSetting(kind, k, v); err != nil {
+			return err
 		}
 	}
+	if _, bound := settings[SettingRegistryHost]; kind == KindRegistry && !bound {
+		return fmt.Errorf("%w: a registry credential needs %s, the one registry host its login is "+
+			"sent to, such as ghcr.io", ErrBadSetting, SettingRegistryHost)
+	}
 	return nil
+}
+
+// ValidateSetting checks one settings pair of a credential of kind: a key of the allowed pattern
+// and length, and a value that is non-empty, bounded, and free of control characters. A value
+// carrying a newline could append an extra line to an env or extra-vars injection, the same trick a
+// multi-line token pulls, so it is refused here rather than trusted downstream. A registry
+// credential's registry host must also read as a host.
+func ValidateSetting(kind Kind, key, value string) error {
+	if len(key) > maxSettingKeyLen || !settingKeyPattern.MatchString(key) {
+		return fmt.Errorf("%w: key %q must be a letter followed by letters, digits, or "+
+			"underscores, at most %d bytes", ErrBadSetting, key, maxSettingKeyLen)
+	}
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("%w: key %q has an empty value", ErrBadSetting, key)
+	}
+	if len(value) > maxSettingValueLen {
+		return fmt.Errorf("%w: key %q value exceeds %d bytes", ErrBadSetting, key, maxSettingValueLen)
+	}
+	for _, r := range value {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("%w: key %q value contains a control character", ErrBadSetting, key)
+		}
+	}
+	if kind == KindRegistry && key == SettingRegistryHost && !validRegistryHost(value) {
+		return fmt.Errorf("%w: %s must be a registry host with no scheme and no path, such as "+
+			"ghcr.io or registry.example.com:5000", ErrBadSetting, SettingRegistryHost)
+	}
+	return nil
+}
+
+// validRegistryHost reports whether v names a registry the way an image reference does: a host name
+// or an IPv4 address with an optional port, or an IPv6 address in brackets with an optional port.
+func validRegistryHost(v string) bool {
+	if rest, bracketed := strings.CutPrefix(v, "["); bracketed {
+		literal, port, closed := strings.Cut(rest, "]")
+		addr, err := netip.ParseAddr(literal)
+		if !closed || err != nil || !addr.Is6() || addr.Zone() != "" {
+			return false
+		}
+		if port == "" {
+			return true
+		}
+		port, hasPort := strings.CutPrefix(port, ":")
+		return hasPort && validPort(port)
+	}
+	host, port, hasPort := strings.Cut(v, ":")
+	if hasPort && !validPort(port) {
+		return false
+	}
+	return len(host) <= maxHostNameLen && hostNamePattern.MatchString(host)
+}
+
+// validPort reports whether s is a port number written in digits alone.
+func validPort(s string) bool {
+	if s == "" || len(s) > 5 || strings.Trim(s, "0123456789") != "" {
+		return false
+	}
+	n, err := strconv.Atoi(s)
+	return err == nil && n >= 1 && n <= 65535
+}
+
+// CheckPull returns ErrPullKind unless c is a registry credential, the only kind a run may name to
+// pull its image with.
+func CheckPull(c *Credential) error {
+	if c.Kind == KindRegistry && c.TypeID == "" {
+		return nil
+	}
+	kind := string(c.Kind)
+	if c.TypeID != "" {
+		kind = "a custom type"
+	}
+	return fmt.Errorf("%w: %q is %s", ErrPullKind, c.Name, kind)
 }
 
 // ansibleOnlyKinds are credential kinds materialized through Ansible-specific flags or extra-vars
@@ -370,6 +451,15 @@ type Credential struct {
 	OrgID string `json:"org_id,omitempty"`
 	// CreatedAt is when the credential was created.
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// RegistryHost returns the registry host c's login is bound to, or the empty string when c is not a
+// registry credential or names none. A login with no bound host is sent to no registry.
+func (c *Credential) RegistryHost() string {
+	if c.Kind != KindRegistry || c.TypeID != "" {
+		return ""
+	}
+	return c.Settings[SettingRegistryHost]
 }
 
 // Store persists credentials with their secrets encrypted by the caller. Implementations must be

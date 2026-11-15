@@ -98,7 +98,7 @@ just live behind a smaller, faster surface.</p>
 </tr>
 <tr>
 <td>Smart or constructed inventory</td>
-<td>Smart or constructed inventory, resolved at each launch. A smart inventory imports into its AWX organization and, as in AWX, carries hosts and their variables but no groups. See <a href="/docs/inventories">inventories</a>.</td>
+<td>Smart or constructed inventory, resolved at each launch. A smart inventory imports into its AWX organization and, as in AWX, carries hosts and their variables but no groups. A constructed inventory needs ansible-core 2.19 or later, and one whose input holds template text, such as AWX's stock <code>ansible_python_interpreter</code> value, is left out of the import with the input named. See <a href="/docs/inventories">inventories</a> and <a href="/docs/migration">migration</a>.</td>
 </tr>
 <tr>
 <td>Job template</td>
@@ -226,7 +226,10 @@ through a file, so the password stays off the command line.</li>
 <code>ansible_network_os</code>, and <code>ansible_connection</code> variables.</li>
 <li><code>env</code>: <code>KEY=VALUE</code> lines injected into the run, how cloud SDK credentials reach plugins.</li>
 <li><code>token</code>: a single API token or JWT, exposed to the run as the <code>SWITCHTENDER_TOKEN</code> environment variable.</li>
-<li><code>registry</code>: a container registry login, for pulling a pinned execution image.</li>
+<li><code>registry</code>: a container registry login, for pulling an execution image. AWX's <code>host</code> input
+becomes its <code>registry_host</code>, the one registry the login is sent to. An export with no host, or
+one written as a URL, imports the login bound to no registry and the import says so. Set the
+host on it before a run pulls with it.</li>
 <li><code>aws</code>: an AWS access key, injected as the standard <code>AWS_*</code> environment variables.</li>
 <li><code>azure</code>: an Azure service principal, injected as the <code>ARM_*</code> variables Terraform reads and the
 <code>AZURE_*</code> variables the Ansible azure collection reads.</li>

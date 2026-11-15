@@ -9,14 +9,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/dispatchtest"
+	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -469,5 +472,78 @@ func TestAStoredInventorySurvivesAGitBackedProject(t *testing.T) {
 	}
 	if plainSpec.Inventory == "" || plainSpec.Inventory == materialized {
 		t.Errorf("plain spec.Inventory = %q, want the checkout's inventory path", plainSpec.Inventory)
+	}
+}
+
+// TestNothingIsInstalledForAHeldRun covers when a project's dependencies are installed. A
+// requirements file names code from anywhere and ansible-galaxy runs it, so the install is work
+// done for a run and waits for a person as the run does. An agent's run on a project with
+// dependency install on is held, and while it waits the gate's refresh and the pin it gets move
+// the checkout and install nothing. Approved and claimed, the run's own sync installs them. A
+// counting ansible-galaxy stands in.
+func TestNothingIsInstalledForAHeldRun(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("the counting ansible-galaxy is a shell script")
+	}
+	ctx := context.Background()
+	repo := newTreeRepo(t, map[string]string{
+		"site.yml":         cleanPlaybook,
+		"hosts.ini":        "localhost\n",
+		"requirements.yml": "roles:\n  - src: local.role\n",
+	})
+	bin := t.TempDir()
+	calls := filepath.Join(bin, "calls.log")
+	stub := filepath.Join(bin, "ansible-galaxy")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\necho \"$*\" >> '"+calls+"'\n"),
+		0o700); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	installs := func() int {
+		body, err := os.ReadFile(calls)
+		if err != nil {
+			return 0
+		}
+		return strings.Count(string(body), "install")
+	}
+	syncer, err := project.NewSyncer(t.TempDir(), project.WithGalaxyCommand(func() (string, error) {
+		return stub, nil
+	}))
+	if err != nil {
+		t.Fatalf("NewSyncer() error = %v", err)
+	}
+	projects := project.NewMemStore()
+	p := &project.Project{ID: "proj_deps", Name: "deps", RepoURL: repo, Branch: "main",
+		InstallDeps: true}
+	if err := projects.Save(ctx, p); err != nil {
+		t.Fatalf("Save(project) error = %v", err)
+	}
+	store := run.NewMemStore()
+	// A rule that reads a dry run's playbook, so the gate refreshes the checkout before it grades.
+	previews := dispatchtest.RulesHolding(t, &policy.Policy{ID: "pol_prev", Name: "hold ansible",
+		Tool: run.ToolAnsible, ExcludeDryRun: true, MaxDestroy: policy.DisabledMaxDestroy})
+	d := New(store, dispatchtest.OKRunner(), zap.NewNop(), WithProjects(projects, syncer),
+		WithPolicies(previews), WithNoJanitor(), WithClaimInterval(5*time.Millisecond))
+	t.Cleanup(d.Close)
+	held, err := d.Submit(ctx, "site.yml", "hosts.ini", append([]run.SubmitOption{
+		run.WithProject(p.ID), run.WithDryRun(true)}, dispatchtest.AgentOpts()...)...)
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if held.Status != run.StatusPendingApproval || held.PinnedCommit == "" {
+		t.Fatalf("submitted %q pinned to %q, want held and pinned", held.Status, held.PinnedCommit)
+	}
+	if n := installs(); n != 0 {
+		t.Fatalf("ansible-galaxy installed %d times while the run waited for a person", n)
+	}
+	if _, err := d.Approve(ctx, held.ID, decider("approver", "session")); err != nil {
+		t.Fatalf("Approve() error = %v", err)
+	}
+	if final := dispatchtest.WaitTerminal(t, store, held.ID); final.Status != run.StatusSucceeded {
+		t.Fatalf("the approved run ended %q: %s", final.Status, final.Error)
+	}
+	if n := installs(); n < 1 {
+		t.Errorf("ansible-galaxy installed %d times once the run was approved and claimed, want "+
+			"at least 1", n)
 	}
 }

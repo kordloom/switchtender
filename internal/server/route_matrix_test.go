@@ -136,7 +136,7 @@ var routeRoles = map[string]user.Role{
 	"POST /v1/grants":                                        user.Role("admin"),
 	"POST /v1/import/{format}":                               user.Role("admin"),
 	"POST /v1/inventories":                                   user.Role("admin"),
-	"POST /v1/inventories/preview":                           user.Role("operator"),
+	"POST /v1/inventories/preview":                           user.Role("admin"),
 	"POST /v1/inventories/{id}/preview":                      user.Role("operator"),
 	"POST /v1/inventory-sources":                             user.Role("admin"),
 	"POST /v1/inventory-sources/{id}/refresh":                user.Role("admin"),

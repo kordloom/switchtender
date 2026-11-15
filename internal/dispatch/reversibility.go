@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 
+	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -93,7 +94,7 @@ func scanRunPlaybook(r *run.Run, checkouts CheckoutReader) (*run.PlaybookSignals
 	if r.ProjectID != "" {
 		return scanProjectPlaybook(r, checkouts)
 	}
-	return scanLocalPlaybook(r.Playbook)
+	return scanLocalPlaybook(r)
 }
 
 // scanProjectPlaybook scans a project run's playbook at the commit that decides what the run
@@ -129,18 +130,18 @@ func scanProjectPlaybook(r *run.Run, checkouts CheckoutReader) (*run.PlaybookSig
 	}
 }
 
-// scanLocalPlaybook scans a playbook named by a path on this server. The path is read wherever the
-// run names it, as it always was, and the directory it resolves to bounds everything else the scan
-// reads, so a role or include cannot reach a file outside it.
-func scanLocalPlaybook(name string) (*run.PlaybookSignals, string) {
-	root, base, err := openLocal(name, true)
+// scanLocalPlaybook scans the playbook r names by a path on this server. The path is read wherever
+// the run names it, as it always was, and the directory it resolves to bounds everything else the
+// scan reads, so a role or include cannot reach a file outside it.
+func scanLocalPlaybook(r *run.Run) (*run.PlaybookSignals, string) {
+	root, base, err := openLocal(r.Playbook, true)
 	if err != nil {
-		return nil, unreadWhy(err, "not on this server")
+		return nil, localUnread(r, err)
 	}
 	defer func() { _ = root.Close() }()
 	signals, err := run.ScanPlaybookIn(root.FS(), base, "the playbook's directory")
 	if err != nil {
-		return nil, unreadWhy(err, "not on this server")
+		return nil, localUnread(r, err)
 	}
 	return &signals, ""
 }
@@ -197,3 +198,17 @@ func unreadWhy(err error, missing string) string {
 	}
 	return "it could not be read or parsed"
 }
+
+// localUnread says why a path on this server that r names could not be read, for r's record. On a
+// run an agent asked for it gives one reason whether the path is missing or unreadable, since the
+// record goes back to the agent, and two reasons would tell it which paths exist on this server.
+func localUnread(r *run.Run, err error) string {
+	if policy.AgentRequested(r) {
+		return agentLocalUnread
+	}
+	return unreadWhy(err, "not on this server")
+}
+
+// agentLocalUnread is the one reason a run an agent asked for records for a path on this server it
+// could not read, whether the path is missing or unreadable.
+const agentLocalUnread = "not readable on this server"

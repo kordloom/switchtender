@@ -47,7 +47,7 @@ func TestProjectWriteAuthorizesTheCredentialItClonesWith(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save() project error = %v", err)
 	}
-	handler := updateProjectHandler(store, authz, zap.NewNop())
+	handler := updateProjectHandler(store, nil, authz, zap.NewNop())
 
 	body := `{"name":"hers","repo_url":"https://attacker.example.com/collect.git",` +
 		`"credential_id":"cred_victim"}`

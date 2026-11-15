@@ -113,6 +113,13 @@ type Spec struct {
 	ExtraVarsFiles []string
 	// Env holds additional environment entries (KEY=VALUE) layered over the base environment.
 	Env []string
+	// MinimalEnv, on a module download, starts the get on the host from the few variables
+	// minimalGetEnv names, a HOME inside RunDir, and the entries fixedGetEnv sets, in place of the
+	// whole base environment, with Env layered over them except where it names one of those, which
+	// come from the server or the gate alone. The approval gate asks for it, so a get it runs before
+	// anyone approves signs in with nothing the server's own environment, home directory, or
+	// identity holds. It needs RunDir, and a get asking for it inside an image is refused.
+	MinimalEnv bool
 	// Dir is the working directory for the process. When empty, the current directory is used.
 	Dir string
 	// EventsPath, when set, enables the structured event callback and names the file it writes.
@@ -504,7 +511,8 @@ func (t *toolRouter) Run(ctx context.Context, spec Spec, out io.Writer) (Result,
 // the tool there: with the host's binary and environment, or inside spec's image with the image's
 // binary, the same mounts, limits, and network. It downloads the modules the configuration calls
 // and nothing else, so it installs no provider and runs no program the configuration names, and it
-// is handed no variables, since a get needs none.
+// is handed no variables, since a get needs none. A spec asking for a minimal environment runs on
+// the host from that environment alone, and is refused when it names an image.
 func (t *toolRouter) FetchModules(ctx context.Context, spec Spec, out io.Writer) (Result, error) {
 	tool := run.NormalizeTool(spec.Tool)
 	if tool != run.ToolTerraform && tool != run.ToolOpenTofu {
@@ -513,6 +521,10 @@ func (t *toolRouter) FetchModules(ctx context.Context, spec Spec, out io.Writer)
 	}
 	spec.ExtraVars = nil
 	if spec.Image != "" {
+		if spec.MinimalEnv {
+			return Result{ExitCode: -1}, fmt.Errorf("%w: a get with a minimal environment runs on "+
+				"the host and never inside an image", ErrLaunch)
+		}
 		if !t.allowContainer {
 			return Result{ExitCode: -1}, ErrContainerDisabled
 		}

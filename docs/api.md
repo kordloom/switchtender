@@ -122,7 +122,7 @@ Two more are enforced somewhere other than the request:
 | GET    | `/v1/notifications/{id}/deliveries` | A target's recent deliveries, newest first. `?status=failed` keeps the failures. Operator role. |
 | POST   | `/v1/notifications/{id}/attachments` | Attach a target to a template, workflow, schedule, project, or organization for one event. Use of the target and management of the object. |
 | DELETE | `/v1/notifications/{id}/attachments/{attachment}` | Detach one attachment, asking what attaching it asked. |
-| POST   | `/v1/credentials`          | Store a credential, encrypted at rest. Fifteen built-in kinds, or a custom type via `type_id` and `fields`. Non-secret `settings` ride beside the secret and return from the API. The four federated kinds, `aws_oidc`, `gcp_oidc`, `azure_oidc`, and `oidc_token`, take `settings` and no `secret`. |
+| POST   | `/v1/credentials`          | Store a credential, encrypted at rest. Fifteen built-in kinds, or a custom type via `type_id` and `fields`. Non-secret `settings` ride beside the secret and return from the API. The four federated kinds, `aws_oidc`, `gcp_oidc`, `azure_oidc`, and `oidc_token`, take `settings` and no `secret`. A `registry` credential needs `settings.registry_host`. |
 | GET    | `/v1/credentials`          | List credentials, secrets never included.               |
 | POST   | `/v1/credential-types`     | Define a custom credential type: fields and how they inject. Admin only. |
 | GET    | `/v1/credential-types`     | List custom credential types. Admin only.               |
@@ -180,13 +180,13 @@ Two more are enforced somewhere other than the request:
 | POST   | `/v1/inventories`          | Store an inventory. Runs reference it by id anywhere. A body may be up to 26 MiB, the same as an import, so anything that imported can be edited; every other write is limited to 1 MiB, and a body over the limit answers 413 naming it. |
 | GET    | `/v1/inventories`          | List stored inventories as summaries: name, kind, owner and size in bytes, never the content. |
 | GET    | `/v1/inventories/{id}`     | Read one stored inventory with its content, secret-looking values masked below admin. |
-| PUT    | `/v1/inventories/{id}`     | Update a stored inventory.                              |
+| PUT    | `/v1/inventories/{id}`     | Update a stored inventory. Creating, changing, or renaming a constructed inventory is for an admin only, whatever grant the caller holds, and anyone else is answered `403`. |
 | DELETE | `/v1/inventories/{id}`     | Delete a stored inventory, with every fact cached for its hosts. |
 | GET    | `/v1/inventories/{id}/facts` | List the inventory's hosts with cached facts: size, gathering run, and time. Operator role. |
 | GET    | `/v1/inventories/{id}/facts/{host}` | Read one host's cached facts. Secret-looking values are masked below admin. Operator role. |
 | DELETE | `/v1/inventories/{id}/facts/{host}` | Clear one host's cached facts, so the next run gathers them afresh. |
-| POST   | `/v1/inventories/preview`  | Resolve an unsaved smart or constructed inventory and list the hosts it reaches for the caller, with the `engine` that resolved it and the `ansible_core` version when Ansible did. It answers `422` with the reason for a definition that cannot resolve or content that could not be read, and `500` for a failure of the server's stores. |
-| POST   | `/v1/inventories/{id}/preview` | Resolve a stored smart or constructed inventory and list the hosts a launch by the caller would reach, with the same `engine` and `ansible_core`. |
+| POST   | `/v1/inventories/preview`  | Resolve an unsaved smart or constructed inventory and list the hosts it reaches for the caller, with the `engine` that resolved it and the `ansible_core` version when Ansible did. Admin role, and an agent's token is refused whatever its owner's role, since a constructed definition is evaluated on the server. It answers `422` with the reason for a definition that cannot resolve, an input refused for template text, or content that could not be read, and `500` for a failure of the server's stores. |
+| POST   | `/v1/inventories/{id}/preview` | Resolve a stored smart or constructed inventory and list the hosts a launch by the caller would reach, with the same `engine` and `ansible_core`. Operator role. It answers `422` as the unsaved preview does. |
 | POST   | `/v1/policies`             | Create a policy that holds, denies, or exempts matching runs. `effect` is `require_approval`, the default, `deny`, or `exempt`. `account` matches the username of the account the requesting credential is bound to. An exempt policy lets the agent runs it matches go ahead without the built-in agent hold, takes only `tool`, `command_contains`, `inventory_id`, `queue`, `actor`, `account`, and `actor_kind: agent`, and is Community. An exempt policy that names `actor` without `account` is refused with 400, since a token label is not unique across accounts. See [Agent runs are held by default](policy.md#agent-runs-are-held-by-default). |
 | GET    | `/v1/policies`             | List approval policies. A Rego policy from the policy file carries a `rego` object with its `package`, `syntax`, bundle `sha256`, `modules`, `warn` (`hold` or `note`), and `timeout`. See [Approval policies](policy.md). |
 | PUT    | `/v1/policies/{id}`        | Update an approval policy.                              |
@@ -394,6 +394,41 @@ host pattern matches nothing, so a run aimed at a path that does not exist touch
 Its recap names no host, and the run is recorded as failed with the reason on its `error`, since a
 clean exit over nothing is not a success.
 
+### Splitting an inventory named by path
+
+A split lists the inventory's hosts before the run exists, so before any policy, hold, or approval
+sees it, and the listing opens the inventory as the user the server runs as. A stored inventory is
+content somebody with the right to save it put there. A path is whatever the sender wrote. So a
+split of a path, which is `shards` of two or more with `inventory` and no `inventory_id` on the
+Ansible tool, is accepted only from an admin, or on an install with no accounts. Anybody else,
+and every agent token whatever account it is bound to, is answered `403`, and the message says to
+store the inventory and name it with `inventory_id`.
+
+The rule is asked at every place such a run is handed in or saved:
+
+| Request                             | What is refused                                                                                                                 |
+|-------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|
+| `POST /v1/runs`                     | A submission that splits a path.                                                                                                |
+| `POST /v1/runs/{id}/rerun`          | A rerun of a split of a path, whoever submitted the original.                                                                   |
+| `POST` and `PUT` on `/v1/templates` | Saving a split of a path into a template, which includes a caller who holds a manage grant on it.                               |
+| `POST /v1/templates/{id}/launch`    | Launching a template that splits a path. A launch that names a stored inventory in `inventory_id` splits that one and is taken. |
+| `POST` and `PUT` on `/v1/schedules` | A schedule that splits a path, and a schedule that fires a template that does.                                                  |
+| `POST /v1/triggers`                 | A trigger on a template that splits a path.                                                                                     |
+
+A schedule and a webhook fire with nobody present to ask, which is why the rule is asked when they
+are saved. One an admin saved keeps firing. A single run that names a path, a split of a stored
+inventory, and a workflow step, which cannot split, are open to an operator as before.
+
+## Execution images
+
+A run, a project, and a template take `image`, the container image the run executes inside, and
+`pull_credential_id`, the login that image is pulled with. The pull credential must be a
+`registry` credential. `POST /v1/runs`, a template launch, and `POST` or `PUT` on `/v1/projects`
+and `/v1/templates` answer `400` naming the rule when it is any other kind. A `registry` credential
+needs `settings.registry_host`, and a create or update that would leave one without it is refused
+with `400`. Its login is sent only to that registry, so an image on another registry is looked up
+with no login. See [Pull credentials](secrets.md#pull-credentials).
+
 ## Ansible run controls
 
 A run submission and a template both accept the Ansible controls that used to require a hand-built
@@ -427,6 +462,14 @@ curl -X POST https://switchtender.example.com/v1/runs \
 
 These apply to the Ansible tool. The other tools ignore them, so a Bash or Terraform template that
 carries one is unaffected.
+
+A `limit` that holds an `@` anywhere is refused, for every tool. Ansible reads what follows the
+sign as a file of host patterns and opens it on the server, and it does so after a comma, a colon,
+a space, a bracket, or a control character, so the whole limit is refused and not only an element
+that begins with the sign. `POST /v1/runs`, `POST` and `PUT` on `/v1/templates`, a template
+launch that sends its own `limit`, and the `limit` of a constructed inventory on `/v1/inventories`
+answer `400`. A rerun of a run stored with such a limit answers `409`, since nothing in that request
+can be corrected. Name the hosts or groups themselves, as in `web:!canary:&east`.
 
 A run submission also accepts `extra_vars`, an object of variables injected into the run. Ansible
 receives them the way `--extra-vars` supplies them, and a plugin tool reads them as its input. A

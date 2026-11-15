@@ -13,6 +13,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // stubInventory puts a stand-in ansible-inventory on PATH and returns the file its arguments are
@@ -122,6 +124,76 @@ func TestHostsEnumeratesAndFailsClosed(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestListersRefuseALimitThatNamesAFile pins the last check before ansible-inventory starts.
+// Ansible opens a limit element that begins with an at sign as a file of hosts, so a limit holding
+// one is refused by both functions that pass a limit to the command, whoever called them.
+//
+//nolint:funlen // Test function.
+func TestListersRefuseALimitThatNamesAFile(t *testing.T) {
+	// No t.Parallel: the subtests set PATH, which is process-global.
+	const doc = `{"_meta":{"hostvars":{}},"web":{"hosts":["web01"]}}`
+	listers := []struct {
+		// Name is the lister function called.
+		Name string
+		// List calls it with limit.
+		List func(a *ansibleRunner, limit string) error
+	}{{
+		Name: "Hosts",
+		List: func(a *ansibleRunner, limit string) error {
+			_, err := a.Hosts(context.Background(), "hosts.ini", limit)
+			return err
+		},
+	}, {
+		Name: "ListInventory",
+		List: func(a *ansibleRunner, limit string) error {
+			_, err := a.ListInventory(context.Background(), []string{"hosts.ini"}, limit)
+			return err
+		},
+	}}
+	tests := []struct {
+		Want      error
+		Limit     string
+		WantCalls int
+	}{{ // Test 0: A list of hosts reaches the command.
+		Limit: "web01,web02", WantCalls: 1,
+	}, { // Test 1: A group pattern reaches the command.
+		Limit: "web:!canary:&east", WantCalls: 1,
+	}, { // Test 2: A limit that is only a file.
+		Limit: "@/etc/shells", Want: run.ErrLimitFile,
+	}, { // Test 3: A file after a comma.
+		Limit: "nosuchhost,@/etc/shells", Want: run.ErrLimitFile,
+	}, { // Test 4: A file after a colon.
+		Limit: "web:@/etc/shells", Want: run.ErrLimitFile,
+	}, { // Test 5: A file after a comma, the path absent.
+		Limit: "web01,@/nonexistent/x", Want: run.ErrLimitFile,
+	}, { // Test 6: A file after a space.
+		Limit: "web01 @/nonexistent/x", Want: run.ErrLimitFile,
+	}, { // Test 7: A file after a closing bracket.
+		Limit: "web01]@/nonexistent/x", Want: run.ErrLimitFile,
+	}, { // Test 8: A file after an opening bracket.
+		Limit: "web01[@/nonexistent/x", Want: run.ErrLimitFile,
+	}, { // Test 9: A file behind U+001C.
+		Limit: "\x1c@/nonexistent/x", Want: run.ErrLimitFile,
+	}}
+	for testNum, test := range tests {
+		for _, lister := range listers {
+			t.Run(fmt.Sprintf("test %d %s", testNum, lister.Name), func(t *testing.T) {
+				logPath := stubInventory(t, "echo '"+doc+"'\n")
+				err := lister.List(newAnsibleRunner(), test.Limit)
+				if !errors.Is(err, test.Want) {
+					t.Fatalf("%s(%q) error = %v, want %v", lister.Name, test.Limit, err, test.Want)
+				}
+				calls, _ := os.ReadFile(logPath)
+				got := strings.Count(string(calls), "--list")
+				if diff := cmp.Diff(test.WantCalls, got); diff != "" {
+					t.Errorf("%s(%q) command starts mismatch (-want +got):\n%s\ncalls: %q",
+						lister.Name, test.Limit, diff, calls)
+				}
+			})
+		}
 	}
 }
 

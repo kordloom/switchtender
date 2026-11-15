@@ -30,19 +30,10 @@ const (
 	LauncherSystem = "system"
 )
 
-// Purposes a token names in its purpose claim: why it was minted.
-const (
-	// PurposeRun is a token for a run executing.
-	PurposeRun = "run"
-	// PurposeGateDownload is a token for the module download the approval gate runs, with the
-	// run's own credentials, before it records the run. A gate that refuses the run leaves the
-	// token naming a run id no run was recorded under, and this says why.
-	PurposeGateDownload = "gate_download"
-	// PurposeReviewPrecheck is a token for the module download a pull request review runs before it
-	// plans, to learn whether the plan is safe to run at all. No run exists yet, so the token names
-	// no run, and names the pull request and commit instead.
-	PurposeReviewPrecheck = "review_precheck"
-)
+// PurposeRun is what a token's purpose claim says it was minted for: a run executing. Nothing
+// before a run executes opens its credentials, the approval gate's module download included, so it
+// is the only purpose a token names.
+const PurposeRun = "run"
 
 // noneSegment stands in for an empty subject segment, so a run with no project still has a subject
 // whose shape a trust policy pattern can match.
@@ -70,13 +61,12 @@ type Claims struct {
 	NotBefore int64 `json:"nbf"`
 	// ID is the jti claim, unique per token.
 	ID string `json:"jti"`
-	// RunID is the run the token was minted for, empty for a review pre-check, which no run exists
-	// for.
+	// RunID is the run the token was minted for.
 	RunID string `json:"run_id"`
-	// Purpose says why the token was minted: run, gate_download, or review_precheck.
+	// Purpose says why the token was minted, always run.
 	Purpose string `json:"purpose"`
-	// PullRequest is the pull or merge request number a review's plan or pre-check is for, empty
-	// for anything else.
+	// PullRequest is the pull or merge request number a review's plan is for, empty for anything
+	// else.
 	PullRequest string `json:"pull_request"`
 	// ParentRunID is the pipeline or split run this run is a step or shard of, empty for a
 	// top-level run.

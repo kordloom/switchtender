@@ -823,11 +823,12 @@ func TestRegistrySecretsMasked(t *testing.T) {
 	store := credential.NewMemStore()
 	if err := store.Save(context.Background(), &credential.Credential{
 		ID: "pull_1", Name: "ghcr", Kind: credential.KindRegistry, Secret: sealed,
+		Settings: map[string]string{credential.SettingRegistryHost: "ghcr.io"},
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	d := &Dispatcher{credentials: store, sealer: sealer}
-	spec := &roundhouse.Spec{}
+	d := &Dispatcher{credentials: store, sealer: sealer, log: zap.NewNop()}
+	spec := &roundhouse.Spec{Image: "ghcr.io/acme/ee:1"}
 	pullCleanup, err := d.resolvePullCredential(t.Context(), "pull_1", spec)
 	defer pullCleanup()
 	if err != nil {
@@ -855,6 +856,7 @@ func TestRegistryPasswordMaskedInLog(t *testing.T) {
 	creds := credential.NewMemStore()
 	if err := creds.Save(context.Background(), &credential.Credential{
 		ID: "pull_1", Name: "ghcr", Kind: credential.KindRegistry, Secret: sealed,
+		Settings: map[string]string{credential.SettingRegistryHost: "ghcr.io"},
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
