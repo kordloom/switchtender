@@ -228,8 +228,8 @@ func TestNoFlagDefaultCarriesASecret(t *testing.T) {
 	var names []string
 	for _, c := range commands().All {
 		collect := func(f *pflag.Flag) {
-			// A boolean cannot hold a credential; --allow-admin-token is a policy switch, not a
-			// place a secret could be typed.
+			// A boolean cannot hold a credential: a switch whose name mentions one is not a place
+			// a secret could be typed.
 			if f.Value.Type() == "bool" {
 				return
 			}

@@ -21,9 +21,9 @@ var docsFlagMention = regexp.MustCompile("--([a-z0-9-]+)")
 // The page opens by claiming it lists every command, flag, and environment variable. A sibling test
 // already holds the command half. The flag half was unheld and untrue: eighteen flags on visible
 // commands were missing, and they were not the obscure ones. --policy-file is how an operator runs
-// approval policy from a file, --trusted-proxy and --client-ip-header decide which client address
-// the server believes behind a proxy, and --allow-admin-token governs what an AI agent's token may
-// be. A security reviewer reading this page would conclude those controls do not exist.
+// approval policy from a file, and --trusted-proxy and --client-ip-header decide which client
+// address the server believes behind a proxy. A security reviewer reading this page would conclude
+// those controls do not exist.
 //
 // A claim to be exhaustive is the kind a reader never verifies and an author never revisits, which
 // is why it needs a test rather than care.

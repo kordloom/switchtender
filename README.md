@@ -162,8 +162,8 @@ guessed from traffic:
   names that rule instead.
 
 The MCP server (`switchtender mcp`) is how an agent talks to the gate: it can list templates,
-propose runs, and read results, and it deliberately has no approve tool, no credential access, and
-by default refuses to start on an admin token. The full walkthrough is in
+propose runs, and read results, it deliberately has no approve tool and no credential access, and
+it starts only for an agent token. The full walkthrough is in
 [Run an AI agent through the gate](docs/agents.md).
 
 ## Proven against a real cluster on every push

@@ -36,9 +36,26 @@ const maxResponseBytes = 1 << 20
 const truncationNotice = "\n\n[this output was cut off: it is longer than this tool can return, " +
 	"and what is above is the end of it, not the whole of it]"
 
-// ErrAdminToken is returned when the configured token carries admin rights. An agent must hold a
-// scoped operator token, so the server refuses to start rather than lending an agent admin authority.
-var ErrAdminToken = errors.New("the token has admin rights")
+// agentActorType is the actor type the server reports for a token minted for an agent.
+const agentActorType = "agent"
+
+var (
+	// ErrNotAgentToken is returned when the server reports the configured token as anything other
+	// than an agent token. The hold on an agent's runs applies to an agent token and to no other,
+	// so the command refuses to start rather than serve an agent on a person's credential.
+	ErrNotAgentToken = errors.New("the token is not an agent token")
+	// ErrNoAccounts is returned when the server runs with no accounts. A request there has no
+	// requester, so nothing an agent asks for can be held for a person.
+	ErrNoAccounts = errors.New("the server has no accounts")
+)
+
+// identity is the part of the server's answer about the caller that the startup check reads.
+type identity struct {
+	// ActorType is how the server says the caller authenticated.
+	ActorType string `json:"actor_type"`
+	// Open reports a server that runs with no accounts, where no caller is anybody.
+	Open bool `json:"open"`
+}
 
 // Client calls the SwitchTender API on the agent's behalf. It is the only way this package reaches
 // the product, which is what keeps the agent on the authenticated path.
@@ -203,37 +220,49 @@ func serverMessage(data []byte) string {
 	return text
 }
 
-// RefuseAdminToken checks the configured token's authority and returns ErrAdminToken when it is an
-// admin token.
+// RequireAgentToken asks the server who the configured token is and returns nil only when the
+// answer is an agent token. It returns ErrNoAccounts for a server that runs with no accounts and
+// ErrNotAgentToken for every other credential, an admin's and an operator's alike.
 //
-// The rule that an agent holds an operator-bound token is the difference between a governed agent and
-// an agent that can approve its own work, and a rule enforced only in documentation is not enforced.
-// The probe reads an admin-only endpoint: a token that may list accounts is an admin token, so the
-// server refuses to start on it. A refusal on that endpoint is the healthy answer. An unreachable or
-// unauthenticated server is reported as its own error rather than being read as either verdict.
-func (c *Client) RefuseAdminToken(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/v1/users", nil)
+// The hold on an agent's runs applies to a token the server records as an agent's. Served on a
+// person's token, an agent's runs would go through under that person's name with no hold, and the
+// server cannot tell a person from a program holding that person's token, so the check is made
+// here, before anything is served. An unreachable server, a rejected token, and an answer that
+// cannot be read are each reported as their own error and are never read as an agent token.
+func (c *Client) RequireAgentToken(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/v1/auth/me", nil)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/json")
 	res, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("reach %s: %w", c.base, err)
 	}
 	defer func() { _ = res.Body.Close() }()
-	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, maxResponseBytes))
+	data, err := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes))
+	if err != nil {
+		return fmt.Errorf("checking the token: read the answer: %w", err)
+	}
 
 	switch res.StatusCode {
 	case http.StatusOK:
-		return ErrAdminToken
-	case http.StatusForbidden, http.StatusNotFound:
-		// Forbidden is the scoped token this server is meant to carry. Not found means the account
-		// endpoints are not enabled on this install, which also means no admin authority was proven.
-		return nil
 	case http.StatusUnauthorized:
 		return errors.New("the token was rejected by the server")
 	default:
-		return fmt.Errorf("checking token authority: %s", res.Status)
+		return fmt.Errorf("checking the token: %s", res.Status)
+	}
+	var who identity
+	if err := json.Unmarshal(data, &who); err != nil {
+		return fmt.Errorf("checking the token: decode the answer: %w", err)
+	}
+	switch {
+	case who.Open:
+		return ErrNoAccounts
+	case who.ActorType == agentActorType:
+		return nil
+	default:
+		return ErrNotAgentToken
 	}
 }

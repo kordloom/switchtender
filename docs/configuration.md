@@ -655,9 +655,12 @@ default](policy.md#agent-runs-are-held-by-default) describes. See [Agents](agent
 
 The token is read from `SWITCHTENDER_MCP_TOKEN`, falling back to `SWITCHTENDER_TOKEN`. Prefer the
 environment variable to a flag, whose value is visible in the host's process list. The command
-refuses to start on an admin token. There is deliberately no approve tool, so an agent cannot release
-its own work, and no credential, account, token, grant, or policy tool, so it cannot widen its own
-reach.
+starts only for an agent token, one minted with `switchtender token new --user <account> --agent`.
+Any other token is refused, and so is a server with no accounts, where nothing can be held, and no
+flag turns that off. The refusal covers this command, and the server cannot tell a person from a
+program holding that person's token. There is deliberately no approve tool, so an agent cannot
+release its own work, and no credential, account, token, grant, or policy tool, so it cannot widen
+its own reach.
 
 | Flag | Default | Purpose |
 |------|---------|---------|
@@ -665,7 +668,6 @@ reach.
 | `--allow-adhoc` | off | Also expose the ad-hoc run tool, letting the agent compose a run rather than launch a template an operator defined. The default hold on agent runs and approval policy still apply. |
 | `--token` | none | API token the agent presents. Prefer `SWITCHTENDER_MCP_TOKEN`. |
 | `--timeout` | `1m0s` | Bounds one API call. |
-| `--allow-admin-token` | `false` | Start even when the token has admin rights. An agent should hold an operator-bound token, so this is a deliberate override. |
 
 ## demo
 

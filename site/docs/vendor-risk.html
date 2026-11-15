@@ -93,6 +93,11 @@ when you configure them, and each is optional:</p>
 <td>The RFC 3161 timestamp authority you name; the default is freetsa.org</td>
 </tr>
 <tr>
+<td>Demo anchoring</td>
+<td>You run <code>switchtender demo</code>. This one is on by default</td>
+<td>freetsa.org, which is sent hashes of the seeded chain's head and none of its entries. <code>--anchor-tsa</code> names another RFC 3161 authority, and <code>--anchor-tsa &quot;&quot;</code> skips it</td>
+</tr>
+<tr>
 <td>Witness countersignatures</td>
 <td>You enroll the install with <code>switchtender witness enroll</code></td>
 <td>The <a href="/docs/witness">hosted witness</a> at witness.switchtender.com, or a push witness you run yourself with this binary. It receives the producer public key, the install id, and the license file at enrollment, then each span beat's number, time, position, entry hash, tree root, and consistency proof. No run content, host names, credentials, or personal data</td>

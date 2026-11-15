@@ -192,9 +192,12 @@ it executes, and it waits for a human to release it, a dry run included, unless 
 
 The tool set is narrow on purpose. There is no approve tool, so an agent cannot release its own work
 however it is prompted, and no credential, account, token, grant, or policy tool, so it cannot widen
-its own reach. The command refuses to start on an admin token. Ad-hoc runs, where the agent composes
-a command instead of launching a template a person defined, stay off unless you pass `--allow-adhoc`,
-and the default hold and the approval policy still cover them when they are on.
+its own reach. The command starts only for an agent token. Any other token is refused, and so is a
+server with no accounts, where nothing can be held, and no flag turns that off. The refusal covers
+this command, and the server cannot tell a person from a program holding that person's token. Ad-hoc
+runs, where the agent composes a command instead of launching a template a person defined, stay off
+unless you pass `--allow-adhoc`, and the default hold and the approval policy still cover them when
+they are on.
 
 The narrowness holds inside a template launch too, which is where it would otherwise leak, and it
 holds on the server, so it applies the same whether the agent connects over MCP or calls the API

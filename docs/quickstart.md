@@ -263,5 +263,8 @@ read-only so it is safe to expose:
 
     switchtender demo --addr :8080
 
+By default the demo asks freetsa.org, a public timestamp authority, to anchor the seeded chain, and
+sends it hashes only. `--anchor-tsa ""` skips that.
+
 Or with Docker, from a checkout: `docker compose --profile demo up --build`, which serves on port
 8081 so it can run beside the stack. `SWITCHTENDER_DEMO_PORT` moves it.

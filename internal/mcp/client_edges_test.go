@@ -282,72 +282,101 @@ func TestAToolCallStopsWithItsContext(t *testing.T) {
 	}
 }
 
-// TestRefuseAdminTokenFailsClosedWhenTheServerCannotBeReached pins the direction the startup check
-// errs in. It exists to stop this server lending an agent admin authority, and a probe that could
-// not be made proves nothing about the token, so it must be an error rather than a pass.
-func TestRefuseAdminTokenFailsClosedWhenTheServerCannotBeReached(t *testing.T) {
+// TestRequireAgentTokenFailsClosedWhenTheServerCannotBeReached pins the direction the startup check
+// errs in. A probe that could not be made proves nothing about the token, so it must be its own
+// error: never a pass, and never one of the two refusals that tell an operator what to change.
+func TestRequireAgentTokenFailsClosedWhenTheServerCannotBeReached(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	c := testClient(t, ts)
 	ts.Close()
 
-	err := c.RefuseAdminToken(context.Background())
+	err := c.RequireAgentToken(context.Background())
 	if err == nil {
-		t.Fatal("an unreachable server was read as a token without admin rights")
+		t.Fatal("an unreachable server was read as an agent token")
 	}
-	if errors.Is(err, ErrAdminToken) {
-		t.Error("an unreachable server was read as an admin token, which is the other wrong verdict")
+	if errors.Is(err, ErrNotAgentToken) || errors.Is(err, ErrNoAccounts) {
+		t.Errorf("error = %v, want an unreachable server reported as itself", err)
 	}
 	if !strings.Contains(err.Error(), "reach") {
 		t.Errorf("error = %v, want it to say the server could not be reached", err)
 	}
 }
 
-// TestRefuseAdminTokenReadsEveryStatusAsOneVerdict pins the whole status table of the startup check.
-// Only a 200 on the admin-only endpoint proves admin rights, only 403 and 404 prove the token is
-// scoped, and every other answer is its own error rather than being folded into either verdict.
-func TestRefuseAdminTokenReadsEveryStatusAsOneVerdict(t *testing.T) {
+// TestRequireAgentTokenReadsOnlyAnAgentAnswerAsAnAgentToken pins every answer the startup check can
+// receive. Only a 200 whose body names the agent actor type passes. A 200 that names anything else
+// is a token that is not an agent's, a 200 that says the server is open is a server with no
+// accounts, and every other status or unreadable body is its own error whatever its body claims.
+func TestRequireAgentTokenReadsOnlyAnAgentAnswerAsAnAgentToken(t *testing.T) {
 	t.Parallel()
+	const agent = `{"actor_type":"agent"}`
 	tests := []struct {
+		// Want is the refusal the check must return, matched with errors.Is. Nil means the error,
+		// if any, must be neither refusal.
+		Want error
 		// Name says what the case proves.
 		Name string
-		// Status is what the admin-only probe endpoint answers.
+		// Body is what the server answers with.
+		Body string
+		// Status is the status the server answers with.
 		Status int
-		// WantAdmin is whether the token must be judged an admin token.
-		WantAdmin bool
 		// WantErr is whether any error is expected.
 		WantErr bool
 	}{
-		{Name: "listing accounts is admin", Status: http.StatusOK, WantAdmin: true, WantErr: true},
-		{Name: "forbidden is the scoped token", Status: http.StatusForbidden},
-		{Name: "accounts not enabled", Status: http.StatusNotFound},
-		{Name: "rejected token", Status: http.StatusUnauthorized, WantErr: true},
-		{Name: "no content proves nothing", Status: http.StatusNoContent, WantErr: true},
-		{Name: "method refused proves nothing", Status: http.StatusMethodNotAllowed, WantErr: true},
-		{Name: "rate limited proves nothing", Status: http.StatusTooManyRequests, WantErr: true},
-		{Name: "gateway fault proves nothing", Status: http.StatusBadGateway, WantErr: true},
+		{Name: "an agent answer passes", Status: http.StatusOK, Body: agent},
+		{Name: "an empty object names no agent", Status: http.StatusOK, Body: `{}`,
+			Want: ErrNotAgentToken, WantErr: true},
+		{Name: "null names no agent", Status: http.StatusOK, Body: `null`,
+			Want: ErrNotAgentToken, WantErr: true},
+		{Name: "the actor type is matched exactly", Status: http.StatusOK,
+			Body: `{"actor_type":"Agent"}`, Want: ErrNotAgentToken, WantErr: true},
+		{Name: "a role named agent is not an actor type", Status: http.StatusOK,
+			Body: `{"role":"agent","name":"agent"}`, Want: ErrNotAgentToken, WantErr: true},
+		{Name: "open wins over an agent actor type", Status: http.StatusOK,
+			Body: `{"actor_type":"agent","open":true}`, Want: ErrNoAccounts, WantErr: true},
+		{Name: "a proxy page proves nothing", Status: http.StatusOK,
+			Body: `<html>sign in</html>`, WantErr: true},
+		{Name: "an empty body proves nothing", Status: http.StatusOK, WantErr: true},
+		{Name: "a list proves nothing", Status: http.StatusOK, Body: `[` + agent + `]`,
+			WantErr: true},
+		{Name: "rejected token", Status: http.StatusUnauthorized, Body: agent, WantErr: true},
+		{Name: "forbidden proves nothing", Status: http.StatusForbidden, Body: agent,
+			WantErr: true},
+		{Name: "a server without the endpoint", Status: http.StatusNotFound, Body: agent,
+			WantErr: true},
+		{Name: "created is not the answer", Status: http.StatusCreated, Body: agent,
+			WantErr: true},
+		{Name: "method refused proves nothing", Status: http.StatusMethodNotAllowed, Body: agent,
+			WantErr: true},
+		{Name: "rate limited proves nothing", Status: http.StatusTooManyRequests, Body: agent,
+			WantErr: true},
+		{Name: "gateway fault proves nothing", Status: http.StatusBadGateway, Body: agent,
+			WantErr: true},
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/v1/users" {
-					t.Errorf("probed %q, want the admin-only account list", r.URL.Path)
+				if r.URL.Path != "/v1/auth/me" {
+					t.Errorf("probed %q, want the endpoint that says who the caller is", r.URL.Path)
 				}
 				if got := r.Header.Get("Authorization"); got != "Bearer st_test_token" {
 					t.Errorf("the probe carried authorization %q, want the bearer token", got)
 				}
 				w.WriteHeader(test.Status)
-				_, _ = w.Write([]byte(strings.Repeat("x", 4<<10)))
+				_, _ = w.Write([]byte(test.Body))
 			}))
 			defer ts.Close()
 
-			err := testClient(t, ts).RefuseAdminToken(context.Background())
-			if got := errors.Is(err, ErrAdminToken); got != test.WantAdmin {
-				t.Errorf("ErrAdminToken = %v, want %v (error was %v)", got, test.WantAdmin, err)
-			}
+			err := testClient(t, ts).RequireAgentToken(context.Background())
 			if (err != nil) != test.WantErr {
-				t.Errorf("error = %v, want error: %v", err, test.WantErr)
+				t.Fatalf("%s: error = %v, want error: %v", test.Name, err, test.WantErr)
+			}
+			for _, refusal := range []error{ErrNotAgentToken, ErrNoAccounts} {
+				if got, want := errors.Is(err, refusal), errors.Is(test.Want, refusal); got != want {
+					t.Errorf("%s: errors.Is(%v) = %v, want %v (error was %v)",
+						test.Name, refusal, got, want, err)
+				}
 			}
 		})
 	}

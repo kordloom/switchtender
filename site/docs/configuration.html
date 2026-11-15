@@ -1559,9 +1559,12 @@ switchtender mcp --server https://switchtender.internal
 </code></pre>
 <p>The token is read from <code>SWITCHTENDER_MCP_TOKEN</code>, falling back to <code>SWITCHTENDER_TOKEN</code>. Prefer the
 environment variable to a flag, whose value is visible in the host's process list. The command
-refuses to start on an admin token. There is deliberately no approve tool, so an agent cannot release
-its own work, and no credential, account, token, grant, or policy tool, so it cannot widen its own
-reach.</p>
+starts only for an agent token, one minted with <code>switchtender token new --user &lt;account&gt; --agent</code>.
+Any other token is refused, and so is a server with no accounts, where nothing can be held, and no
+flag turns that off. The refusal covers this command, and the server cannot tell a person from a
+program holding that person's token. There is deliberately no approve tool, so an agent cannot
+release its own work, and no credential, account, token, grant, or policy tool, so it cannot widen
+its own reach.</p>
 <table>
 <thead>
 <tr>
@@ -1590,11 +1593,6 @@ reach.</p>
 <td><code>--timeout</code></td>
 <td><code>1m0s</code></td>
 <td>Bounds one API call.</td>
-</tr>
-<tr>
-<td><code>--allow-admin-token</code></td>
-<td><code>false</code></td>
-<td>Start even when the token has admin rights. An agent should hold an operator-bound token, so this is a deliberate override.</td>
 </tr>
 </tbody>
 </table>

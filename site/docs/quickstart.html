@@ -269,6 +269,8 @@ inventories, and real runs, including a flaky host, a split, and a pipeline, the
 read-only so it is safe to expose:</p>
 <pre><code>switchtender demo --addr :8080
 </code></pre>
+<p>By default the demo asks freetsa.org, a public timestamp authority, to anchor the seeded chain, and
+sends it hashes only. <code>--anchor-tsa &quot;&quot;</code> skips that.</p>
 <p>Or with Docker, from a checkout: <code>docker compose --profile demo up --build</code>, which serves on port
 8081 so it can run beside the stack. <code>SWITCHTENDER_DEMO_PORT</code> moves it.</p>
 

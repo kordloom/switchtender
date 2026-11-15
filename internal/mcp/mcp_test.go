@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -138,44 +139,67 @@ func TestRunIDIsConfinedToOnePathSegment(t *testing.T) {
 	}
 }
 
-// TestRefuseAdminToken proves the server declines to lend an agent admin authority. The rule that an
-// agent holds an operator-bound token is what keeps it from approving its own work, and a rule
-// enforced only in documentation is not enforced.
-func TestRefuseAdminToken(t *testing.T) {
+// TestRequireAgentToken proves the startup check passes an agent token and nothing else. The hold
+// on an agent's runs applies to a token the server records as an agent's, so an agent served on a
+// person's token would run under that person's name with no hold, and on a server with no accounts
+// nothing can be held at all.
+func TestRequireAgentToken(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
+		// Want is the error the check must return, matched with errors.Is. Nil means it passes.
+		Want error
 		// Name says what the case proves.
 		Name string
-		// Status is what the admin-only probe endpoint answers.
-		Status int
-		// WantAdmin is whether the token should be judged an admin token.
-		WantAdmin bool
-		// WantErr is whether any error is expected.
-		WantErr bool
-	}{
-		{Name: "admin token refused", Status: http.StatusOK, WantAdmin: true, WantErr: true},
-		{Name: "operator token accepted", Status: http.StatusForbidden},
-		{Name: "accounts disabled accepted", Status: http.StatusNotFound},
-		{Name: "rejected token errors", Status: http.StatusUnauthorized, WantErr: true},
-		{Name: "server fault errors", Status: http.StatusInternalServerError, WantErr: true},
-	}
+		// Body is what the server answers about the caller, in the shape GET /v1/auth/me writes.
+		Body string
+		// WantText is the line the returned error must read as, empty when the check passes.
+		WantText string
+	}{{ // Test 0: A token minted with --agent is the one credential the command starts for.
+		Name: "agent token starts",
+		Body: `{"name":"agent-bot","account":"dev-lead","role":"operator","actor_type":"agent"}`,
+	}, { // Test 1: An operator's own token gets no agent hold, so it is refused.
+		Name: "operator token refused", Want: ErrNotAgentToken,
+		Body:     `{"name":"deploy","account":"dev-lead","role":"operator","actor_type":"token"}`,
+		WantText: "the token is not an agent token",
+	}, { // Test 2: An admin token bound to no account is refused the same way.
+		Name: "admin token refused", Want: ErrNotAgentToken,
+		Body:     `{"name":"initial-admin","role":"admin","actor_type":"token"}`,
+		WantText: "the token is not an agent token",
+	}, { // Test 3: A person's browser session is not an agent token either.
+		Name: "session refused", Want: ErrNotAgentToken,
+		Body:     `{"name":"dev-lead","account":"dev-lead","role":"admin","actor_type":"session"}`,
+		WantText: "the token is not an agent token",
+	}, { // Test 4: A server with no accounts says it is open, and nothing can be held there.
+		Name: "open install refused", Want: ErrNoAccounts, Body: `{"open":true}`,
+		WantText: "the server has no accounts",
+	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
 			t.Parallel()
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/v1/users" {
-					t.Errorf("probed %q, want the admin-only account list", r.URL.Path)
+				if r.Method != http.MethodGet || r.URL.Path != "/v1/auth/me" {
+					t.Errorf("probed %s %q, want GET /v1/auth/me", r.Method, r.URL.Path)
 				}
-				w.WriteHeader(test.Status)
+				if got := r.Header.Get("Authorization"); got != "Bearer st_test_token" {
+					t.Errorf("the probe carried authorization %q, want the bearer token", got)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(test.Body))
 			}))
 			defer ts.Close()
 
-			err := testClient(t, ts).RefuseAdminToken(context.Background())
-			if test.WantAdmin && err != ErrAdminToken {
-				t.Errorf("error = %v, want ErrAdminToken", err)
+			err := testClient(t, ts).RequireAgentToken(context.Background())
+			if test.Want == nil {
+				if err != nil {
+					t.Fatalf("RequireAgentToken() error = %v, want an agent token to pass", err)
+				}
+				return
 			}
-			if (err != nil) != test.WantErr {
-				t.Errorf("error = %v, want error: %v", err, test.WantErr)
+			if !errors.Is(err, test.Want) {
+				t.Fatalf("RequireAgentToken() error = %v, want %v", err, test.Want)
+			}
+			if diff := cmp.Diff(test.WantText, err.Error()); diff != "" {
+				t.Errorf("refusal mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
