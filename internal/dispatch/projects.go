@@ -3,7 +3,6 @@ package dispatch
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"go.uber.org/zap"
 
@@ -116,52 +115,53 @@ func (d *Dispatcher) resolveProject(ctx context.Context, r *run.Run, spec *round
 }
 
 // pinHeldRunCommit stamps the commit a held git-backed run is allowed to execute, at the moment it
-// is held.
+// is held, and refuses the run when that commit cannot be read.
 //
 // Approval binds the spec digest, but for a run drawn from a git project the spec names a branch,
 // and the branch is a moving pointer: between the approver's yes and the worker's claim, HEAD can
 // advance, so the release executed code nobody judged. The plan gate already pins its proposals;
 // blanket holds did not. Pinning at hold time makes the approver's decision mean the commit that
 // was current when the request was made, and execution already refuses a pin that no longer
-// matches. A sync failure downgrades to an unpinned hold, which is exactly the old behavior, but
-// says so on the run so the approver can see the guarantee is absent rather than assume it.
+// matches.
+//
+// A run whose commit cannot be pinned is refused rather than held. Held unpinned, its approval
+// would release whatever the branch holds at execution time, which is code nobody was shown. The
+// caller saves nothing and the submitter is told to try again, which succeeds once the project's
+// repository can be fetched.
 //
 // The pin only moves the project's checkout and reads the commit. It installs none of the
 // project's dependencies, since the run is held and nothing is installed for it before a person
 // approves: the sync at claim installs them for the commit pinned here.
-func (d *Dispatcher) pinHeldRunCommit(r *run.Run) {
+func (d *Dispatcher) pinHeldRunCommit(r *run.Run) error {
 	if r.Status != run.StatusPendingApproval || r.ProjectID == "" || r.PinnedCommit != "" ||
 		r.GitRef != "" {
-		return
+		return nil
 	}
 	if d.projects == nil || d.syncer == nil {
-		return
+		return fmt.Errorf("%w: projects are not enabled on this server: %w", ErrCommitUnpinned,
+			project.ErrNotFound)
 	}
-	fail := func(err error) {
-		d.log.Warn("dispatch: pin held run commit: " + err.Error())
-		r.Warning = strings.TrimSpace(r.Warning + " The commit could not be pinned when this run " +
-			"was held, so approval releases whatever the branch holds at execution time.")
+	fail := func(err error) error {
+		return fmt.Errorf("%w: try again: project %s: %w", ErrCommitUnpinned, r.ProjectID, err)
 	}
 	p, err := d.projects.Get(context.Background(), r.ProjectID)
 	if err != nil {
-		fail(err)
-		return
+		return fail(err)
 	}
 	// Resolved and unlocked the same way the sync during execution does. Pinning the commit runs the
-	// identical git operation, so a credential that works for one and not the other would hold a run
-	// at approval time for a reason that disappears by execution.
+	// identical git operation, so a credential that works for one and not the other would refuse a
+	// run at hold time for a reason that disappears by execution.
 	sshKey, release, err := d.projectKey(context.Background(), p)
 	defer release()
 	if err != nil {
-		fail(err)
-		return
+		return fail(err)
 	}
 	sha, err := d.syncer.Fetch(p, sshKey)
 	if err != nil {
-		fail(err)
-		return
+		return fail(err)
 	}
 	r.PinnedCommit = sha
+	return nil
 }
 
 // projectKey returns the SSH key the project's syncs authenticate with, empty for a remote that

@@ -386,7 +386,9 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 	// Pinned while it is held, like every other submit path. Each step copies the parent's pin, so
 	// without it an approved pipeline ran whatever the branch held when its steps started, which is
 	// code the approver never read.
-	d.pinHeldRunCommit(parent)
+	if err := d.pinHeldRunCommit(parent); err != nil {
+		return nil, err
+	}
 	created, dup, err := d.idempotentSave(ctx, parent)
 	if err != nil {
 		return nil, err

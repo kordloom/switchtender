@@ -42,6 +42,10 @@ var (
 	// to a digest and this server refuses unpinned images. An approval of a tag would cover whatever
 	// the tag names when the run executes, not the image the approver saw.
 	ErrImageUnpinned = errors.New("image not pinned to a digest")
+	// ErrCommitUnpinned is returned when a run about to be held names a project whose commit could
+	// not be read, so its approval would bind no commit and the run is not saved.
+	ErrCommitUnpinned = errors.New("the project's commit could not be pinned, so the held run " +
+		"was not saved")
 	// ErrNoHostLister is returned when a split is requested but the runner cannot list hosts.
 	ErrNoHostLister = errors.New("host listing unavailable")
 	// ErrAgentPathSplit is returned when an agent's run asks for a split of an inventory named by a

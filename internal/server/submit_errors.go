@@ -63,7 +63,9 @@ var submitClasses = []struct {
 	{class: submitPolicy, errs: []error{
 		dispatch.ErrPolicyDenied, dispatch.ErrQueueUnlicensed, dispatch.ErrAgentPathSplit,
 	}},
-	{class: submitContent, errs: []error{inventory.ErrContentRead, dispatch.ErrImageUnpinned}},
+	{class: submitContent, errs: []error{
+		inventory.ErrContentRead, dispatch.ErrImageUnpinned, dispatch.ErrCommitUnpinned,
+	}},
 	{class: submitCapacity, errs: []error{dispatch.ErrLowSpace}},
 	{class: submitInput, errs: []error{inventory.ErrComposition, inventory.ErrResolve}},
 }

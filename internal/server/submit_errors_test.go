@@ -63,8 +63,10 @@ func TestClassifySubmitNamesEveryKnownError(t *testing.T) {
 		WantClass: submitPolicy, Errs: []error{
 			dispatch.ErrPolicyDenied, dispatch.ErrQueueUnlicensed, dispatch.ErrAgentPathSplit,
 		},
-	}, { // Test 3: An inventory or image tag that could not be read from where it lives.
-		WantClass: submitContent, Errs: []error{inventory.ErrContentRead, dispatch.ErrImageUnpinned},
+	}, { // Test 3: An inventory, image tag, or held run's commit that could not be read.
+		WantClass: submitContent, Errs: []error{
+			inventory.ErrContentRead, dispatch.ErrImageUnpinned, dispatch.ErrCommitUnpinned,
+		},
 	}, { // Test 4: A disk too full to record a new run.
 		WantClass: submitCapacity, Errs: []error{dispatch.ErrLowSpace},
 	}}

@@ -352,7 +352,9 @@ func TestPinHeldRunCommitLeavesUnpinnableRunsAlone(t *testing.T) {
 				WithProjects(project.NewMemStore(), syncer))
 			defer d.Close()
 
-			d.pinHeldRunCommit(test.Run)
+			if err := d.pinHeldRunCommit(test.Run); err != nil {
+				t.Fatalf("pinHeldRunCommit() error = %v, want none: there is nothing to pin", err)
+			}
 
 			if test.Run.PinnedCommit != test.WantPin {
 				t.Errorf("PinnedCommit = %q, want %q", test.Run.PinnedCommit, test.WantPin)
@@ -364,11 +366,11 @@ func TestPinHeldRunCommitLeavesUnpinnableRunsAlone(t *testing.T) {
 	}
 }
 
-// TestPinHeldRunCommitSaysSoWhenItCannotPin pins the downgrade. Failing to pin is not fatal, because
-// the run can still be approved and executed the way it always was, but silently dropping the
-// guarantee would leave an approver believing their yes was bound to the commit they read. The run
-// says the guarantee is absent instead.
-func TestPinHeldRunCommitSaysSoWhenItCannotPin(t *testing.T) {
+// TestPinHeldRunCommitRefusesWhenItCannotPin pins the refusal. A held run whose commit cannot be
+// read has nothing for its approval to bind, and held anyway it would release whatever the branch
+// holds at execution time. The pin refuses it with an error that says to try again, and leaves no
+// warning or partial pin on the run, since the caller saves nothing.
+func TestPinHeldRunCommitRefusesWhenItCannotPin(t *testing.T) {
 	t.Parallel()
 	cache := t.TempDir()
 	syncer, err := project.NewSyncer(cache)
@@ -384,34 +386,39 @@ func TestPinHeldRunCommitSaysSoWhenItCannotPin(t *testing.T) {
 		ID: "run_unpinnable", Status: run.StatusPendingApproval, ProjectID: "proj_missing",
 		CreatedAt: time.Now(),
 	}
-	d.pinHeldRunCommit(r)
+	err = d.pinHeldRunCommit(r)
 
-	if r.PinnedCommit != "" {
-		t.Errorf("PinnedCommit = %q, want none: nothing could be resolved", r.PinnedCommit)
+	if !errors.Is(err, ErrCommitUnpinned) {
+		t.Fatalf("pinHeldRunCommit() error = %v, want %v: a held run nobody can pin would be "+
+			"approved against no commit", err, ErrCommitUnpinned)
 	}
-	if r.Warning == "" {
-		t.Fatal("the run carries no warning, so an approver believes their decision is bound to a " +
-			"commit when it is not")
+	if !strings.Contains(err.Error(), "try again") {
+		t.Errorf("error = %q, want it to tell the submitter to try again", err)
 	}
-	if !strings.Contains(r.Warning, "pinned") {
-		t.Errorf("Warning = %q, want it to say the commit could not be pinned", r.Warning)
+	if r.PinnedCommit != "" || r.Warning != "" {
+		t.Errorf("run = {pin:%q warning:%q}, want both empty: the run is refused, not held "+
+			"with a warning", r.PinnedCommit, r.Warning)
 	}
 }
 
-// TestPinHeldRunCommitWithNoProjectStoreIsSilent pins the install with git projects turned off. There
-// is no guarantee to lose there, so warning about it on every held run would be noise on every
-// approval page.
-func TestPinHeldRunCommitWithNoProjectStoreIsSilent(t *testing.T) {
+// TestPinHeldRunCommitWithNoProjectStoreRefuses pins the install with git projects turned off. A
+// held run naming a project there cannot be pinned, and cannot run either, so it is refused the
+// same way rather than saved unpinned.
+func TestPinHeldRunCommitWithNoProjectStoreRefuses(t *testing.T) {
 	t.Parallel()
 	d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithNoJanitor())
 	defer d.Close()
 
 	r := &run.Run{Status: run.StatusPendingApproval, ProjectID: "proj_1"}
-	d.pinHeldRunCommit(r)
+	err := d.pinHeldRunCommit(r)
 
+	if !errors.Is(err, ErrCommitUnpinned) || !errors.Is(err, project.ErrNotFound) {
+		t.Fatalf("pinHeldRunCommit() error = %v, want %v and %v", err, ErrCommitUnpinned,
+			project.ErrNotFound)
+	}
 	if r.PinnedCommit != "" || r.Warning != "" {
-		t.Errorf("run = {pin:%q warning:%q}, want both empty on an install with no projects",
-			r.PinnedCommit, r.Warning)
+		t.Errorf("run = {pin:%q warning:%q}, want both empty on a refused run", r.PinnedCommit,
+			r.Warning)
 	}
 }
 
