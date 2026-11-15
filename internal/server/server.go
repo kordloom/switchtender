@@ -623,6 +623,9 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 // featuresOff names the optional features this install has switched off, so a page can skip asking
 // for them. Each answers 404 when off, which the page reads as "not enabled", but the browser logs
 // every 404 it sees, so a page that asked would open with errors in its console.
+//
+// The period change register is named when the license refuses it, so a page links a reader to the
+// audit trail and not to a register that answers with a refusal.
 func (s *Server) featuresOff() []string {
 	var off []string
 	if s.tokens == nil {
@@ -633,6 +636,9 @@ func (s *Server) featuresOff() []string {
 	}
 	if s.federation == nil {
 		off = append(off, "federation")
+	}
+	if license.Allow(license.FeatureRegister) != nil {
+		off = append(off, "register")
 	}
 	return off
 }

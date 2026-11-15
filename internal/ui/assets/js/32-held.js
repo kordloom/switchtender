@@ -151,7 +151,8 @@ function renderHeldDecide(shown) {
 }
 
 // renderHeldNext lists where a visitor goes from here: the first held run, the change register, and on
-// the hosted demo the site's section on checking the history yourself.
+// the hosted demo the site's section on checking the history yourself. An install whose license
+// leaves the register out links the audit trail in its place, so no step ends on a refusal.
 function renderHeldNext(items) {
 	const section = document.getElementById("held-next");
 	const ul = document.getElementById("held-next-links");
@@ -167,7 +168,11 @@ function renderHeldNext(items) {
 	};
 	const first = items.find((it) => it.run_id);
 	if (first) add("/ui/runs/" + encodeURIComponent(first.run_id), "Open the first held run");
-	add("/ui/audit/register", "Read the change register");
+	if (featureOff("register")) {
+		add("/ui/audit", "Read the audit trail");
+	} else {
+		add("/ui/audit/register", "Read the change register");
+	}
 	if (isDemo() && location.hostname === PUBLIC_DEMO_HOST) {
 		add("https://switchtender.com/#proof", "Check the history yourself");
 	}

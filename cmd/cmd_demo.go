@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/ansibleruntime"
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/demo"
 	"github.com/kordloom/switchtender/internal/dispatch"
@@ -129,6 +130,73 @@ func removeDemoFiles(db, assets string) {
 	_ = os.RemoveAll(assets)
 }
 
+// demoAnsibleLocator returns the locator the demo starts Ansible through, built the way serve
+// builds its own. It looks for the managed runtime where `switchtender ansible install` writes one
+// with no flags: beside the database SWITCHTENDER_DB names, or beside the default database in the
+// working directory. A --db moves it beside that database, as serve's --db does.
+//
+// The demo's own temporary database is never where a runtime was installed, so its folder is not
+// consulted.
+func demoAnsibleLocator(cmd *cobra.Command) *ansibleruntime.Locator {
+	db := demoDB
+	if db == "" {
+		db = dbFromEnv(cmd, defaultDBPath)
+	}
+	return ansibleLocator(db)
+}
+
+// demoRunner returns the runner the demo seeds and serves through: the host Ansible runner,
+// starting its commands from where ansible says.
+func demoRunner(ansible *ansibleruntime.Locator) roundhouse.Runner {
+	return roundhouse.NewAnsibleRunner(roundhouse.WithAnsibleLocator(ansible))
+}
+
+// demoPythonNeed returns the Python versions `switchtender ansible install` needs with no
+// --version, read from the lock that command installs so the two cannot disagree.
+func demoPythonNeed() string {
+	lock, err := ansibleruntime.LockFor("")
+	if err != nil {
+		return "a python3 the release supports"
+	}
+	return "Python " + lock.PythonMin + " to " + lock.PythonMax
+}
+
+// checkDemoAnsible returns nil when the Ansible commands seeding starts are where ansible says,
+// and otherwise the one line a reader acts on. Seeding runs real playbooks, so the check comes
+// before a database is made.
+//
+// With nothing configured and no managed runtime in use, the line names the fix: Ansible on PATH,
+// or `switchtender ansible install` with the Python versions that command needs. dbFlag is the
+// --db value: with one set the runtime belongs beside that database, where the plain command
+// would not put it, so the command names the directory. A configured directory without Ansible,
+// or a managed runtime that cannot be used, is a different fault that installing a runtime does
+// not mend, so that line carries the reason alone.
+//
+// A noSeed run serves a database seeded elsewhere and starts no playbook, so it is not checked.
+func checkDemoAnsible(ansible *ansibleruntime.Locator, dbFlag string, noSeed bool) error {
+	if noSeed {
+		return nil
+	}
+	const need = "demo needs Ansible, because seeding runs real playbooks"
+	cmds := ansible.Locate()
+	for _, name := range []string{"ansible-playbook", "ansible-inventory"} {
+		_, err := cmds.Path(name)
+		if err == nil {
+			continue
+		}
+		if cmds.Source != ansibleruntime.SourcePath {
+			return fmt.Errorf("%s: %w", need, err)
+		}
+		install := "`switchtender ansible install` in this folder"
+		if dbFlag != "" && ansible.Root() != "" {
+			install = "`switchtender ansible install --dir " + ansible.Root() + "`"
+		}
+		return fmt.Errorf("%s: put ansible-playbook and ansible-inventory on PATH, or run %s, "+
+			"which needs %s: %w", need, install, demoPythonNeed(), err)
+	}
+	return nil
+}
+
 // demoDispatcher returns the dispatcher the demo seeds and serves through, over bundle with runner,
 // and a cleanup that closes it and removes the cache its projects sync into.
 //
@@ -143,14 +211,15 @@ func removeDemoFiles(db, assets string) {
 // projects, the git folders the seed materializes on this server, and a held run is pinned to the
 // commit its project holds, which takes a syncer. Without one the demo refused every run that named
 // a project, and a held run must name one. The checkouts are this process's scratch, so the cache
-// is a temporary folder removed when the demo stops.
-func demoDispatcher(bundle storeBundle, runner roundhouse.Runner, hub *live.Hub, clock func() time.Time,
-	log *zap.Logger) (*dispatch.Dispatcher, func(), error) {
+// is a temporary folder removed when the demo stops. A project's collections are installed by the
+// ansible-galaxy ansible names, as serve installs them, so they come from the Ansible its runs use.
+func demoDispatcher(bundle storeBundle, runner roundhouse.Runner, ansible *ansibleruntime.Locator,
+	hub *live.Hub, clock func() time.Time, log *zap.Logger) (*dispatch.Dispatcher, func(), error) {
 	cache, err := os.MkdirTemp("", "switchtender-demo-projects-*")
 	if err != nil {
 		return nil, nil, fmt.Errorf("demo project cache: %w", err)
 	}
-	syncer, err := project.NewSyncer(cache)
+	syncer, err := project.NewSyncer(cache, galaxySyncerOpts(ansible)...)
 	if err != nil {
 		_ = os.RemoveAll(cache)
 		return nil, nil, fmt.Errorf("demo project cache: %w", err)
@@ -179,6 +248,13 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 	// The demo anchors its seeded chain through the guarded timestamp client, which never reads the
 	// ambient HTTPS_PROXY, so a proxied evaluator needs the same egress setting serve takes.
 	if err := applyEgressProxy(log); err != nil {
+		return err
+	}
+
+	// Seeding runs real playbooks, so a machine with no Ansible is told so here, before a database
+	// is made or a playbook is started.
+	ansible := demoAnsibleLocator(cmd)
+	if err := checkDemoAnsible(ansible, demoDB, demoNoSeed); err != nil {
 		return err
 	}
 
@@ -227,7 +303,7 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 	seedClock := demo.NewSeedClock()
 	// The demo serves the policy endpoints, so it enforces them too. Displaying policies that gate
 	// nothing teaches the wrong thing about how the product behaves.
-	disp, closeDisp, err := demoDispatcher(bundle, roundhouse.NewAnsibleRunner(), hub, seedClock.Now,
+	disp, closeDisp, err := demoDispatcher(bundle, demoRunner(ansible), ansible, hub, seedClock.Now,
 		log)
 	if err != nil {
 		return err

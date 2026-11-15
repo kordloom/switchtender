@@ -255,9 +255,11 @@ carry anything the chart has no key for, such as a secret source's token or a CA
 
 ## Try the demo
 
-To look around without setting anything up, run the seeded demo. It fills a fresh database with
-sample projects, templates, inventories, and real runs, including a flaky host, a split, and a
-pipeline, then serves it read-only so it is safe to expose:
+To look around on your own machine, run the seeded demo. It runs real playbooks, so it needs
+Ansible on the host, or one `switchtender ansible install` first, and it takes about two and a half
+minutes to seed before it answers. It fills a fresh database with sample projects, templates,
+inventories, and real runs, including a flaky host, a split, and a pipeline, then serves it
+read-only so it is safe to expose:
 
     switchtender demo --addr :8080
 

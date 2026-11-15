@@ -59,11 +59,14 @@ function liveAnswer() {
 }
 
 // heldWith loads the held page at search with the attention endpoint answering body, as a read-only
-// demo served at host when demoHost is set.
-async function heldWith(body, search, demoHost) {
+// demo served at host when demoHost is set. featuresOff is the list of optional features the server
+// says are off, space separated, as the template prints it.
+async function heldWith(body, search, demoHost, featuresOff) {
+	const vars = demoHost ? { ReadOnly: true, Demo: true } : {};
+	if (featuresOff) vars.FeaturesOff = featuresOff;
 	const page = loadPage("held", {
 		search: search || "",
-		vars: demoHost ? { ReadOnly: true, Demo: true } : {},
+		vars,
 		routes: { "/v1/attention": body },
 	});
 	if (demoHost) sandboxOf(page.app).location.hostname = demoHost;
@@ -80,6 +83,11 @@ function listed(document) {
 // nextLinks returns the hrefs under Where to go next.
 function nextLinks(document) {
 	return Array.from(document.querySelectorAll("#held-next-links a")).map((a) => a.getAttribute("href"));
+}
+
+// nextTexts returns the link texts under Where to go next.
+function nextTexts(document) {
+	return Array.from(document.querySelectorAll("#held-next-links a")).map((a) => a.textContent);
 }
 
 test("the agent's page shows only the runs an AI agent asked for, each with why it is held", async () => {
@@ -137,6 +145,23 @@ test("where to go next opens the first held run, the register, and on the hosted
 		["/ui/runs/run_restart", "/ui/audit/register", "https://switchtender.com/#proof"]);
 	const local = await heldWith(reply(liveAnswer()), "?who=agent", "127.0.0.1");
 	assert.deepEqual(nextLinks(local.document), ["/ui/runs/run_restart", "/ui/audit/register"]);
+});
+
+test("with the register off the second step is the audit trail, and with it on the register", async () => {
+	const off = await heldWith(reply(liveAnswer()), "?who=agent", "demo.switchtender.com",
+		"tokens register");
+	assert.deepEqual(nextLinks(off.document),
+		["/ui/runs/run_restart", "/ui/audit", "https://switchtender.com/#proof"]);
+	assert.deepEqual(nextTexts(off.document),
+		["Open the first held run", "Read the audit trail", "Check the history yourself"]);
+	const on = await heldWith(reply(liveAnswer()), "?who=agent", "demo.switchtender.com", "tokens");
+	assert.deepEqual(nextLinks(on.document),
+		["/ui/runs/run_restart", "/ui/audit/register", "https://switchtender.com/#proof"]);
+	assert.deepEqual(nextTexts(on.document),
+		["Open the first held run", "Read the change register", "Check the history yourself"]);
+	const untold = await heldWith(reply(liveAnswer()), "?who=agent", "127.0.0.1");
+	assert.deepEqual(nextLinks(untold.document), ["/ui/runs/run_restart", "/ui/audit/register"]);
+	assert.deepEqual(nextTexts(untold.document), ["Open the first held run", "Read the change register"]);
 });
 
 test("an agent's page with nothing held says so", async () => {

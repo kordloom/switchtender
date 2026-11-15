@@ -10,9 +10,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// TestPagesSayWhichFeaturesAreOff covers the marker the users and credentials pages carry naming
-// the optional features the server has switched off, so the script asks for none of them. A page
-// told nothing carries no marker and asks for every feature.
+// TestPagesSayWhichFeaturesAreOff covers the marker the users, credentials, and held pages carry
+// naming the optional features the server has switched off, so the script asks for none of them. A
+// page told nothing carries no marker and asks for every feature.
 func TestPagesSayWhichFeaturesAreOff(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -25,13 +25,15 @@ func TestPagesSayWhichFeaturesAreOff(t *testing.T) {
 		Off: []string{"federation"}, WantAttr: ` data-features-off="federation"`,
 	}, { // Test 2: Nothing off leaves the marker out.
 		Off: nil, WantAttr: "",
+	}, { // Test 3: The register the license leaves out is named with the rest.
+		Off: []string{"tokens", "register"}, WantAttr: ` data-features-off="tokens register"`,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			handler := New(zap.NewNop(), nil, false, 0, false, false, false, "",
 				WithFeaturesOff(test.Off...)).Handler()
-			for _, path := range []string{"/ui/users", "/ui/credentials"} {
+			for _, path := range []string{"/ui/users", "/ui/credentials", "/ui/held"} {
 				rec := httptest.NewRecorder()
 				handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 				body := rec.Body.String()

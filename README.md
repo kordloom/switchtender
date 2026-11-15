@@ -357,8 +357,10 @@ Coming from [AWX](https://switchtender.com/awx-alternative),
 [Rundeck](https://switchtender.com/rundeck-alternative), or
 [Jenkins](https://switchtender.com/jenkins-alternative).
 
-To see it without any setup, run the seeded read-only demo. It fills a fresh database with sample
-projects, templates, and real runs, then serves it with every change blocked:
+To see it on your own machine, run the seeded read-only demo. It runs real playbooks, so it needs
+Ansible on the host, or one `./switchtender ansible install` first, and it takes about two and a
+half minutes to seed before it answers. It fills a fresh database with sample projects, templates,
+and real runs, then serves it with every change blocked:
 
     ./switchtender demo --addr :8080         # or: docker compose --profile demo up --build, on :8081
 
