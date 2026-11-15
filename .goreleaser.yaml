@@ -89,6 +89,8 @@ archives:
         info: *rootfile
       - src: README.md
         info: *rootfile
+      - src: THIRD_PARTY_NOTICES.md
+        info: *rootfile
 
 checksum:
   name_template: SHA256SUMS

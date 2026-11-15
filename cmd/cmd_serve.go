@@ -266,6 +266,10 @@ var (
 	serveAIURL            string
 )
 
+// serveJWTAllowAnyAudience holds --jwt-allow-any-audience, which lets bearer JWT sign-in start with
+// no expected audience.
+var serveJWTAllowAnyAudience bool
+
 // forwardURL holds --forward-url, an HTTP endpoint audit events stream to as NDJSON.
 var forwardURL string
 
@@ -764,7 +768,11 @@ func init() {
 		"JWKS URL to enable bearer JWT sign-in, for example https://jwtmint.example.com/jwks.")
 	serveCmd.Flags().StringVar(&serveJWTIssuer, "jwt-issuer", "", "Expected token issuer, the iss claim.")
 	serveCmd.Flags().StringVar(&serveJWTAudience, "jwt-audience", "",
-		"Expected token audience, empty to skip the audience check.")
+		"Expected token audience, the aud claim. JWT sign-in refuses to start without it unless "+
+			"--jwt-allow-any-audience is set.")
+	serveCmd.Flags().BoolVar(&serveJWTAllowAnyAudience, "jwt-allow-any-audience", false,
+		"Start JWT sign-in with no --jwt-audience, accepting every token the issuer signs. Only "+
+			"for an issuer that serves this install alone.")
 	serveCmd.Flags().StringVar(&serveJWTUsernameClaim, "jwt-username-claim", "sub",
 		"Claim naming the account, for example sub or email.")
 	serveCmd.Flags().StringVar(&serveJWTGroupsClaim, "jwt-groups-claim", "",
@@ -1182,6 +1190,21 @@ func disableExternalAuth() {
 	serveLDAPURL = ""
 	serveSAMLIDPMetadataURL = ""
 	serveJWTJWKSURL = ""
+}
+
+// checkJWTAudience refuses bearer JWT sign-in that names no audience. An issuer usually mints
+// tokens for more than one application, and the audience claim is what says which one a token was
+// for. Without it every token that issuer signs is accepted here, including one minted for a
+// different application entirely, so a service holding a token for something else at the same
+// provider can sign in as whatever its claims map to. An issuer that serves this install alone has
+// nothing to tell apart, and allowAny is how its operator says so.
+func checkJWTAudience(audience string, allowAny bool) error {
+	if audience != "" || allowAny {
+		return nil
+	}
+	return fmt.Errorf("%w: --jwt-jwks-url is set with no --jwt-audience, so a token minted for "+
+		"another application at the same issuer would be accepted here: set --jwt-audience, or "+
+		"pass --jwt-allow-any-audience if the issuer serves this install alone", ErrUsage)
 }
 
 // isLoopbackAddr reports whether addr binds only the loopback interface. An empty or wildcard host
@@ -1949,15 +1972,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	var jwtAuth paid.JWTDirectory
 	if serveJWTJWKSURL != "" {
-		// An issuer usually mints tokens for more than one application, and the audience claim is
-		// what says which one a token was for. Without it every token that issuer signs is accepted
-		// here, including one minted for a different application entirely, so a service holding a
-		// token for something else at the same provider can sign in as whatever its claims map to.
-		// The check is optional because a single-application issuer does not need it, not because
-		// leaving it off is equivalent.
+		if err := checkJWTAudience(serveJWTAudience, serveJWTAllowAnyAudience); err != nil {
+			return err
+		}
 		if serveJWTAudience == "" {
-			log.Warn("jwt sign-in accepts any audience: set --jwt-audience so a token minted for " +
-				"another application at the same issuer is not accepted here")
+			log.Warn("jwt sign-in accepts any audience because --jwt-allow-any-audience is set: " +
+				"a token minted for another application at the same issuer is accepted here")
 		}
 		jwtAuth, err = directory.JWT(cmd.Context(), paid.JWTConfig{
 			Directory: paid.DirectoryConfig{Users: bundle.Users(),

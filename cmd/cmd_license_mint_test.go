@@ -284,8 +284,43 @@ func TestMintClaimsCarryTheAddons(t *testing.T) {
 				t.Errorf("mintClaims().Addons = %s, want %s", got, test.WantAddons)
 			}
 			if c.Tier != license.TierTeam || c.Org != "Acme" || c.Hosts != "1000" ||
-				c.Kid != license.IssuerKid || c.Expires != "2027-09-01T00:00:00Z" {
+				c.Kid != license.IssuerKid || c.Expires != "2027-09-01T23:59:59Z" {
 				t.Errorf("mintClaims() = %+v, want the flags it was given", c)
+			}
+		})
+	}
+}
+
+// TestMintExpiryIsTheEndOfTheLastDay checks a license runs through the whole of its end date. The
+// delivery email names the end of the term as a date, so a license that lapsed at the time of day
+// it was minted would stop partway through the last day the customer paid for.
+func TestMintExpiryIsTheEndOfTheLastDay(t *testing.T) {
+	t.Parallel()
+	central := time.FixedZone("central", -6*60*60)
+	tests := []struct {
+		Now        time.Time
+		Days       int
+		WantExpiry string
+	}{{ // Test 28: A mint at midnight runs to the last second of the end date.
+		Now: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), Days: 365,
+		WantExpiry: "2027-09-01T23:59:59Z",
+	}, { // Test 29: A one-day term minted in the afternoon covers all of the next day.
+		Now: time.Date(2026, 11, 14, 15, 0, 0, 0, time.UTC), Days: 1,
+		WantExpiry: "2026-11-15T23:59:59Z",
+	}, { // Test 30: The end date is counted from the UTC date, whatever zone the clock reads in.
+		Now: time.Date(2026, 11, 13, 20, 0, 0, 0, central), Days: 30,
+		WantExpiry: "2026-12-14T23:59:59Z",
+	}, { // Test 31: A term that crosses a month end lands on the right date.
+		Now: time.Date(2027, 1, 31, 9, 30, 0, 0, time.UTC), Days: 1,
+		WantExpiry: "2027-02-01T23:59:59Z",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			got := mintExpiry(test.Now, test.Days).Format(time.RFC3339)
+			if got != test.WantExpiry {
+				t.Errorf("mintExpiry(%s, %d) = %s, want %s", test.Now.Format(time.RFC3339),
+					test.Days, got, test.WantExpiry)
 			}
 		})
 	}
