@@ -417,8 +417,8 @@ func TestAWXCredentialKindFollowsTheInputsNotOnlyTheTypeName(t *testing.T) {
 			WantKind: credential.KindSSHKey}, // Test 2: the default for a machine credential.
 		{Name: "empty inputs", Inputs: `{}`, WantKind: credential.KindSSHKey},    // Test 3.
 		{Name: "absent inputs", Inputs: `null`, WantKind: credential.KindSSHKey}, // Test 4.
-		{Name: "blank key falls through", Inputs: `{"ssh_key_data": "  ", "password": "$encrypted$"}`,
-			WantKind: credential.KindSSHPassword}, // Test 5.
+		{Name: "blank key is still a key", Inputs: `{"ssh_key_data": "  ", "password": "$encrypted$"}`,
+			WantKind: credential.KindSSHKey}, // Test 5: AWX keeps a key input only while it holds one.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -501,10 +501,10 @@ func TestAWXVaultLabelIsCarriedOnlyWhenItIsUsable(t *testing.T) {
 
 // TestAWXEveryCredentialIsReportedAsNeedingItsSecret pins that no credential imports quietly, and
 // that the line says the true thing. An export omits secrets by design, so a credential that arrives
-// without a line in the report is one an operator will discover at the first failed run. AWX writes a
-// secret it holds as "$encrypted$", so a credential with that marker needs its secret re-entered, and
-// one without it had none to re-enter. Telling the second kind to re-enter a secret sent the operator
-// looking for one that never existed.
+// without a line in the report is one an operator will discover at the first failed run. An export
+// lists every secret AWX holds, so a credential with one listed needs its secret re-entered, and the
+// export lists none for the other kind. Telling the second kind to re-enter a secret sent the
+// operator looking for one that never existed.
 func TestAWXEveryCredentialIsReportedAsNeedingItsSecret(t *testing.T) {
 	t.Parallel()
 	doc := `{"credentials": [
@@ -524,7 +524,7 @@ func TestAWXEveryCredentialIsReportedAsNeedingItsSecret(t *testing.T) {
 	}
 	for _, name := range []string{"bare", "settings only", "refused only", "both"} {
 		line, ok := warningContaining(t, plan.Warnings, fmt.Sprintf("credential %q", name),
-			"had no secret in AWX", "detach it")
+			"the export lists no secret for it", "detach it")
 		if !ok {
 			t.Errorf("credential %q, which held no secret, was not reported as having none.\n"+
 				"warnings: %v", name, plan.Warnings)

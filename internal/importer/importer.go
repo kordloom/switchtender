@@ -116,6 +116,9 @@ type Plan struct {
 	// topSchedules holds the schedules an AWX export writes at its top level until the template or
 	// workflow each belongs to takes them. Nil for every other source.
 	topSchedules *awxTopSchedules
+	// awxBlanked reports an AWX export that writes every secret as an empty value, so a secret
+	// survey default it wrote empty is listed rather than read as no default.
+	awxBlanked bool
 }
 
 // objects counts everything the plan would create, which is what makes an import a success or a
@@ -860,30 +863,34 @@ func mapCredentialKind(awxType string, inputs map[string]any) (credential.Kind, 
 	return credential.KindEnv, false
 }
 
-// awxHeldSecret reports whether an AWX credential held a secret, which its export marks by writing
-// the value as the literal "$encrypted$". That marker is AWX's own reading of which fields are secret,
-// so a credential without one held nothing that needs entering again.
-func awxHeldSecret(inputs map[string]any) bool {
-	for _, v := range inputs {
-		if strings.TrimSpace(jsonScalarString(v)) == "$encrypted$" {
+// awxHeldSecret reports whether an export lists a secret for an AWX credential: any input written as
+// the literal "$encrypted$", which is AWX's own reading of which fields are secret, or a secret input
+// listed under any value, built in or declared by the credential's exported type. declared names the
+// inputs that type marks secret. AWX deletes a secret input that holds no value, so the input being
+// listed is what says a secret was set, not what the export wrote for it.
+func awxHeldSecret(inputs map[string]any, declared []string) bool {
+	for key, v := range inputs {
+		if strings.TrimSpace(jsonScalarString(v)) == awxEncrypted {
+			return true
+		}
+		if hasInput(inputs, key) && awxSecretInput(key, declared) {
 			return true
 		}
 	}
 	return false
 }
 
-// hasInput reports whether an AWX credential configured the named input. AWX exports a secret as the
-// literal "$encrypted$", so a set secret is present but unreadable, which is all this needs to know.
+// hasInput reports whether an AWX credential lists the named input as a JSON string. AWX keeps a
+// secret input only while it holds a value, so a listed one was set whatever the export wrote for
+// it: the "$encrypted$" a current client writes, the empty value upstream awxkit through 23.7.0
+// writes, or ASK for one AWX asks for at launch.
 //
-// The value is rendered by jsonScalarString, so a JSON null reads as unset. Printed the Go way it
-// became "<nil>", which counted as configured, and a machine credential whose password is null
-// imported as the password kind rather than the key kind: the wrong material to prompt for.
+// A JSON null, a number, or no key at all reads as unset. A null printed the Go way became "<nil>",
+// which counted as configured, and a machine credential whose password is null imported as the
+// password kind rather than the key kind: the wrong material to prompt for.
 func hasInput(inputs map[string]any, key string) bool {
-	v, ok := inputs[key]
-	if !ok {
-		return false
-	}
-	return strings.TrimSpace(jsonScalarString(v)) != ""
+	_, ok := inputs[key].(string)
+	return ok
 }
 
 // choicesFrom normalizes a survey field's choices, which AWX encodes as either a list or a newline

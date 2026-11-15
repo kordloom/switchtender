@@ -513,9 +513,10 @@ type awxCredential struct {
 	// object, so encoding/json failed on the whole document and an export from a live AWX imported
 	// nothing at all rather than importing partially.
 	CredentialType awxRef `json:"credential_type"`
-	// Inputs are the credential's configured values. AWX replaces every secret among them with the
-	// literal "$encrypted$", so what survives an export is the non-secret settings: which user to
-	// connect as, how to become root, which region or endpoint to talk to.
+	// Inputs are the credential's configured values. An export writes every secret among them as the
+	// literal "$encrypted$", or as an empty value from upstream awxkit through 23.7.0, so what
+	// survives is the non-secret settings: which user to connect as, how to become root, which
+	// region or endpoint to talk to.
 	Inputs map[string]any `json:"inputs,omitempty"`
 }
 
@@ -639,6 +640,8 @@ func fromAWX(data []byte, now time.Time, ids *awxTemplateIDs) (*Plan, error) {
 	// Said before anything is mapped, so it leads the items to review and no cap on a long report
 	// can hide it: it is about every workflow in the file rather than one object in it.
 	plan.warnOldAWXClient(data, export)
+	// Second, for the same reason: it is about every credential in the file.
+	plan.warnBlankedSecrets(data, export)
 
 	projectIDs := awxIDs{}
 	var projectCreds []projectCredential
@@ -746,6 +749,7 @@ func fromAWX(data []byte, now time.Time, ids *awxTemplateIDs) (*Plan, error) {
 		return c.Organization.Name, c.Name
 	})...)
 	customTypes, refusedTypes := plan.addCredentialTypes(export.CredentialTypes, now)
+	declared := awxDeclaredSecrets(export.CredentialTypes)
 	for _, c := range export.Credentials {
 		// A credential of a custom type the export also carries becomes a credential of the imported
 		// type. It arrives as an empty shell like every other credential, and its type decides how
@@ -806,9 +810,10 @@ func fromAWX(data []byte, now time.Time, ids *awxTemplateIDs) (*Plan, error) {
 		// A machine credential in AWX can hold a become password beside its connection secret. A
 		// credential here holds one secret, so the become password arrives as a shell of its own,
 		// attached wherever the first one is. It went unmentioned, and escalation failed at run time
-		// on a password nobody had been asked to enter.
-		if kind != credential.KindBecomePassword &&
-			strings.TrimSpace(jsonScalarString(c.Inputs["become_password"])) == "$encrypted$" {
+		// on a password nobody had been asked to enter. The input is read by its presence, since a
+		// file from upstream awxkit through 23.7.0 writes it empty and one AWX asks for at launch is
+		// ASK, and either way AWX held it.
+		if kind != credential.KindBecomePassword && hasInput(c.Inputs, "become_password") {
 			become := &credential.Credential{
 				ID: credential.NewID(), Name: obj.Name + " (become)", Kind: credential.KindBecomePassword,
 				CreatedAt: now,
@@ -822,13 +827,15 @@ func fromAWX(data []byte, now time.Time, ids *awxTemplateIDs) (*Plan, error) {
 				"credential %q attached wherever %q is; set its secret too", c.Name, become.Name, c.Name)
 		}
 		base := "credential %q needs its secret re-entered; an export never carries secret values"
-		if !awxHeldSecret(c.Inputs) {
-			// AWX writes every secret it holds as "$encrypted$", and this credential carries none: a
-			// machine credential that only names a user, or a Galaxy credential for the public
-			// server. Telling the operator to re-enter its secret sent them looking for one that
-			// never existed.
-			base = "credential %q had no secret in AWX, so there is nothing to re-enter. A run needs " +
-				"a credential to hold a secret, so set one or detach it from the templates that use it"
+		if !awxHeldSecret(c.Inputs, declared[c.CredentialType.Name]) {
+			// The export lists no secret input for this credential: a machine credential that only
+			// names a user, or a Galaxy credential for the public server. Telling the operator to
+			// re-enter its secret sent them looking for one that never existed. A secret a lookup
+			// plugin filled in AWX leaves no input in any export, so the line says what the export
+			// lists rather than what AWX held.
+			base = "credential %q: the export lists no secret for it, so there is nothing to " +
+				"re-enter. A run needs a credential to hold a secret, so set one or detach it from " +
+				"the templates that use it"
 		}
 		switch {
 		case len(settings) > 0 && len(refused) > 0:
@@ -843,6 +850,11 @@ func fromAWX(data []byte, now time.Time, ids *awxTemplateIDs) (*Plan, error) {
 				c.Name, strings.Join(refused, ", "))
 		default:
 			plan.warn(base, c.Name)
+		}
+		if prompted := awxPromptedInputs(c.Inputs, declared[c.CredentialType.Name]); len(prompted) > 0 {
+			plan.warn("credential %q is set in AWX to ask for %s at launch. A launch here does not "+
+				"ask for a credential's secret, so each is entered once and stored like any other",
+				c.Name, strings.Join(prompted, ", "))
 		}
 		// A registry login is sent only to the one host its settings name. An export with no host,
 		// or one written as a URL, leaves the imported login bound to nothing, and an execution
@@ -1170,9 +1182,17 @@ func (p *Plan) mapSurvey(jt awxJobTemplate) []template.SurveyField {
 		}
 		// A password prompt imports as a secret field, whose answer is sealed the way AWX encrypts
 		// it. Its default is the one part that cannot come across: AWX exports it as $encrypted$.
+		// A file that writes every secret empty writes a set default the same way, and AWX keeps an
+		// empty default for a question that has none, so there an empty one is listed too.
 		if field.Secret() {
 			field.Default, field.Choices = nil, nil
-			p.secretSurveyDefault(fmt.Sprintf("template %q", jt.Name), f.Variable, f.Default)
+			if def, ok := f.Default.(string); p.awxBlanked && ok && def == "" {
+				p.warn("template %q secret field %q arrives without its default: this export writes "+
+					"a set default as an empty value, the same as no default, so set it on the "+
+					"template if launches relied on one", jt.Name, f.Variable)
+			} else {
+				p.secretSurveyDefault(fmt.Sprintf("template %q", jt.Name), f.Variable, f.Default)
+			}
 		}
 		fields = append(fields, field)
 	}

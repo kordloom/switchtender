@@ -41,9 +41,10 @@ Two numbers are worth understanding before relying on them.
 **Needs a secret is not a limitation of the importer.** An export never carries secret values, from
 any of these systems, so a credential arrives as a named shell whoever wrote the tool. The count is
 how many credentials need a secret set once before anything uses them. The plan says which of them
-held a secret in the source and which held none, such as an AWX machine credential that only names a
-user. A run refuses a credential with no secret and says which one, so the choice for the second kind
-is to set a secret or to detach the credential from the templates that use it.
+held a secret in the source and which the export lists no secret for, such as an AWX machine
+credential that only names a user. A run refuses a credential with no secret and says which one, so
+the choice for the second kind is to set a secret or to detach the credential from the templates
+that use it.
 
 **Does not come across is itemized, never summarized.** Each entry names the object and the reason,
 because a count with no names cannot be acted on. Nothing is dropped without an entry: a test reads
@@ -95,7 +96,9 @@ crontab import creates no template either, so an imported cron line has nothing 
   attachments of their own, are counted in the report rather than imported. The awx client of the
   Tower 3.8 era, upstream awxkit before 21.4.0, leaves approval nodes out of its export. The
   preview says when a file looks like one. Check each workflow against the source and add any
-  missing approval back as an approval step.
+  missing approval back as an approval step. Upstream awxkit through 23.7.0 writes every secret as
+  an empty value instead of `$encrypted$`. AWX never stores an empty credential secret, so the
+  importer reads an empty secret input as one AWX held and asks for it like any other.
 - Semaphore: export the project's repositories, inventories, keys, templates, and schedules as
   JSON. Semaphore's own single-project backup file and the multi-project wrapper are both read.
 - Rundeck: either export a project's jobs as YAML or JSON from the project's job list or the API, or

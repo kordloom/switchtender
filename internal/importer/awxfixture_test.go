@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -13,7 +14,9 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
+	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/template"
 )
 
 // vendorFixture reads one of the vendor-shaped exports in testdata. Each is built key for key from
@@ -53,7 +56,12 @@ func withoutTopLevelKey(t *testing.T, raw []byte, key string) []byte {
 // refuse their workflows by name, and an approval that approves itself on a timeout and carries a
 // context template, which import with a warning each, beside a node's retries.
 //
-//nolint:funlen // Test function.
+// Every client's machine credential comes across the same way: a password credential with its
+// become password split out and attached beside it, each needing its secret. awxkit through 23.7.0
+// writes both secrets empty, so its file also says so, second after the old-client warning when
+// both apply.
+//
+//nolint:funlen,gocognit // Test function.
 func TestVendorExportFixturesImportAsTheQuorumSays(t *testing.T) {
 	t.Parallel()
 	release := []run.PipelineStep{
@@ -67,10 +75,15 @@ func TestVendorExportFixturesImportAsTheQuorumSays(t *testing.T) {
 		Fixture string
 		// DropKey names a top-level key to remove first, to stand for a partial export.
 		DropKey string
+		// Blank writes every secret as an empty value first, as awxkit 21.4.0 through 23.7.0 does.
+		Blank bool
 		// WantKeys are the top-level keys the client's EXPORTABLE_RESOURCES makes it write.
 		WantKeys []string
 		// WantOldClient reports whether the old-client warning must lead the preview.
 		WantOldClient bool
+		// WantBlanked reports whether the blanked-secrets sentence must follow the old-client
+		// warning, or lead the preview when there is none.
+		WantBlanked bool
 		// WantSteps are the steps of each workflow that must import, by name.
 		WantSteps map[string][]run.PipelineStep
 		// WantRefused are fragments of the refusal each refused workflow must carry, by name.
@@ -90,10 +103,12 @@ func TestVendorExportFixturesImportAsTheQuorumSays(t *testing.T) {
 		DropKey:       "schedules",
 		WantSteps:     map[string][]run.PipelineStep{"Release": release},
 		WantSchedules: 1,
-	}, { // Test 2: The Tower 3.8 era client drops the opening approval without a trace.
+	}, { // Test 2: The Tower 3.8 era client drops the opening approval without a trace, and writes
+		// every secret empty.
 		Fixture:       "awxkit-17.1.0-export.json",
 		WantKeys:      awxkitResources("17.1.0"),
 		WantOldClient: true,
+		WantBlanked:   true,
 		WantSteps: map[string][]run.PipelineStep{"Release": {
 			{Name: "deploy", Playbook: "deploy.yml"},
 			{Name: "page", Playbook: "page.yml"},
@@ -114,11 +129,21 @@ func TestVendorExportFixturesImportAsTheQuorumSays(t *testing.T) {
 		},
 		WantReview: []string{`workflow "Nightly" approval node approve, "Approve the nightly", ` +
 			"approves itself in Ascender"},
+	}, { // Test 4: A client from 21.4.0 through 23.7.0 writes the approval and the schedules list,
+		// and every secret empty, so only the blanked-secrets sentence applies.
+		Fixture:       "awxkit-24.6.1-export.json",
+		Blank:         true,
+		WantBlanked:   true,
+		WantSteps:     map[string][]run.PipelineStep{"Release": release},
+		WantSchedules: 1,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			raw := vendorFixture(t, test.Fixture)
+			if test.Blank {
+				raw = bytes.ReplaceAll(raw, []byte(`"$encrypted$"`), []byte(`""`))
+			}
 			if test.WantKeys != nil {
 				var doc map[string]json.RawMessage
 				if err := json.Unmarshal(raw, &doc); err != nil {
@@ -148,6 +173,19 @@ func TestVendorExportFixturesImportAsTheQuorumSays(t *testing.T) {
 			if w, ok := warningContaining(t, plan.Warnings, oldClientWarning); ok && !test.WantOldClient {
 				t.Errorf("a file a current client wrote carries the old-client warning: %s", w)
 			}
+			at := 0
+			if test.WantOldClient {
+				at = 1
+			}
+			gotBlanked := len(r.NeedsReview) > at && strings.Contains(r.NeedsReview[at], blankedSentence)
+			if gotBlanked != test.WantBlanked {
+				t.Errorf("blanked-secrets sentence at review item %d = %v, want %v.\nwarnings:\n%s", at,
+					gotBlanked, test.WantBlanked, joined)
+			}
+			if w, ok := warningContaining(t, plan.Warnings, blankedSentence); ok && !test.WantBlanked {
+				t.Errorf("a file that writes secrets as $encrypted$ says they are empty: %s", w)
+			}
+			assertMachineCredential(t, plan)
 
 			imported := map[string][]run.PipelineStep{}
 			for _, tpl := range plan.Templates {
@@ -200,4 +238,47 @@ func awxkitResources(since string) []string {
 		return keys
 	}
 	return append(keys, "execution_environments", "applications", "schedules")
+}
+
+// assertMachineCredential pins what every vendor fixture's machine credential becomes, whichever
+// way its client wrote the secrets: a password credential with its become password split out as a
+// shell of its own, both attached to the Deploy template, and both reported as needing a secret.
+func assertMachineCredential(t *testing.T, plan *Plan) {
+	t.Helper()
+	joined := strings.Join(plan.Warnings, "\n")
+	byName := map[string]*credential.Credential{}
+	for _, c := range plan.Credentials {
+		byName[c.Name] = c
+	}
+	ssh, become := byName["prod-ssh"], byName["prod-ssh (become)"]
+	if ssh == nil {
+		t.Fatalf("prod-ssh was not imported.\nwarnings:\n%s", joined)
+	}
+	if ssh.Kind != credential.KindSSHPassword {
+		t.Errorf("prod-ssh kind = %q, want %q", ssh.Kind, credential.KindSSHPassword)
+	}
+	if become == nil {
+		t.Fatalf("the become password of prod-ssh did not arrive as its own shell.\nwarnings:\n%s",
+			joined)
+	}
+	if become.Kind != credential.KindBecomePassword {
+		t.Errorf("prod-ssh (become) kind = %q, want %q", become.Kind, credential.KindBecomePassword)
+	}
+	at := slices.IndexFunc(plan.Templates, func(tpl *template.Template) bool {
+		return tpl.Name == "Deploy"
+	})
+	if at < 0 {
+		t.Fatalf("template Deploy was not imported.\nwarnings:\n%s", joined)
+	}
+	if ids := plan.Templates[at].CredentialIDs; !slices.Contains(ids, ssh.ID) ||
+		!slices.Contains(ids, become.ID) {
+		t.Errorf("template Deploy attaches %v, want prod-ssh and its become password", ids)
+	}
+	if _, ok := warningContaining(t, plan.Warnings, `credential "prod-ssh" needs its secret `+
+		"re-entered"); !ok {
+		t.Errorf("prod-ssh is not reported as needing its secret.\nwarnings:\n%s", joined)
+	}
+	if w, ok := warningContaining(t, plan.Warnings, "the export lists no secret for it"); ok {
+		t.Errorf("a credential that held a secret is reported as listing none: %s", w)
+	}
 }

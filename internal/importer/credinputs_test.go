@@ -34,12 +34,25 @@ func TestMachineKindFollowsInputs(t *testing.T) {
 		WantKind: credential.KindSSHKey,
 	}, { // Test 3: No inputs at all keeps the historical default rather than guessing.
 		AWXType: "Machine", Inputs: nil, WantKind: credential.KindSSHKey,
-	}, { // Test 4: An empty value is not a configured value.
+	}, { // Test 4: Both written empty were both held, as AWX never stores an empty secret, so the
+		// key wins.
 		AWXType: "Machine", Inputs: map[string]any{"password": "", "ssh_key_data": ""},
 		WantKind: credential.KindSSHKey,
 	}, { // Test 5: Source control follows the same rule.
 		AWXType: "Source Control", Inputs: map[string]any{"password": "$encrypted$"},
 		WantKind: credential.KindSSHPassword,
+	}, { // Test 6: A password written empty, as awxkit through 23.7.0 writes it, is a password.
+		AWXType: "Machine", Inputs: map[string]any{"username": "deploy", "password": ""},
+		WantKind: credential.KindSSHPassword,
+	}, { // Test 7: A key written empty is a key.
+		AWXType: "Machine", Inputs: map[string]any{"username": "deploy", "ssh_key_data": ""},
+		WantKind: credential.KindSSHKey,
+	}, { // Test 8: A password AWX asks for at launch is a password.
+		AWXType: "Machine", Inputs: map[string]any{"password": "ASK"},
+		WantKind: credential.KindSSHPassword,
+	}, { // Test 9: A null password is unset, so the default holds.
+		AWXType: "Machine", Inputs: map[string]any{"password": nil},
+		WantKind: credential.KindSSHKey,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
