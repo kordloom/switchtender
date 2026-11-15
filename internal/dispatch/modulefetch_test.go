@@ -803,7 +803,7 @@ func TestAPlanInAContainerImageIsNotDownloaded(t *testing.T) {
 			}
 			p := &project.Project{ID: "proj_image", Name: "infra", RepoURL: repo, Branch: "main",
 				Image: test.ProjectImage}
-			var projects project.Store = project.NewMemStore()
+			projects := project.NewMemStore()
 			if err := projects.Save(ctx, p); err != nil {
 				t.Fatalf("Save(project) error = %v", err)
 			}
