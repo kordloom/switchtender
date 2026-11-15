@@ -605,6 +605,9 @@ func fromAWX(data []byte, now time.Time, ids *awxTemplateIDs) (*Plan, error) {
 		reflect.TypeFor[awxInventoryRelated](), reflect.TypeFor[awxGroup](),
 		reflect.TypeFor[awxGroupRelated]())
 	if err != nil {
+		if towerCLI := refuseTowerCLI(data); towerCLI != nil {
+			return nil, towerCLI
+		}
 		return nil, fmt.Errorf("parse awx export: %w", err)
 	}
 	// A decoder reads one value and stops, so the rest of the file has to be checked separately. See
