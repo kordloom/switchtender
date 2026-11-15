@@ -85,13 +85,15 @@ func TestAnAgentsWorkflowCannotApply(t *testing.T) {
 			t.Parallel()
 			store := run.NewMemStore()
 			audits := audit.NewMemStore()
+			projects, from := heldFrom(t)
 			d := New(store, dispatchtest.OKRunner(), zap.NewNop(), WithNoJanitor(), WithAudits(audits),
-				WithPolicies(dispatchtest.RulesHolding(t, test.Rules...)))
+				WithPolicies(dispatchtest.RulesHolding(t, test.Rules...)), projects)
 			t.Cleanup(d.Close)
 			ctx, opts := boundAgent("dev-lead")
 			if test.Person {
 				ctx, opts = context.Background(), dispatchtest.PersonOpts()
 			}
+			opts = append(opts, from)
 			if test.DryRun {
 				opts = append(opts, run.WithDryRun(true))
 			}

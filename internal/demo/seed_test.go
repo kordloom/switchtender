@@ -399,26 +399,30 @@ func TestSeedConfigProducesTheSameShapeEveryTime(t *testing.T) {
 	}
 }
 
-// TestSeedConfigStoresRepositoriesTheSyncerWillAccept pins the seam between the two packages. The
-// seeded projects are only useful if the syncer will clone them: a project whose URL the validator
-// refuses shows up on the demo and fails the moment anyone launches its template, which is worse
-// than not seeding it.
-//
-// It also pins that no seeded project publishes a path off the demo server's disk. The remote is
-// the one column a visitor reads to learn where the demo's playbooks come from, and a file URL
-// under a temporary directory reads as an install somebody never finished.
+// TestSeedConfigStoresRepositoriesTheSyncerWillAccept pins the seam between the two packages. Every
+// run the demo holds comes from a seeded project, so a project the syncer will not clone strands the
+// showcase that names it. Each seeded project names the working copy the seed committed on the demo
+// server, which is what the projects page shows, and the syncer clones it in process and finds what
+// the held runs name inside it.
 func TestSeedConfigStoresRepositoriesTheSyncerWillAccept(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	stores := newSeedStores()
-	seedConfig(ctx, stores.deps(), zap.NewNop())
+	deps := stores.deps()
+	deps.Repos = demoRepos(t)
+	seedConfig(ctx, deps, zap.NewNop())
 
 	projects, err := stores.Projects.List(ctx)
 	if err != nil {
 		t.Fatalf("Projects.List() error = %v", err)
 	}
-	if len(projects) == 0 {
-		t.Fatal("no projects were seeded")
+	want := map[string][]string{
+		webProject: {projectPlaybook, projectRestart, projectInventory},
+		dbProject:  {projectNetwork + "/main.tf"},
+	}
+	syncer, err := project.NewSyncer(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewSyncer() error = %v", err)
 	}
 	for _, p := range projects {
 		if err := project.ValidateRepoURL(p.RepoURL); err != nil {
@@ -427,13 +431,25 @@ func TestSeedConfigStoresRepositoriesTheSyncerWillAccept(t *testing.T) {
 		if p.Branch != "main" {
 			t.Errorf("project %q pins branch %q, want the branch the demo repository is on", p.Name, p.Branch)
 		}
-		if !strings.HasPrefix(p.RepoURL, "https://") {
-			t.Errorf("project %q publishes %q, want a remote a reader can recognize as one",
+		if p.RepoURL != "file://"+filepath.ToSlash(filepath.Join(deps.Repos, p.Name)) {
+			t.Errorf("project %q publishes %q, want the working copy the seed committed",
 				p.Name, p.RepoURL)
 		}
-		if strings.Contains(p.RepoURL, os.TempDir()) || strings.Contains(p.RepoURL, "/tmp/") {
-			t.Errorf("project %q publishes a scratch path on the demo server: %q", p.Name, p.RepoURL)
+		wt, err := syncer.Sync(p, "")
+		if err != nil {
+			t.Errorf("project %q does not sync: %v", p.Name, err)
+			continue
 		}
+		for _, name := range want[p.Name] {
+			if _, err := os.Stat(filepath.Join(wt.Dir, filepath.FromSlash(name))); err != nil {
+				t.Errorf("project %q holds no %s, which a held run names: %v", p.Name, name, err)
+			}
+		}
+		wt.Cleanup()
+		delete(want, p.Name)
+	}
+	for name := range want {
+		t.Errorf("no project %q was seeded", name)
 	}
 }
 

@@ -259,9 +259,10 @@ func TestTheSnapshotIsSealedAtRestAndWipedWhenTheRunEnds(t *testing.T) {
 			ctx := context.Background()
 			f := newSnapshotFixture()
 			f.saveInventory(t, "[web]\ncanary ansible_password="+secret+"\n")
-			d := f.dispatcher(t, WithAudits(audit.NewMemStore()))
+			projects, from := heldFrom(t)
+			d := f.dispatcher(t, WithAudits(audit.NewMemStore()), projects)
 			held, err := d.Submit(ctx, "site.yml", "", run.WithTool(run.ToolAnsible),
-				run.WithInventory("inv_snap"), run.WithRequireApproval(true))
+				run.WithInventory("inv_snap"), run.WithRequireApproval(true), from)
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}

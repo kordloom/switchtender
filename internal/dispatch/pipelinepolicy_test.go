@@ -47,14 +47,15 @@ func TestPolicyHoldsPipelineWithMatchingStep(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
 	executions := 0
-	d := New(store, countingRunner(&executions), nil, WithPolicies(destroyPolicy(t)))
+	projects, from := heldFrom(t)
+	d := New(store, countingRunner(&executions), nil, WithPolicies(destroyPolicy(t)), projects)
 	defer d.Close()
 
 	steps := []run.PipelineStep{
 		{Name: "plan", Tool: "terraform", Command: "terraform plan"},
 		{Name: "wreck", Tool: "terraform", Command: "terraform destroy prod"},
 	}
-	parent, err := d.SubmitPipeline(context.Background(), "release", "hosts.ini", steps)
+	parent, err := d.SubmitPipeline(context.Background(), "release", "hosts.ini", steps, from)
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
@@ -91,13 +92,14 @@ func TestApprovedPipelineRunsItsSteps(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
 	executions := 0
-	d := New(store, countingRunner(&executions), nil, WithPolicies(destroyPolicy(t)))
+	projects, from := heldFrom(t)
+	d := New(store, countingRunner(&executions), nil, WithPolicies(destroyPolicy(t)), projects)
 	defer d.Close()
 
 	steps := []run.PipelineStep{
 		{Name: "wreck", Tool: "terraform", Command: "terraform destroy prod"},
 	}
-	parent, err := d.SubmitPipeline(context.Background(), "teardown", "hosts.ini", steps)
+	parent, err := d.SubmitPipeline(context.Background(), "teardown", "hosts.ini", steps, from)
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
@@ -139,13 +141,14 @@ func TestRejectedPipelineNeverRuns(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
 	executions := 0
-	d := New(store, countingRunner(&executions), nil, WithPolicies(destroyPolicy(t)))
+	projects, from := heldFrom(t)
+	d := New(store, countingRunner(&executions), nil, WithPolicies(destroyPolicy(t)), projects)
 	defer d.Close()
 
 	steps := []run.PipelineStep{
 		{Name: "wreck", Tool: "terraform", Command: "terraform destroy prod"},
 	}
-	parent, err := d.SubmitPipeline(context.Background(), "teardown", "hosts.ini", steps)
+	parent, err := d.SubmitPipeline(context.Background(), "teardown", "hosts.ini", steps, from)
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
@@ -259,11 +262,12 @@ func TestPolicyHoldsSplit(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
 	runner := &countingRunnerLister{hosts: []string{"web01", "web02", "web03", "web04"}}
-	d := New(store, runner, nil, WithPolicies(ansibleWidePolicy(t)))
+	projects, from := heldFrom(t)
+	d := New(store, runner, nil, WithPolicies(ansibleWidePolicy(t)), projects)
 	defer d.Close()
 	ctx := context.Background()
 
-	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2)
+	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2, from)
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
@@ -306,11 +310,12 @@ func TestApproveStartsHeldSplit(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
 	runner := &countingRunnerLister{hosts: []string{"web01", "web02", "web03", "web04"}}
-	d := New(store, runner, nil, WithPolicies(ansibleWidePolicy(t)))
+	projects, from := heldFrom(t)
+	d := New(store, runner, nil, WithPolicies(ansibleWidePolicy(t)), projects)
 	defer d.Close()
 	ctx := context.Background()
 
-	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2)
+	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2, from)
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
@@ -329,11 +334,12 @@ func TestRejectSettlesHeldSplitShards(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
 	runner := &countingRunnerLister{hosts: []string{"web01", "web02", "web03", "web04"}}
-	d := New(store, runner, nil, WithPolicies(ansibleWidePolicy(t)))
+	projects, from := heldFrom(t)
+	d := New(store, runner, nil, WithPolicies(ansibleWidePolicy(t)), projects)
 	defer d.Close()
 	ctx := context.Background()
 
-	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2)
+	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2, from)
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}

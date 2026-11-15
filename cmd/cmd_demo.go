@@ -21,6 +21,7 @@ import (
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/live"
 	"github.com/kordloom/switchtender/internal/logutil"
+	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/server"
 	"github.com/kordloom/switchtender/spanbeat"
@@ -128,6 +129,46 @@ func removeDemoFiles(db, assets string) {
 	_ = os.RemoveAll(assets)
 }
 
+// demoDispatcher returns the dispatcher the demo seeds and serves through, over bundle with runner,
+// and a cleanup that closes it and removes the cache its projects sync into.
+//
+// The stale-lease janitor is off for the demo. It abandons a split or pipeline parent still pending
+// past a cutoff it measures against the real clock, which assumes the parent's created time tracks
+// that clock. The seed clock deliberately parks created times hours in the past, so every fresh
+// parent would read as long abandoned and be interrupted the instant it was submitted. The demo is
+// one process driving every run to completion in hand, with no dead coordinator to reclaim, so the
+// janitor has nothing to do here anyway.
+//
+// Projects are wired as serve wires them. Every run the demo holds comes from one of its seeded
+// projects, the git folders the seed materializes on this server, and a held run is pinned to the
+// commit its project holds, which takes a syncer. Without one the demo refused every run that named
+// a project, and a held run must name one. The checkouts are this process's scratch, so the cache
+// is a temporary folder removed when the demo stops.
+func demoDispatcher(bundle storeBundle, runner roundhouse.Runner, hub *live.Hub, clock func() time.Time,
+	log *zap.Logger) (*dispatch.Dispatcher, func(), error) {
+	cache, err := os.MkdirTemp("", "switchtender-demo-projects-*")
+	if err != nil {
+		return nil, nil, fmt.Errorf("demo project cache: %w", err)
+	}
+	syncer, err := project.NewSyncer(cache)
+	if err != nil {
+		_ = os.RemoveAll(cache)
+		return nil, nil, fmt.Errorf("demo project cache: %w", err)
+	}
+	disp := dispatch.New(bundle.Runs(), runner, log, dispatch.WithPublisher(hub),
+		dispatch.WithAudits(bundle.Audits()),
+		dispatch.WithClock(clock),
+		dispatch.WithNoJanitor(),
+		dispatch.WithPolicies(bundle.Policies()),
+		dispatch.WithDecisions(bundle.Decisions()),
+		dispatch.WithPresence(bundle.Attention()),
+		dispatch.WithProjects(bundle.Projects(), syncer))
+	return disp, func() {
+		disp.Close()
+		_ = os.RemoveAll(cache)
+	}, nil
+}
+
 // runDemo seeds a database and serves it read-only until interrupted.
 func runDemo(cmd *cobra.Command, _ []string) error {
 	log, err := logutil.New()
@@ -186,20 +227,12 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 	seedClock := demo.NewSeedClock()
 	// The demo serves the policy endpoints, so it enforces them too. Displaying policies that gate
 	// nothing teaches the wrong thing about how the product behaves.
-	// The stale-lease janitor is off for the demo. It abandons a split or pipeline parent still pending
-	// past a cutoff it measures against the real clock, which assumes the parent's created time tracks
-	// that clock. The seed clock deliberately parks created times hours in the past, so every fresh
-	// parent would read as long abandoned and be interrupted the instant it was submitted. The demo is
-	// one process driving every run to completion in hand, with no dead coordinator to reclaim, so the
-	// janitor has nothing to do here anyway.
-	disp := dispatch.New(store, roundhouse.NewAnsibleRunner(), log, dispatch.WithPublisher(hub),
-		dispatch.WithAudits(bundle.Audits()),
-		dispatch.WithClock(seedClock.Now),
-		dispatch.WithNoJanitor(),
-		dispatch.WithPolicies(bundle.Policies()),
-		dispatch.WithDecisions(bundle.Decisions()),
-		dispatch.WithPresence(bundle.Attention()))
-	defer disp.Close()
+	disp, closeDisp, err := demoDispatcher(bundle, roundhouse.NewAnsibleRunner(), hub, seedClock.Now,
+		log)
+	if err != nil {
+		return err
+	}
+	defer closeDisp()
 
 	if demoNoSeed && demoSeedOnly {
 		return errors.New("--no-seed and --seed-only are opposites; pass at most one")

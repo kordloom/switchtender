@@ -29,10 +29,12 @@ func TestRunApprovalGate(t *testing.T) {
 			return roundhouse.Result{ExitCode: 0}, nil
 		},
 	)
-	d := New(store, runner, nil)
+	projects, from := heldFrom(t, "play.yml")
+	d := New(store, runner, nil, projects)
 	defer d.Close()
 
-	created, err := d.Submit(context.Background(), "play.yml", "inv", run.WithRequireApproval(true))
+	created, err := d.Submit(context.Background(), "play.yml", "inv", run.WithRequireApproval(true),
+		from)
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -73,13 +75,15 @@ func TestRunApprovalGate(t *testing.T) {
 func TestRunReject(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
+	projects, from := heldFrom(t, "play.yml")
 	d := New(store, roundhouse.RunnerFunc(
 		func(_ context.Context, _ roundhouse.Spec, _ io.Writer) (roundhouse.Result, error) {
 			return roundhouse.Result{}, nil
-		}), nil)
+		}), nil, projects)
 	defer d.Close()
 
-	created, err := d.Submit(context.Background(), "play.yml", "inv", run.WithRequireApproval(true))
+	created, err := d.Submit(context.Background(), "play.yml", "inv", run.WithRequireApproval(true),
+		from)
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}

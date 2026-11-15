@@ -28,8 +28,9 @@ func TestEveryReaderCreditsOnlyTheStoredWinner(t *testing.T) {
 	store := run.NewMemStore()
 	audits := audit.NewMemStore()
 	records := decision.NewMemStore()
+	projects, from := heldFrom(t, "play.yml")
 	d := New(store, &commandRecorder{}, nil, WithNoJanitor(), WithAudits(audits),
-		WithDecisions(records), WithBindingKey(bndKey(t)))
+		WithDecisions(records), WithBindingKey(bndKey(t)), projects)
 	defer d.Close()
 	creation := &audit.Entry{ID: audit.NewID(), At: time.Now(), Actor: "requester",
 		ActorType: "session", Method: "POST", Path: "/v1/runs"}
@@ -38,7 +39,7 @@ func TestEveryReaderCreditsOnlyTheStoredWinner(t *testing.T) {
 	}
 	launch := run.WithAuditReceipt(ctx, audit.Receipt(creation))
 	held, err := d.Submit(launch, "play.yml", "inv", run.WithRequireApproval(true),
-		run.WithActor("requester"))
+		run.WithActor("requester"), from)
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}

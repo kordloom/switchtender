@@ -461,11 +461,12 @@ func TestAHeldSplitAndAHeldRetryAreAnnouncedForTheParentAlone(t *testing.T) {
 	// Test 0: a split a rule holds is announced once, for its parent.
 	hookURL, events := captureEvents(t)
 	store := run.NewMemStore()
+	projects, from := heldFrom(t, "site.yml", "play.yml")
 	d := New(store, &countingRunnerLister{hosts: []string{"web01", "web02"}}, nil,
 		WithPolicies(holdEverything(t)), WithWebhooks([]string{hookURL}), WithNoJanitor(),
-		WithNotifyClient(http.DefaultClient))
+		WithNotifyClient(http.DefaultClient), projects)
 	defer d.Close()
-	parent, err := d.SubmitSplit(ctx, "site.yml", "hosts.ini", 2)
+	parent, err := d.SubmitSplit(ctx, "site.yml", "hosts.ini", 2, from)
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
@@ -482,9 +483,9 @@ func TestAHeldSplitAndAHeldRetryAreAnnouncedForTheParentAlone(t *testing.T) {
 	retryStore := run.NewMemStore()
 	flaky := &flakyRunnerLister{hosts: []string{"a", "b", "c", "d"}, failHost: "b"}
 	rd := New(retryStore, flaky, nil, WithWebhooks([]string{retryURL}),
-		WithNotifyClient(http.DefaultClient))
+		WithNotifyClient(http.DefaultClient), projects)
 	defer rd.Close()
-	failed, err := rd.SubmitSplit(ctx, "play.yml", "inv", 2)
+	failed, err := rd.SubmitSplit(ctx, "play.yml", "inv", 2, from)
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}

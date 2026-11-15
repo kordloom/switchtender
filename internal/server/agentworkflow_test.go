@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/mcp"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/template"
@@ -22,12 +23,14 @@ func agentWorkflowSeed(t *testing.T, s *agentHoldServer) {
 	agentHoldSeed(t, s.DB)
 	ctx := context.Background()
 	for _, tpl := range []*template.Template{
-		{ID: "tpl_apply", Name: "infra apply", Steps: []run.PipelineStep{
-			{Name: "build", Tool: run.ToolBash, Command: "./build.sh"},
-			{Name: "apply", Tool: run.ToolTerraform, Command: "infra"}}},
-		{ID: "tpl_plan", Name: "infra plan", Steps: []run.PipelineStep{
-			{Name: "build", Tool: run.ToolBash, Command: "./build.sh"},
-			{Name: "plan", Tool: run.ToolTerraform, Command: "infra", DryRun: true}}},
+		{ID: "tpl_apply", Name: "infra apply", ProjectID: dispatchtest.LocalProjectID,
+			Steps: []run.PipelineStep{
+				{Name: "build", Tool: run.ToolBash, Command: "./build.sh"},
+				{Name: "apply", Tool: run.ToolTerraform, Command: "infra"}}},
+		{ID: "tpl_plan", Name: "infra plan", ProjectID: dispatchtest.LocalProjectID,
+			Steps: []run.PipelineStep{
+				{Name: "build", Tool: run.ToolBash, Command: "./build.sh"},
+				{Name: "plan", Tool: run.ToolTerraform, Command: "infra", DryRun: true}}},
 	} {
 		if err := s.DB.templates.Save(ctx, tpl); err != nil {
 			t.Fatalf("templates.Save(%s) error = %v", tpl.ID, err)
@@ -74,7 +77,8 @@ func proposeOverMCP(t *testing.T, s *agentHoldServer, token, tplID string) (stri
 func TestAnAgentsWorkflowApplyIsRefusedOnEveryPath(t *testing.T) {
 	t.Parallel()
 	const whole = `{"name":"release","steps":[{"name":"build","tool":"bash","command":"./b.sh"},` +
-		`{"name":"apply","tool":"terraform","command":"infra"}]}`
+		`{"name":"apply","tool":"terraform","command":"infra"}],` +
+		`"project_id":"` + dispatchtest.LocalProjectID + `"}`
 	const exempt = `{"name":"lead applies","effect":"exempt","tool":"terraform",` +
 		`"actor":"release-agent","account":"dev-lead"}`
 	tests := []struct {

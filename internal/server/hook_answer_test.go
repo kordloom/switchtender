@@ -7,8 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +16,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/policytest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -90,14 +89,12 @@ type slowHook struct {
 func newSlowHook(t *testing.T, rule *policy.Policy) *slowHook {
 	t.Helper()
 	ctx := context.Background()
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(
-		"module \"net\" {\n  source = \"registry.example.test/acme/net/null\"\n}\n"), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	// A plan the gate holds comes from a project, so the configuration is committed to one.
+	p := dispatchtest.LocalProject(t, map[string]string{"main.tf": "module \"net\" {\n" +
+		"  source = \"registry.example.test/acme/net/null\"\n}\n"})
 	templates := template.NewMemStore()
 	if err := templates.Save(ctx, &template.Template{ID: "tpl_1", Name: "plan",
-		Tool: run.ToolTerraform, Command: dir, DryRun: true}); err != nil {
+		Tool: run.ToolTerraform, Command: ".", DryRun: true, ProjectID: p.ID}); err != nil {
 		t.Fatalf("save template: %v", err)
 	}
 	policies := policytest.Serving(rule)
@@ -108,7 +105,8 @@ func newSlowHook(t *testing.T, rule *policy.Policy) *slowHook {
 		return roundhouse.Result{ExitCode: 0}, nil
 	}), release: make(chan struct{}), begun: make(chan struct{})}
 	disp := dispatch.New(runs, gate, zap.NewNop(), dispatch.WithPolicies(policies),
-		dispatch.WithRunFilesRoot(t.TempDir()), dispatch.WithNoJanitor())
+		dispatch.WithRunFilesRoot(t.TempDir()), dispatch.WithNoJanitor(),
+		dispatch.WithProjects(p.Store, p.Syncer))
 	sealer := testSealer()
 	triggers := trigger.NewMemStore()
 	srv := New(runs, disp, zap.NewNop(), WithTriggers(triggers, sealer), WithTemplates(templates),

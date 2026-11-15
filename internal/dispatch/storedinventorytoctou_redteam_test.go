@@ -75,11 +75,13 @@ func TestApprovedRunIsPinnedToTheInventoryItWasApprovedWith(t *testing.T) {
 	store := run.NewMemStore()
 	audits := audit.NewMemStore()
 	runner := &inventoryCapturingRunner{}
+	projects, from := heldFrom(t)
 	d := New(store, runner, nil,
-		WithInventories(invs), WithAudits(audits), WithRunFilesRoot(t.TempDir()), WithNoJanitor())
+		WithInventories(invs), WithAudits(audits), WithRunFilesRoot(t.TempDir()), WithNoJanitor(),
+		projects)
 	t.Cleanup(d.Close)
 
-	held, err := d.Submit(ctx, "site.yml", "", run.WithTool(run.ToolAnsible),
+	held, err := d.Submit(ctx, "site.yml", "", run.WithTool(run.ToolAnsible), from,
 		run.WithInventory("inv_blast"), run.WithRequireApproval(true),
 		run.WithActor("operator-1"), run.WithActorType("session"))
 	if err != nil {

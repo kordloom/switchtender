@@ -25,11 +25,12 @@ func TestRetryOfARejectedSplitIsRefused(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
 	runner := &countingRunnerLister{hosts: []string{"web01", "web02", "web03", "web04"}}
-	d := New(store, runner, nil, WithPolicies(ansibleWidePolicy(t)))
+	projects, from := heldFrom(t)
+	d := New(store, runner, nil, WithPolicies(ansibleWidePolicy(t)), projects)
 	defer d.Close()
 	ctx := context.Background()
 
-	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2)
+	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2, from)
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
@@ -58,11 +59,12 @@ func TestRetryHonorsTheApprovalPolicy(t *testing.T) {
 	runner := &countingRunnerLister{hosts: []string{"web01", "web02", "web03", "web04"}}
 	// No policy while the original runs, so it executes and its shards genuinely fail.
 	policies := policy.NewMemStore()
-	d := New(store, &failingLister{hosts: runner.hosts}, nil, WithPolicies(policies))
+	projects, from := heldFrom(t)
+	d := New(store, &failingLister{hosts: runner.hosts}, nil, WithPolicies(policies), projects)
 	defer d.Close()
 	ctx := context.Background()
 
-	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2)
+	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2, from)
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
@@ -114,12 +116,13 @@ func TestSubmitRefusedWhenPoliciesCannotBeRead(t *testing.T) {
 		t.Fatalf("NewFileStore() error = %v", err)
 	}
 	runner := &countingRunnerLister{hosts: []string{"web01", "web02"}}
-	d := New(run.NewMemStore(), runner, nil, WithPolicies(files))
+	projects, from := heldFrom(t)
+	d := New(run.NewMemStore(), runner, nil, WithPolicies(files), projects)
 	defer d.Close()
 	ctx := context.Background()
 
 	// The gate works while the file is readable.
-	held, err := d.Submit(ctx, "site.yml", "inv")
+	held, err := d.Submit(ctx, "site.yml", "inv", from)
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -131,7 +134,7 @@ func TestSubmitRefusedWhenPoliciesCannotBeRead(t *testing.T) {
 	if err := os.Remove(path); err != nil {
 		t.Fatalf("Remove() error = %v", err)
 	}
-	if _, err := d.Submit(ctx, "site.yml", "inv"); !errors.Is(err, ErrPolicyUnavailable) {
+	if _, err := d.Submit(ctx, "site.yml", "inv", from); !errors.Is(err, ErrPolicyUnavailable) {
 		t.Errorf("Submit() with unreadable policies error = %v, want ErrPolicyUnavailable: a gate "+
 			"that cannot be checked has not been passed", err)
 	}
@@ -152,11 +155,12 @@ func TestApprovedSplitSurvivesTheAbandonedParentSweep(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
 	runner := &countingRunnerLister{hosts: []string{"web01", "web02", "web03", "web04"}}
-	d := New(store, runner, nil, WithPolicies(ansibleWidePolicy(t)), WithNoJanitor())
+	projects, from := heldFrom(t)
+	d := New(store, runner, nil, WithPolicies(ansibleWidePolicy(t)), WithNoJanitor(), projects)
 	defer d.Close()
 	ctx := context.Background()
 
-	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2)
+	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2, from)
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
@@ -340,11 +344,12 @@ func TestCancelingAHeldSplitSettlesItsShards(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
 	runner := &countingRunnerLister{hosts: []string{"web01", "web02", "web03", "web04"}}
-	d := New(store, runner, nil, WithPolicies(ansibleWidePolicy(t)))
+	projects, from := heldFrom(t)
+	d := New(store, runner, nil, WithPolicies(ansibleWidePolicy(t)), projects)
 	defer d.Close()
 	ctx := context.Background()
 
-	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2)
+	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2, from)
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}

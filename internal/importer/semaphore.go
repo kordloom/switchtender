@@ -322,9 +322,13 @@ func (p *Plan) addSemaphoreProject(proj semaphoreProject, now time.Time) {
 	// uncarried names the templates whose arguments did not all come across, so their schedules can
 	// arrive switched off rather than firing a template that no longer does what it did.
 	uncarried := map[string]bool{}
+	// refused names the templates that did not import, so the schedules that fire them say why
+	// they are not imported either rather than naming a template the export does hold.
+	refused := map[string]bool{}
 	for _, tmpl := range proj.Templates {
 		obj, complete := p.semaphoreTemplate(tmpl, repoIDs, inventoryIDs, keys, now)
 		if obj == nil {
+			refused[tmpl.Name] = true
 			continue
 		}
 		p.Templates = append(p.Templates, obj)
@@ -336,6 +340,12 @@ func (p *Plan) addSemaphoreProject(proj semaphoreProject, now time.Time) {
 
 	for _, s := range proj.Schedules {
 		id, ok := templateIDs[s.Template]
+		if !ok && refused[s.Template] {
+			p.warn("schedule %q in project %q fires template %q, which did not import, so it was "+
+				"not imported either", s.Name, proj.Name, s.Template)
+			p.refused++
+			continue
+		}
 		if !ok {
 			p.warn("schedule %q in project %q references unknown template %q",
 				s.Name, proj.Name, s.Template)
@@ -390,7 +400,25 @@ func (p *Plan) semaphoreTemplate(tmpl semaphoreTemplate, repoIDs, inventoryIDs m
 		p.refused++
 		return nil, false
 	}
-	obj := &template.Template{ID: template.NewID(), Name: tmpl.Name, CreatedAt: now}
+	// A template whose repository did not come across is not created, whatever it runs. In
+	// Semaphore every template runs from its repository, so its playbook, script, or Terraform
+	// folder names a file in that checkout. With no project here it would resolve against the
+	// server's own directory on every run, held or not, and a held one would be refused at every
+	// launch. The AWX importer refuses a template whose project is not in its export the same way.
+	projectID := ""
+	if tmpl.Repository != "" {
+		id, ok := repoIDs[tmpl.Repository]
+		if !ok {
+			p.warn("template %q was not imported: it runs from repository %q, which did not come "+
+				"across, and a template with no project has no checkout to resolve %s against",
+				tmpl.Name, tmpl.Repository, oneLine(tmpl.Playbook))
+			p.refused++
+			return nil, false
+		}
+		projectID = id
+	}
+	obj := &template.Template{ID: template.NewID(), Name: tmpl.Name, ProjectID: projectID,
+		CreatedAt: now}
 	complete := true
 	args, err := semaphoreArguments(tmpl.Arguments)
 	if err != nil {
@@ -423,13 +451,6 @@ func (p *Plan) semaphoreTemplate(tmpl semaphoreTemplate, repoIDs, inventoryIDs m
 		}
 	default:
 		obj.Tool, obj.Command = tool, semaphoreScript(tool, tmpl.Playbook, args)
-	}
-	if tmpl.Repository != "" {
-		if id, ok := repoIDs[tmpl.Repository]; ok {
-			obj.ProjectID = id
-		} else {
-			p.warn("template %q references unknown repository %q", tmpl.Name, tmpl.Repository)
-		}
 	}
 	switch {
 	case tmpl.Inventory == "":

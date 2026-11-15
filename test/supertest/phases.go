@@ -299,9 +299,30 @@ func (h *harness) phaseTeam(license string) error {
 	h.pass(phase, "the routine playbook was not held", "run "+deployID+
 		": creating files grades reversible, so the gate stayed open")
 
+	// An agent's run is held, and a held run must come from a project. The destructive playbook
+	// named by its path on the server is refused before it is stored, since an approval binds no
+	// file there.
+	if detail, err := h.mustRefuse(&h.agent, "POST", "/v1/runs", map[string]any{
+		"playbook":       "/data/destroy.yml",
+		"inventory_id":   h.mustID("team-inventory"),
+		"credential_ids": []string{h.mustID("team-credential")},
+		"labels":         labels,
+	}); err != nil {
+		h.fail(phase, "an agent's destroy named by path is refused", err)
+	} else {
+		h.pass(phase, "an agent's destroy named by path is refused", detail)
+	}
+
+	// The same playbook from a project: a git folder on the server, synced in process on an image
+	// that carries no git.
+	projectID, err := h.opsProject("team")
+	if err != nil {
+		return err
+	}
 	var destroy map[string]any
 	err = h.apiCall("POST", "/v1/runs", &h.agent, map[string]any{
-		"playbook":       "/data/destroy.yml",
+		"playbook":       "destroy.yml",
+		"project_id":     projectID,
 		"inventory_id":   h.mustID("team-inventory"),
 		"credential_ids": []string{h.mustID("team-credential")},
 		"labels":         labels,
@@ -315,6 +336,12 @@ func (h *harness) phaseTeam(license string) error {
 	held, err := h.awaitRunStatus(destroyID, "pending_approval", 60*time.Second)
 	if err != nil {
 		return fmt.Errorf("the destructive run was not held: %w", err)
+	}
+	if pin := dig(held, "pinned_commit"); pin == "" {
+		h.fail(phase, "the held destroy is pinned to the project's commit",
+			fmt.Errorf("it carries no pinned commit"))
+	} else {
+		h.pass(phase, "the held destroy is pinned to the project's commit", "commit "+pin)
 	}
 	class := dig(held, "reversibility", "class")
 	if class != "irreversible" {
@@ -479,6 +506,34 @@ func (h *harness) mustID(name string) string {
 			"answered without one")
 	}
 	return id
+}
+
+// opsProject lands a git repository holding destroy.yml in the server pod of namespace and creates
+// a project on the current install whose remote is that folder, and returns the project's id. A
+// local remote is set by a global admin, which the harness's person is.
+func (h *harness) opsProject(namespace string) (string, error) {
+	pod, err := h.serverPod(namespace)
+	if err != nil {
+		return "", err
+	}
+	const dir = "/data/repos/ops"
+	if err := h.writePodRepo(namespace, pod, dir, map[string]string{
+		"destroy.yml": mustManifest("destroy.yml"),
+	}); err != nil {
+		return "", err
+	}
+	var created map[string]any
+	if err := h.apiCall("POST", "/v1/projects", &h.human, map[string]any{
+		"name": "ops", "repo_url": dir, "branch": "main",
+	}, &created); err != nil {
+		return "", fmt.Errorf("create the ops project: %w", err)
+	}
+	id, _ := created["id"].(string)
+	if id == "" {
+		return "", fmt.Errorf("%w: the ops project", ErrNoID)
+	}
+	h.ids[namespace+"-project"] = id
+	return id, nil
 }
 
 // deployAcrossFleet writes the playbooks into the server pod, creates the SSH credential and the

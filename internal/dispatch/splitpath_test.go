@@ -82,6 +82,8 @@ func TestSubmitSplitRefusesBeforeListing(t *testing.T) {
 		WantListings int
 		// WantRawListed is whether the path the caller wrote was listed.
 		WantRawListed bool
+		// Project draws the run from a project, which a run the agent hold holds comes from.
+		Project bool
 	}{{ // Test 0: An agent's split of a path is refused and nothing is listed.
 		Opts: dispatchtest.AgentOpts(), Shards: 2, Want: ErrAgentPathSplit,
 	}, { // Test 1: A person's split of a path lists it, since the caller checked the role.
@@ -92,9 +94,9 @@ func TestSubmitSplitRefusesBeforeListing(t *testing.T) {
 		Opts:   []run.SubmitOption{run.WithActor("push"), run.WithActorType("webhook")},
 		Shards: 2, WantListings: 1, WantRawListed: true,
 	}, { // Test 4: An agent's split of a stored inventory lists that inventory's own file.
-		Opts: dispatchtest.AgentOpts(), Stored: true, Shards: 2, WantListings: 1,
+		Opts: dispatchtest.AgentOpts(), Stored: true, Shards: 2, WantListings: 1, Project: true,
 	}, { // Test 5: An agent's single run names a path without listing anything.
-		Opts: dispatchtest.AgentOpts(), Shards: 1,
+		Opts: dispatchtest.AgentOpts(), Shards: 1, Project: true,
 	}, { // Test 6: A limit with a file after a comma is refused before the listing.
 		Opts:   append(dispatchtest.PersonOpts(), run.WithLimit("nosuchhost,@/etc/shells")),
 		Shards: 2, Want: run.ErrLimitFile,
@@ -140,10 +142,14 @@ func TestSubmitSplitRefusesBeforeListing(t *testing.T) {
 			if err := invs.Save(ctx, fleet); err != nil {
 				t.Fatalf("invs.Save() error = %v", err)
 			}
-			d := New(store, lister, zap.NewNop(), WithNoJanitor(), WithInventories(invs))
+			projects, from := heldFrom(t, "play.yml")
+			d := New(store, lister, zap.NewNop(), WithNoJanitor(), WithInventories(invs), projects)
 			t.Cleanup(d.Close)
 
 			opts, path := slices.Clone(test.Opts), rawPath
+			if test.Project {
+				opts = append(opts, from)
+			}
 			if test.Stored {
 				opts, path = append(opts, run.WithInventory(fleet.ID)), ""
 			}

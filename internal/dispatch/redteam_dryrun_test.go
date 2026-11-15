@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"path/filepath"
 	"testing"
 
 	"github.com/kordloom/switchtender/internal/dispatchtest"
@@ -93,19 +92,21 @@ func TestRedTeamAgentDryRunExecutesChangeFreeGap(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
 			store := run.NewMemStore()
-			d := newAgentHoldDispatcher(t, store, nil)
+			// An agent's held run comes from a project, so the playbook or configuration is
+			// committed to one, fetched as the project's last sync left it.
+			p := dispatchtest.LocalProject(t, map[string]string{"site.yml": test.Playbook,
+				"main.tf": test.Config})
+			p.Fetch(t)
+			d := newAgentHoldDispatcher(t, store, nil, WithProjects(p.Store, p.Syncer))
 			opts := append([]run.SubmitOption{run.WithTool(test.Tool), run.WithDryRun(true)},
 				test.Opts...)
 			playbook := ""
 			switch test.Tool {
 			case run.ToolAnsible:
-				dir := t.TempDir()
-				dispatchtest.WriteFiles(t, dir, map[string]string{"site.yml": test.Playbook})
-				playbook = filepath.Join(dir, "site.yml")
+				playbook = "site.yml"
+				opts = append(opts, run.WithProject(p.ID))
 			case run.ToolTerraform:
-				dir := t.TempDir()
-				dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": test.Config})
-				opts = append(opts, run.WithCommand(dir))
+				opts = append(opts, run.WithCommand("."), run.WithProject(p.ID))
 			default:
 				opts = append(opts, run.WithCommand(test.Command))
 			}

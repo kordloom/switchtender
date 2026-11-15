@@ -17,12 +17,9 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 )
 
-// probeScript is the program an external data source names in the real plan tests. It leaves a
-// file beside itself, which is the evidence that a plan ran it, and answers the empty object the
-// external protocol expects.
-const probeScript = "#!/bin/sh\ntouch \"$(dirname \"$0\")/ran\"\nprintf '{}'\n"
-
-// probeConfig declares an external data source running probeScript.
+// probeConfig declares an external data source running the probe.sh committed beside it. The
+// probe leaves a marker file, which is the evidence that a plan ran it, and answers the empty object
+// the external protocol expects.
 const probeConfig = "data \"external\" \"probe\" {\n" +
 	"  program = [\"sh\", \"${path.module}/probe.sh\"]\n}\n"
 
@@ -82,9 +79,15 @@ func TestARealPlanRunsTheProgramTheGateHeldItFor(t *testing.T) {
 			t.Parallel()
 			requireExternalProvider(t, test.Binary)
 			ctx := context.Background()
+			// A plan the gate holds comes from a project. Its plan runs in a copy of the checkout
+			// that is removed when the run ends, so the probe leaves its trace outside it.
+			marker := filepath.Join(t.TempDir(), "ran")
+			p := dispatchtest.LocalProject(t, map[string]string{"main.tf": probeConfig,
+				"probe.sh": "#!/bin/sh\ntouch '" + marker + "'\nprintf '{}'\n"})
 			store := run.NewMemStore()
 			d := New(store, roundhouse.NewAnsibleRunner(), zap.NewNop(),
-				WithPolicies(dispatchtest.RulesHolding(t, excludePlans(test.Tool))), WithNoJanitor())
+				WithPolicies(dispatchtest.RulesHolding(t, excludePlans(test.Tool))), WithNoJanitor(),
+				WithProjects(p.Store, p.Syncer))
 			t.Cleanup(d.Close)
 
 			clean := t.TempDir()
@@ -101,11 +104,8 @@ func TestARealPlanRunsTheProgramTheGateHeldItFor(t *testing.T) {
 				t.Fatalf("the change-free plan ended %q: %s", done.Status, done.Error)
 			}
 
-			dir := t.TempDir()
-			dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": probeConfig, "probe.sh": probeScript})
-			marker := filepath.Join(dir, "ran")
-			held, err := d.Submit(ctx, "", "", run.WithTool(test.Tool), run.WithCommand(dir),
-				run.WithDryRun(true))
+			held, err := d.Submit(ctx, "", "", run.WithTool(test.Tool), run.WithCommand("."),
+				run.WithDryRun(true), run.WithProject(p.ID))
 			if err != nil {
 				t.Fatalf("Submit(external) error = %v", err)
 			}

@@ -45,6 +45,7 @@ func seedFailedSplit(t *testing.T, store run.Store, count, stored int) string {
 	parent := &run.Run{
 		ID: parentID, Playbook: "site.yml", Inventory: "inv", Kind: run.KindSplit,
 		Status: run.StatusFailed, CreatedAt: time.Now(), ShardCount: &count,
+		ProjectID: dispatchtest.LocalProjectID,
 	}
 	if err := store.Save(ctx, parent); err != nil {
 		t.Fatalf("Save(parent) error = %v", err)
@@ -96,8 +97,9 @@ func TestASplitThatCannotStoreAllItsShardsRunsNoneOfThem(t *testing.T) {
 			hookURL, events := captureEvents(t)
 			base := run.NewMemStore()
 			runner := &countingRunnerLister{hosts: []string{"web01", "web02", "web03"}}
+			projects, from := heldFrom(t)
 			opts := []Option{WithNoJanitor(), WithWebhooks([]string{hookURL}),
-				WithNotifyClient(http.DefaultClient)}
+				WithNotifyClient(http.DefaultClient), projects}
 			if test.Held {
 				opts = append(opts, WithPolicies(ansibleWidePolicy(t)))
 			}
@@ -115,7 +117,7 @@ func TestASplitThatCannotStoreAllItsShardsRunsNoneOfThem(t *testing.T) {
 			if test.Retry {
 				got, err = d.RetryFailedShards(ctx, parentID)
 			} else {
-				got, err = d.SubmitSplit(ctx, "site.yml", "inv", 3)
+				got, err = d.SubmitSplit(ctx, "site.yml", "inv", 3, from)
 			}
 			if !errors.Is(err, errShardWrite) {
 				t.Fatalf("error = %v, want the write failure", err)

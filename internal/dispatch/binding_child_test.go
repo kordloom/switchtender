@@ -152,6 +152,8 @@ type childInstall struct {
 	runner *childRunner
 	// d is the dispatcher, which both decides and executes.
 	d *Dispatcher
+	// from names the project a held split here comes from.
+	from run.SubmitOption
 }
 
 // newChildInstall starts a keyed dispatcher that serves the default queue.
@@ -159,8 +161,10 @@ func newChildInstall(t *testing.T) *childInstall {
 	t.Helper()
 	ci := &childInstall{store: newPickedRows(), chain: &bndChain{Store: audit.NewMemStore()},
 		runner: &childRunner{}}
+	projects, from := heldFrom(t)
+	ci.from = from
 	ci.d = New(ci.store, ci.runner, nil, WithNoJanitor(), WithAudits(ci.chain),
-		WithBindingKey(bndKey(t)), WithClaimInterval(5*time.Millisecond))
+		WithBindingKey(bndKey(t)), WithClaimInterval(5*time.Millisecond), projects)
 	t.Cleanup(ci.d.Close)
 	return ci
 }
@@ -173,7 +177,8 @@ type childShape func(t *testing.T, ci *childInstall) (parent, child *run.Run)
 func shapeSplit(t *testing.T, ci *childInstall) (*run.Run, *run.Run) {
 	t.Helper()
 	ctx := context.Background()
-	held, err := ci.d.SubmitSplit(ctx, "site.yml", "inv", 2, run.WithRequireApproval(true))
+	held, err := ci.d.SubmitSplit(ctx, "site.yml", "inv", 2, run.WithRequireApproval(true),
+		ci.from)
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
@@ -210,7 +215,8 @@ func shapeSplitRefused(why string) childShape {
 func splitRefused(t *testing.T, ci *childInstall, why string) (*run.Run, *run.Run) {
 	t.Helper()
 	ctx := context.Background()
-	held, err := ci.d.SubmitSplit(ctx, "site.yml", "inv", 2, run.WithRequireApproval(true))
+	held, err := ci.d.SubmitSplit(ctx, "site.yml", "inv", 2, run.WithRequireApproval(true),
+		ci.from)
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}

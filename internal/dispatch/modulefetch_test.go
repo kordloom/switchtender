@@ -269,18 +269,19 @@ func TestTheGateDownloadsModulesBeforeItReadsAPlan(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
 			reg := newTestRegistry(t, testModules())
-			dir := t.TempDir()
-			dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": reg.call(test.Module)})
+			// A plan the gate holds comes from a project, so the configuration is committed to one.
+			p := dispatchtest.LocalProject(t, map[string]string{"main.tf": reg.call(test.Module)})
 			store := run.NewMemStore()
 			files := t.TempDir()
 			d := New(store, newFetchingRunner(t), zap.NewNop(),
 				WithPolicies(dispatchtest.RulesHolding(t, excludePlans(run.ToolTerraform))),
 				WithRunFilesRoot(files), WithNoJanitor(),
-				WithModuleFetchLimits(cmp.Or(test.Timeout, time.Minute), 1<<20))
+				WithModuleFetchLimits(cmp.Or(test.Timeout, time.Minute), 1<<20),
+				WithProjects(p.Store, p.Syncer))
 			t.Cleanup(d.Close)
 
-			got, err := d.Submit(ctx, "", "", run.WithTool(run.ToolTerraform), run.WithCommand(dir),
-				run.WithDryRun(true))
+			got, err := d.Submit(ctx, "", "", run.WithTool(run.ToolTerraform), run.WithCommand("."),
+				run.WithDryRun(true), run.WithProject(p.ID))
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
@@ -676,13 +677,15 @@ func TestTheGateDownloadsWithNothingOfTheRuns(t *testing.T) {
 					t.Fatalf("Save(credential) error = %v", err)
 				}
 			}
-			dir := t.TempDir()
-			dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": registryCall("clean")})
+			// A plan the gate holds comes from a project, so the configuration is committed to one,
+			// whose folder the pre-check reads the way a pull request's checkout is read.
+			p := dispatchtest.LocalProject(t, map[string]string{"main.tf": registryCall("clean")})
+			dir := p.Repo
 			get := &stubGet{}
 			d := New(run.NewMemStore(), fetchingRunner{Runner: dispatchtest.OKRunner(), fetch: get},
 				zap.NewNop(), WithCredentials(creds, sealer), WithRunFilesRoot(t.TempDir()),
 				WithPolicies(dispatchtest.RulesHolding(t, excludePlans(run.ToolTerraform))),
-				WithNoJanitor())
+				WithNoJanitor(), WithProjects(p.Store, p.Syncer))
 			t.Cleanup(d.Close)
 			named := []string{"cred_count", "cred_kc"}
 			var scans []run.DryRunScan
@@ -692,8 +695,8 @@ func TestTheGateDownloadsWithNothingOfTheRuns(t *testing.T) {
 					Labels: map[string]string{run.LabelPullRequest: "7"}})
 			} else {
 				got, err := d.Submit(ctx, "", "", append([]run.SubmitOption{
-					run.WithTool(run.ToolTerraform), run.WithCommand(dir), run.WithDryRun(true),
-					run.WithCredentialIDs(named),
+					run.WithTool(run.ToolTerraform), run.WithCommand("."), run.WithDryRun(true),
+					run.WithCredentialIDs(named), run.WithProject(p.ID),
 					run.WithExtraVars(map[string]any{"region": "x"})}, test.Opts...)...)
 				if err != nil {
 					t.Fatalf("Submit() error = %v", err)
@@ -1004,10 +1007,10 @@ func TestTheGateIgnoresACommittedManifestAndDownloadsTheRealModule(t *testing.T)
 	ctx := context.Background()
 	reg := newTestRegistry(t, testModules())
 	source := reg.srv.URL + "/archive/hiding-1.0.0.tar.gz"
-	dir := t.TempDir()
 	// The committed tree: a call to the module "hiding", plus a planted clean copy and a manifest
-	// that names it, the shape a pull request author commits to dodge the gate.
-	dispatchtest.WriteFiles(t, dir, map[string]string{
+	// that names it, the shape a pull request author commits to dodge the gate. A plan the gate
+	// holds comes from a project, so the tree is a project's commit.
+	p := dispatchtest.LocalProject(t, map[string]string{
 		"main.tf": reg.call("hiding"),
 		".terraform/modules/modules.json": "{\"Modules\":[{\"Key\":\"\",\"Source\":\"\",\"Dir\":\".\"}," +
 			"{\"Key\":\"net\",\"Source\":\"" + source + "\",\"Dir\":\".terraform/modules/net\"}]}",
@@ -1017,11 +1020,12 @@ func TestTheGateIgnoresACommittedManifestAndDownloadsTheRealModule(t *testing.T)
 	// The download gets a minute, so a busy machine never stops it before it reads the module.
 	d := New(run.NewMemStore(), newFetchingRunner(t), zap.NewNop(),
 		WithPolicies(dispatchtest.RulesHolding(t, excludePlans(run.ToolTerraform))),
-		WithRunFilesRoot(files), WithNoJanitor(), WithModuleFetchLimits(time.Minute, 1<<20))
+		WithRunFilesRoot(files), WithNoJanitor(), WithModuleFetchLimits(time.Minute, 1<<20),
+		WithProjects(p.Store, p.Syncer))
 	t.Cleanup(d.Close)
 
-	got, err := d.Submit(ctx, "", "", run.WithTool(run.ToolTerraform), run.WithCommand(dir),
-		run.WithDryRun(true))
+	got, err := d.Submit(ctx, "", "", run.WithTool(run.ToolTerraform), run.WithCommand("."),
+		run.WithDryRun(true), run.WithProject(p.ID))
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}

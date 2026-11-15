@@ -3,7 +3,6 @@ package dispatch
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -38,9 +37,10 @@ func smokeExemption(t *testing.T) policy.Store {
 
 // newAgentHoldDispatcher returns a dispatcher over store, with rules as its policy store when it
 // is not nil and with no policy store at all when it is.
-func newAgentHoldDispatcher(t *testing.T, store run.Store, rules policy.Store) *Dispatcher {
+func newAgentHoldDispatcher(t *testing.T, store run.Store, rules policy.Store,
+	extra ...Option) *Dispatcher {
 	t.Helper()
-	opts := []Option{WithNoJanitor()}
+	opts := append([]Option{WithNoJanitor()}, extra...)
 	if rules != nil {
 		opts = append(opts, WithPolicies(rules))
 	}
@@ -264,21 +264,24 @@ func TestAnAgentsDryRunIsHeld(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
-			dir := t.TempDir()
-			dispatchtest.WriteFiles(t, dir, test.Files)
+			// A held dry run comes from a project, so every case reads its files from one.
+			p := dispatchtest.LocalProject(t, test.Files)
 			store := run.NewMemStore()
 			var rules policy.Store
 			if test.Rules != nil {
 				rules = test.Rules(t)
 			}
-			d := newAgentHoldDispatcher(t, store, rules)
-			opts := append([]run.SubmitOption{run.WithTool(test.Tool), run.WithDryRun(true)},
-				test.Opts...)
+			d := newAgentHoldDispatcher(t, store, rules, WithProjects(p.Store, p.Syncer))
+			// The checkout stands as the project's last sync left it, which is what the gate reads
+			// for a run no rule fetches for.
+			p.Fetch(t)
+			opts := append([]run.SubmitOption{run.WithTool(test.Tool), run.WithDryRun(true),
+				run.WithProject(p.ID)}, test.Opts...)
 			playbook := ""
 			if test.Tool == run.ToolAnsible {
-				playbook = filepath.Join(dir, "site.yml")
+				playbook = "site.yml"
 			} else {
-				opts = append(opts, run.WithCommand(dir))
+				opts = append(opts, run.WithCommand("."))
 			}
 			got, err := d.Submit(ctx, playbook, "hosts.ini", opts...)
 			if err != nil {
@@ -332,9 +335,10 @@ func TestAnAgentsSplitIsHeldWithEveryShard(t *testing.T) {
 			if err := invs.Save(ctx, fleet); err != nil {
 				t.Fatalf("invs.Save() error = %v", err)
 			}
-			d := New(store, runner, zap.NewNop(), WithNoJanitor(), WithInventories(invs))
+			projects, from := heldFrom(t, "play.yml")
+			d := New(store, runner, zap.NewNop(), WithNoJanitor(), WithInventories(invs), projects)
 			t.Cleanup(d.Close)
-			opts := append(slices.Clone(test.Opts), run.WithInventory(fleet.ID))
+			opts := append(slices.Clone(test.Opts), run.WithInventory(fleet.ID), from)
 			parent, err := d.SubmitSplit(ctx, "play.yml", "", 2, opts...)
 			if err != nil {
 				t.Fatalf("SubmitSplit() error = %v", err)
@@ -393,9 +397,11 @@ func TestAnAgentsRetryOfFailedShardsIsHeld(t *testing.T) {
 			ctx := context.Background()
 			store := run.NewMemStore()
 			runner := &flakyRunnerLister{hosts: []string{"a", "b", "c", "d"}, failHost: "b"}
-			d := New(store, runner, zap.NewNop(), WithNoJanitor())
+			projects, from := heldFrom(t, "play.yml")
+			d := New(store, runner, zap.NewNop(), WithNoJanitor(), projects)
 			t.Cleanup(d.Close)
-			parent, err := d.SubmitSplit(ctx, "play.yml", "inv", 2, dispatchtest.PersonOpts()...)
+			parent, err := d.SubmitSplit(ctx, "play.yml", "inv", 2,
+				append(dispatchtest.PersonOpts(), from)...)
 			if err != nil {
 				t.Fatalf("SubmitSplit() error = %v", err)
 			}
@@ -443,10 +449,12 @@ func TestAnAgentsRelaunchOfFailedHostsIsHeld(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
 			store := run.NewMemStore()
-			d := newAgentHoldDispatcher(t, store, nil)
+			projects, _ := heldFrom(t)
+			d := newAgentHoldDispatcher(t, store, nil, projects)
 			src := &run.Run{ID: "run_src", Playbook: "site.yml", Inventory: "hosts.ini",
 				Tool: run.ToolAnsible, Actor: "dev-lead", ActorType: "session",
-				Status: run.StatusRunning, CreatedAt: time.Now()}
+				ProjectID: dispatchtest.LocalProjectID, Status: run.StatusRunning,
+				CreatedAt: time.Now()}
 			if err := store.Save(ctx, src); err != nil {
 				t.Fatalf("Save() error = %v", err)
 			}
@@ -588,10 +596,10 @@ func TestAnAgentsApplyTakesTwoApprovals(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
-			dir := t.TempDir()
-			dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": test.Config})
+			// An agent's apply is held before it plans, so it comes from a project.
+			p := dispatchtest.LocalProject(t, map[string]string{"main.tf": test.Config})
 			store := run.NewMemStore()
-			opts := []Option{WithNoJanitor()}
+			opts := []Option{WithNoJanitor(), WithProjects(p.Store, p.Syncer)}
 			if test.Rules != nil {
 				opts = append(opts, WithPolicies(test.Rules(t)))
 			}
@@ -599,7 +607,8 @@ func TestAnAgentsApplyTakesTwoApprovals(t *testing.T) {
 				opts...)
 			t.Cleanup(d.Close)
 			created, err := d.Submit(ctx, "", "", append([]run.SubmitOption{
-				run.WithTool(run.ToolTerraform), run.WithCommand(dir)}, test.Opts...)...)
+				run.WithTool(run.ToolTerraform), run.WithCommand("."), run.WithProject(p.ID)},
+				test.Opts...)...)
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
@@ -689,15 +698,16 @@ func TestAnAgentsRerunOfAnApplyTakesTwoApprovals(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
-			dir := t.TempDir()
-			dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": dispatchtest.CleanConfig})
+			// The agent's rerun is held before it plans, so the apply comes from a project.
+			p := dispatchtest.LocalProject(t, map[string]string{"main.tf": dispatchtest.CleanConfig})
 			store := run.NewMemStore()
 			d := New(store, dispatchtest.PlanRunner("Plan: 0 to add, 0 to change, 1 to destroy"), zap.NewNop(),
-				WithNoJanitor())
+				WithNoJanitor(), WithProjects(p.Store, p.Syncer))
 			t.Cleanup(d.Close)
 			// A person's apply finished, so it can be rerun.
 			src, err := d.Submit(ctx, "", "", append([]run.SubmitOption{
-				run.WithTool(run.ToolTerraform), run.WithCommand(dir)}, dispatchtest.PersonOpts()...)...)
+				run.WithTool(run.ToolTerraform), run.WithCommand("."), run.WithProject(p.ID)},
+				dispatchtest.PersonOpts()...)...)
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}

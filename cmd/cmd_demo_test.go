@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -8,8 +9,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
+	"github.com/kordloom/switchtender/internal/live"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // TestDemoPathsKeepIdentityBesideTheResolvedDatabase covers where the demo's producer identity comes
@@ -171,5 +179,42 @@ func TestOnlyATemporaryDemoRemovesItsFiles(t *testing.T) {
 				t.Errorf("ownsDemoFiles(%q, %v) = %v, want %v", test.DB, test.SeedOnly, got, test.WantOwns)
 			}
 		})
+	}
+}
+
+// TestDemoDispatcherHoldsARunFromALocalProject pins the demo's project wiring. Every run the demo
+// holds comes from one of its seeded projects, which are git folders on the demo server, so its
+// dispatcher syncs them and a held run from one is pinned to the project's commit. Without a syncer
+// the demo refused every run that named a project, and a held run naming its playbook by path is
+// refused by the rule, so the demo could hold nothing at all.
+func TestDemoDispatcherHoldsARunFromALocalProject(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	bundle, err := openBundle(filepath.Join(t.TempDir(), "demo.db"))
+	if err != nil {
+		t.Fatalf("openBundle() error = %v", err)
+	}
+	t.Cleanup(func() { _ = bundle.Close() })
+	p := dispatchtest.LocalProject(t, nil)
+	p.SaveIn(t, bundle.Projects())
+	disp, closeDisp, err := demoDispatcher(bundle, dispatchtest.OKRunner(), live.NewHub(), time.Now,
+		zap.NewNop())
+	if err != nil {
+		t.Fatalf("demoDispatcher() error = %v", err)
+	}
+	t.Cleanup(closeDisp)
+
+	held, err := disp.Submit(ctx, "site.yml", "", run.WithProject(p.ID),
+		run.WithRequireApproval(true))
+	if err != nil {
+		t.Fatalf("Submit() from the project error = %v", err)
+	}
+	if held.Status != run.StatusPendingApproval || held.PinnedCommit != p.Head {
+		t.Errorf("held run = %s pinned to %q, want pending_approval pinned to %q", held.Status,
+			held.PinnedCommit, p.Head)
+	}
+	if _, err := disp.Submit(ctx, "/srv/playbooks/site.yml", "",
+		run.WithRequireApproval(true)); !errors.Is(err, dispatch.ErrHeldByPath) {
+		t.Errorf("Submit() by path error = %v, want %v", err, dispatch.ErrHeldByPath)
 	}
 }
