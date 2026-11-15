@@ -169,9 +169,9 @@ func renderGates(out io.Writer, gates []string) {
 		waits, does = "workflows wait", "Those gates do"
 	}
 	fmt.Fprintf(out, "  %d %s for a person at an approval node today. %s not\n"+
-		"  come across: the node runs other work whatever the approver decides, which an\n"+
-		"  approval step cannot express, so rebuild the gate on the Workflows page as an\n"+
-		"  approval step before the workflow runs, or it runs with no gate.\n",
+		"  come across: the node runs other work whatever the approver decides, or it waits\n"+
+		"  for more than one approver, and an approval step holds neither. Rebuild the gate\n"+
+		"  on the Workflows page before the workflow runs, or it runs with no gate.\n",
 		len(gates), waits, does)
 	for _, n := range capList(gates, 6) {
 		fmt.Fprintf(out, "      - %s\n", n)

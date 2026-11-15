@@ -74,6 +74,12 @@ type awxWorkflowNode struct {
 	// SummaryFields is the REST API's summary of what the node references. A node wired by id says
 	// only there what kind of object its unified_job_template is.
 	SummaryFields *awxNodeSummary `json:"summary_fields"`
+	// ConditionNodes are the conditional connectors leaving the node when the export carries them
+	// at the top level, as Ascender's REST API does from 25.5.0.
+	ConditionNodes []json.RawMessage `json:"condition_nodes"`
+	// MaxRetries is how many times Ascender, from 25.5.0, runs the node's job again after it fails
+	// before following the node's failure path.
+	MaxRetries int64 `json:"max_retries"`
 	// templateType is the kind of object the natural key in unified_job_template declares, such as
 	// job_template or workflow_job_template, or empty when the reference declared none.
 	templateType string
@@ -108,6 +114,13 @@ type awxNodeSummaryTemplate struct {
 	// UnifiedJobType is the kind of job the object launches, such as job, workflow_job, or
 	// workflow_approval.
 	UnifiedJobType string `json:"unified_job_type"`
+	// RequiredApprovals is the approval's count of distinct approvers, which Ascender's REST API
+	// adds to an approval node's summary from 25.5.0.
+	RequiredApprovals int64 `json:"required_approvals"`
+	// OnTimeout is what the approval decides when its timeout passes, from the same summary.
+	OnTimeout string `json:"on_timeout"`
+	// ContextTemplate is the template the approval shows its approver, from the same summary.
+	ContextTemplate string `json:"context_template"`
 }
 
 // UnmarshalJSON decodes a node and records the kind of object its template reference declares.
@@ -151,6 +164,10 @@ type awxWorkflowNodeRelated struct {
 	// Credentials are the credentials the node adds on top of its job template's, which awxkit
 	// writes here as natural keys.
 	Credentials []awxRef `json:"credentials"`
+	// ConditionNodes are the conditional connectors ascender-kit writes for every node of an
+	// Ascender 25.5.0 or later export: each names a node that runs only when a condition on this
+	// node's artifacts holds. The list is empty when the node has none.
+	ConditionNodes []json.RawMessage `json:"condition_nodes"`
 }
 
 // awxApprovalTemplate is an AWX approval node: the workflow stops there until a person approves or
@@ -162,6 +179,14 @@ type awxApprovalTemplate struct {
 	Description string `json:"description"`
 	// Timeout is how many seconds the node waits before it fails the workflow, or zero for no limit.
 	Timeout int64 `json:"timeout"`
+	// RequiredApprovals is how many distinct people must approve before Ascender, from 25.5.0,
+	// releases the node. Ascender defaults it to 1, and AWX has no such field.
+	RequiredApprovals int64 `json:"required_approvals"`
+	// OnTimeout is deny or approve: what Ascender, from 25.5.0, decides when the timeout passes.
+	OnTimeout string `json:"on_timeout"`
+	// ContextTemplate is a Jinja2 template Ascender, from 25.5.0, renders with the artifacts of the
+	// nodes before the approval and shows the approver beside the description.
+	ContextTemplate string `json:"context_template"`
 }
 
 // awxNodeRef references a workflow node by whichever key the export used.
@@ -214,9 +239,77 @@ func (n awxWorkflowNode) approvalGate() *awxApprovalTemplate {
 		return &awxApprovalTemplate{Name: n.UnifiedJobTemplate.Name}
 	}
 	if s := n.SummaryFields; s != nil && s.UnifiedJobTemplate.UnifiedJobType == "workflow_approval" {
-		return &awxApprovalTemplate{Name: s.UnifiedJobTemplate.Name}
+		sum := s.UnifiedJobTemplate
+		return &awxApprovalTemplate{Name: sum.Name, RequiredApprovals: sum.RequiredApprovals,
+			OnTimeout: sum.OnTimeout, ContextTemplate: sum.ContextTemplate}
 	}
 	return nil
+}
+
+// conditions returns the conditional connectors leaving the node, from whichever place the export
+// carried them.
+func (n awxWorkflowNode) conditions() []json.RawMessage {
+	out := append([]json.RawMessage(nil), n.ConditionNodes...)
+	if n.Related != nil {
+		out = append(out, n.Related.ConditionNodes...)
+	}
+	return out
+}
+
+// conditionTargets names the nodes a node's conditional connectors lead to, for a refusal. An
+// ascender-kit connector names its target by natural key under id, and a REST one is the target's
+// id alone. Either is named the way the target's step would have been, through nodes. A connector
+// that names its target neither way is counted rather than named.
+func conditionTargets(conds []json.RawMessage, nodes []awxWorkflowNode) string {
+	labels := make(map[string]string, len(nodes)*2)
+	for _, n := range nodes {
+		for _, k := range n.keys() {
+			labels[k] = nodeLabel(n)
+		}
+	}
+	names := make([]string, 0, len(conds))
+	unnamed := 0
+	for _, raw := range conds {
+		var edge struct {
+			// ID is the target node, by natural key.
+			ID awxNodeRef `json:"id"`
+		}
+		var ref awxNodeRef
+		switch {
+		case json.Unmarshal(raw, &edge) == nil && edge.ID != "":
+			ref = edge.ID
+		case json.Unmarshal(raw, &ref) == nil && ref != "":
+		default:
+			unnamed++
+			continue
+		}
+		if label, ok := labels[string(ref)]; ok {
+			names = append(names, quoteName(label))
+			continue
+		}
+		names = append(names, quoteName(string(ref)))
+	}
+	if unnamed > 0 {
+		names = append(names, fmt.Sprintf("%d node%s it does not name", unnamed, plural(unnamed)))
+	}
+	return clipNames(names)
+}
+
+// maxAscenderRetries is the most retries Ascender lets a node carry. A file asking for more was not
+// written by Ascender, and a step held to that ceiling still gets every retry Ascender would give.
+const maxAscenderRetries = 100
+
+// retries returns the extra attempts the node's step gets after a failure. Ascender, from 25.5.0,
+// runs a failed node's job again up to max_retries times before following its failure path, which
+// is what a step's retries do here.
+func (n awxWorkflowNode) retries() int {
+	switch {
+	case n.MaxRetries <= 0:
+		return 0
+	case n.MaxRetries > maxAscenderRetries:
+		return maxAscenderRetries
+	}
+	return int(n.MaxRetries)
 }
 
 // otherWork names what a node runs when the export says it is not a job template, or returns the
@@ -411,9 +504,9 @@ func (p *Plan) addWorkflow(wf awxWorkflow, name string, jobs awxJobs, now time.T
 
 	// An approval node is a person the workflow waits for partway through, and it imports as an
 	// approval step: the steps after it wait for the decision, and its failure edges become the
-	// steps that run when it is denied or times out. An always edge is the one shape that cannot
-	// come across, since it would run the next step whatever the approver said, which is no gate,
-	// so a workflow carrying one is refused and the gate is named as lost rather than weakened.
+	// steps that run when it is denied or times out. An always edge cannot come across, since it
+	// would run the next step whatever the approver said, which is no gate, so a workflow carrying
+	// one is refused and the gate is named as lost rather than weakened.
 	for _, n := range nodes {
 		gate := n.approvalGate()
 		if gate == nil {
@@ -426,6 +519,34 @@ func (p *Plan) addWorkflow(wf awxWorkflow, name string, jobs awxJobs, now time.T
 				"approval and its deny path only on a denial or a timeout, so carrying that edge "+
 				"would run work nobody approved. Rebuild it on the Workflows page with the work on "+
 				"the path it belongs to.", name, nodeLabel(n), oneLine(gate.Name))
+			return ""
+		}
+	}
+
+	// Ascender, from 25.5.0, adds two things to a workflow that a pipeline cannot hold, and the
+	// importer read neither, so each changed what the workflow does without a word. A conditional
+	// connector runs the node it leads to only when an artifact the node before it sets matches, and
+	// a step here has no such condition, so that node ran on every launch. An approval that waits for
+	// several distinct people is released here by one decision, so one person could release work
+	// that needed more. Each refuses the workflow by name. ascender-kit writes the connector list on
+	// every node, empty when the node has none, so only a list holding a connector refuses.
+	for _, n := range nodes {
+		if conds := n.conditions(); len(conds) > 0 {
+			p.warn("workflow %q was not imported: node %s leads to %s through a conditional "+
+				"connector, which runs that node only when an artifact node %s sets matches a "+
+				"condition. A step here waits on its dependencies alone, so that node would run on "+
+				"every launch. Rebuild it on the Workflows page with the condition checked in the "+
+				"playbook itself.",
+				name, nodeLabel(n), conditionTargets(conds, nodes), nodeLabel(n))
+			return ""
+		}
+		if gate := n.approvalGate(); gate != nil && gate.RequiredApprovals > 1 {
+			p.gates = append(p.gates, name)
+			p.warn("workflow %q was not imported: approval node %s, %q, waits for %d distinct "+
+				"people to approve. An approval step here is released by one decision, so one person "+
+				"could release work that needed %d. Rebuild it on the Workflows page and decide "+
+				"there who must agree before that work runs.", name, nodeLabel(n),
+				oneLine(gate.Name), gate.RequiredApprovals, gate.RequiredApprovals)
 			return ""
 		}
 	}
@@ -538,9 +659,11 @@ func (p *Plan) addWorkflow(wf awxWorkflow, name string, jobs awxJobs, now time.T
 		}
 		// A node running a check-mode job template must stay check mode. A step carries its own
 		// DryRun and the dispatcher honors it, so dropping this imported a node that made no changes
-		// as one that makes them, against whatever the workflow targets.
+		// as one that makes them, against whatever the workflow targets. Its retries carry for the
+		// same reason: a node Ascender ran again after a failure failed the workflow on its first
+		// try here. An approval node is never retried in Ascender, so only a job node reads them.
 		steps = append(steps, run.PipelineStep{
-			Name: label, Playbook: jt.Playbook, DryRun: jt.checkMode(),
+			Name: label, Playbook: jt.Playbook, DryRun: jt.checkMode(), Retries: n.retries(),
 		})
 	}
 
@@ -681,7 +804,36 @@ func (p *Plan) addWorkflow(wf awxWorkflow, name string, jobs awxJobs, now time.T
 			name, "node"+plural(len(gateNames)), strings.Join(gateNames, ", "),
 			"step"+plural(len(gateNames)))
 	}
+	p.warnAscenderApprovals(name, nodes)
 	return tpl.ID
+}
+
+// warnAscenderApprovals names the two approval settings Ascender adds from 25.5.0 that an
+// approval step does not hold. Neither refuses the workflow. An approval that approves itself on a
+// timeout imports as one that denies on it, which stops work rather than releasing it, and a
+// context template is text for the approver, not a change in what runs. Both are still said,
+// because each is a change the person who set it would not expect.
+func (p *Plan) warnAscenderApprovals(name string, nodes []awxWorkflowNode) {
+	for _, n := range nodes {
+		gate := n.approvalGate()
+		if gate == nil {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(gate.OnTimeout), "approve") {
+			p.warn("workflow %q approval node %s, %q, approves itself in Ascender when its timeout "+
+				"passes. The approval step it imports as takes its deny path when its timeout "+
+				"passes, so a timeout now stops the work after it instead of releasing it. Check "+
+				"that this is what you want before the workflow runs.", name, nodeLabel(n),
+				oneLine(gate.Name))
+		}
+		if strings.TrimSpace(gate.ContextTemplate) != "" {
+			p.warn("workflow %q approval node %s, %q, shows its approver a context template that "+
+				"Ascender fills from the artifacts of the nodes before it. The template was not "+
+				"imported, so the approver here sees the approval's name and description only. Put "+
+				"what the approver needs into the description on the Workflows page.", name,
+				nodeLabel(n), oneLine(gate.Name))
+		}
+	}
 }
 
 // workflowTags returns the tags and skip tags every node in the workflow shares, refusing when they

@@ -531,6 +531,13 @@ import has none to re-enter and none to attach.
   does not come across, and a workflow holding only approval nodes is reported as having no work for
   them to release. Who may approve follows your roles and approval policies, not the AWX approval
   role.
+- An Ascender export from 25.5.0 or later can say more about a workflow than a pipeline holds. A
+  workflow with a conditional connector is refused and named, since a step here has no condition to
+  wait on and the node behind the connector would run on every launch. So is a workflow with an
+  approval that waits for more than one approver, since an approval step here is released by one
+  decision. A node's retry count carries as its step's retries. An approval that approves itself
+  when its timeout passes imports as one that takes its deny path instead, and an approval's context
+  template is not imported. The report names both.
 - A workflow's own schedules import onto the workflow template, so a graph that fired nightly in AWX
   keeps firing nightly here. The one case that does not carry is a workflow the import refused: with
   no template to fire, its schedules cannot import either, and the report says so by name and count
