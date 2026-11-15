@@ -10,12 +10,13 @@ import (
 // TestTheBindingSeparatesARewriteTheDisclosedDigestCannot records the property the disclosed digest
 // cannot have, so the reason for a second value is written down rather than remembered.
 //
-// The digest is taken over the redacted spec because a receipt publishes those exact bytes. An
-// unquoted secret assignment is masked to the end of its line, which is the right call for secrecy
-// and means the digest cannot see anything written after the secret. That is not a defect to fix in
-// the redaction: narrowing the mask would leave the tail of a passphrase in the clear, which is the
-// bug the end-of-line rule was written for. It is a defect only if something security-bearing is
-// built on it, which is why the execution gate is built on the binding instead.
+// The digest is taken over the redacted spec because a receipt publishes those exact bytes. A
+// secret that opens a YAML entry or sits inside a quoted string is masked to the end of that line
+// or string, which is the right call for secrecy and means the digest cannot see anything written
+// there after the secret, or the secret itself anywhere. That is not a defect to fix in the
+// redaction: narrowing the mask there would leave the tail of a passphrase in the clear, which is
+// the bug the end-of-line rule was written for. It is a defect only if something security-bearing
+// is built on it, which is why the execution gate is built on the binding instead.
 //
 // The binding is checked first and unconditionally. It used to be checked after a skip on the digest
 // comparison, so the digest getting better would have stopped this from checking the gate's own

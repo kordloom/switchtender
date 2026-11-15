@@ -505,6 +505,29 @@ but not who signed it, and the verdict says so: `INTACT, BUT UNIDENTIFIED` rathe
 A `--pubkey` given an empty value, which is what a failed key fetch leaves behind, is refused rather
 than treated as no pin.
 
+A timestamp token an anchor carries is checked against the certificate the token itself carries, and
+anyone can make such a certificate. So `verify` prints each token's signer by its certificate's
+subject and SHA-256 fingerprint, with the certificate the token carries that issued it. Pass
+`--tsa-cert` with the fingerprint of a timestamp authority's certificate, as `sha256:<hex>`, bare
+hex, or the colon pairs openssl prints, once for each authority you accept. A token counts as an
+anchor when its signer certificate, or the carried certificate that directly issued it, matches
+one, and a token that matches none fails the receipt. Without `--tsa-cert` each token reads
+`UNPINNED`, is not counted on the anchors line, and does not change the verdict. An empty
+`--tsa-cert` is refused.
+
+Take the fingerprint from the authority, never from the receipt, which only repeats what its
+producer put there. `audit anchor` and the demo ask freetsa.org unless told otherwise, and `serve`
+anchors against the authority `--anchor-tsa-url` names. freetsa.org publishes its signing
+certificate and the root that issued it:
+
+    curl -sO https://freetsa.org/files/tsa.crt
+    openssl x509 -in tsa.crt -noout -fingerprint -sha256
+
+Pass the colon pairs after `Fingerprint=` to `--tsa-cert`. The root is at
+`https://freetsa.org/files/cacert.pem`, and each token carries it, so a pin on the root keeps
+counting tokens after the authority reissues its signing certificate. For any other authority, read
+the fingerprint of the certificate that authority publishes.
+
 An install enrolled with a witness carries the witness's countersignatures in its bundles and
 receipts. Pass `--witness-pubkey` with the key the witness publishes, in either the sha256 key id or
 the raw hex form, so only that witness's countersignatures are counted, and `--witness` with the

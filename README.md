@@ -324,6 +324,10 @@ relative to the server's working directory unless the run names a project:
       -H "Authorization: Bearer $ST_TOKEN" \
       -d '{"playbook": "site.yml", "inventory": "hosts.ini"}'
 
+A run held for approval, by a rule or because an agent asked for it, must come from a project. One
+that names its playbook by a path on the server is refused, since an approval cannot bind what a
+file holds when the run is released.
+
 Add `"shards": 4` to split it across four slices of the inventory.
 
 Open http://localhost:8080 for the web UI and sign in with the same token.

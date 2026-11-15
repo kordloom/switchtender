@@ -159,6 +159,8 @@ covers. An exemption that names the agent's <code>actor</code> label must also n
 is bound to, since a label repeats across accounts. The receipt proves who approved each run or
 which rule exempted it. <a href="/docs/policy#agent-runs-are-held-by-default">Agent runs are held by
 default</a> covers the exemption and what it risks.</p>
+<p>Every run the agent asks for is held, so it names a project with <code>project_id</code> and a playbook or
+Terraform root inside it. A path on the server is refused.</p>
 <p>Policies gate people's runs too. An approval policy with no criteria matches every run, so one
 empty policy is a gate-everything switch:</p>
 <pre><code>policies:

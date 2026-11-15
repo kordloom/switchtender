@@ -12,12 +12,13 @@ import (
 // exists to refuse, in the shape that walked straight through it.
 //
 // The gate held an approved run to the digest a receipt discloses, and that digest is taken over
-// the redacted spec because it is published. Redaction is lossy on purpose: a secret assignment
-// with no quotes is masked to the end of its line, since a scalar needs no quotes to contain spaces
+// the redacted spec because it is published. Redaction is lossy on purpose: a masked secret reads
+// the same whatever it held, and a secret that opens a YAML entry or sits inside a quoted string is
+// masked to the end of that line or string, since a scalar there needs no quotes to contain spaces
 // and stopping at the first space left the rest of a passphrase in the clear. The consequence is
-// that everything written after the secret is erased before the digest is taken, so a command could
-// be rewritten from one canary host to the whole fleet with a destroy tag, or have a pipe to a
-// downloaded script appended, and still reduce to the identical bytes the approver released.
+// that whatever the mask takes is erased before the digest is taken, so a spec could be rewritten
+// there, from one canary host to the whole fleet with a destroy tag, or with a pipe to a downloaded
+// script appended, and still reduce to the identical bytes the approver released.
 //
 // The binding is taken over the spec as written and never leaves the process, so it separates these
 // while the disclosed digest stays safe to publish. Each case here is a real rewrite of an approved
@@ -36,8 +37,8 @@ func TestTheApprovedSpecBindingSeparatesSpecsTheDigestCannot(t *testing.T) {
 		Name:     "ansible extra var then widened limit",
 		Approved: `ansible-playbook site.yml -e 'ansible_ssh_pass: hunter2' --limit canary`,
 		Tampered: `ansible-playbook site.yml -e 'ansible_ssh_pass: hunter2' --limit ALL`,
-	}, { // Test 2: A multi-word passphrase, where masking to end of line is the right call and the
-		// digest still must not lose the targeting that follows it.
+	}, { // Test 2: A multi-word passphrase, of which the mask in a command line takes the first
+		// word only, and the binding still must not lose the targeting that follows it.
 		Name:     "multi word passphrase then different host",
 		Approved: `deploy; password: p@ss w0rd --limit host01`,
 		Tampered: `deploy; password: p@ss w0rd --limit '*'`,

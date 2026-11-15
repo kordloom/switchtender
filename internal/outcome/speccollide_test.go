@@ -12,14 +12,14 @@ import (
 // TestSpecsDifferingAfterAQuotedSecretHaveDifferentDigests pins that the disclosed digest separates
 // two specs whose secrets are quoted, which is the shape the double reduction used to collapse.
 //
-// It is deliberately not a claim about every spec. The redaction masks an unquoted secret to the
-// end of its line, so anything written after such a secret is invisible to this digest and two
-// specs differing only there still share it. That is recorded by
-// TestTheBindingSeparatesARewriteTheDisclosedDigestCannot, and it is why the execution gate is held
-// to outcome.SpecBinding, which covers the spec as written, rather than to this value. An earlier
-// version of this test asserted the general property while exercising only quoted secrets, so it
-// certified a guarantee the code does not make, and its name still did until it was renamed for the
-// case it actually covers.
+// It is deliberately not a claim about every spec. The redaction masks a secret that opens a YAML
+// entry, or sits inside a quoted string, to the end of that line or string, so anything written
+// there after such a secret is invisible to this digest and two specs differing only there still
+// share it. That is recorded by TestTheBindingSeparatesARewriteTheDisclosedDigestCannot, and it is
+// why the execution gate is held to outcome.SpecBinding, which covers the spec as written, rather
+// than to this value. An earlier version of this test asserted the general property while
+// exercising only quoted secrets, so it certified a guarantee the code does not make, and its name
+// still did until it was renamed for the case it actually covers.
 //
 // A run's spec is redacted before it is disclosed, and its digest was then taken by redacting the
 // already-redacted bytes a second time. Redaction is not idempotent: the first pass turns a quoted

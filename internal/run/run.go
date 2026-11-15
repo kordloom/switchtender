@@ -431,11 +431,12 @@ type Run struct {
 	// spec as written, with nothing redacted, so any change to what will execute moves it.
 	//
 	// It exists because the disclosed digest cannot do this job. Redaction is lossy by design: a
-	// secret assignment with no quotes is masked to the end of the line, since a scalar needs no
-	// quotes to contain spaces and stopping at the first space left the rest of a passphrase in the
-	// clear. That means two commands differing only after the secret reduce to the same bytes, so a
-	// run approved against one host could be rewritten to the whole fleet with a destroy tag and
-	// still match the digest the approver released.
+	// masked secret reads the same whatever it held, and a secret that opens a YAML entry or sits
+	// inside a quoted string is masked to the end of that line or string, since a scalar there
+	// needs no quotes to contain spaces and stopping at the first space left the rest of a
+	// passphrase in the clear. That means two specs differing only inside what the mask took reduce
+	// to the same bytes, so a run approved as one thing could be rewritten there and still match
+	// the digest the approver released.
 	//
 	// It is never serialized. A hash over the unredacted spec is an offline guessing target for
 	// anyone shown it: the redacted command tells them everything except the secret, so they can

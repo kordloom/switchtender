@@ -87,10 +87,11 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 	// to perform it in the first place.
 	//
 	// The binding is what this is judged on. It covers the spec as written, while the digest beside
-	// it covers the redacted spec, and redaction is lossy: an unquoted secret assignment is masked
-	// to the end of its line, so a command could be rewritten after the secret, from one host to
-	// the whole fleet with a destroy tag, and still reduce to the same digest. Checking the digest
-	// as well costs nothing and still catches a run stamped before the binding existed.
+	// it covers the redacted spec, and redaction is lossy: a masked secret reads the same whatever
+	// it held, and one that opens a YAML entry or sits inside a quoted string is masked to the end
+	// of that line or string, so a spec could be rewritten inside what the mask took and still
+	// reduce to the same digest. Checking the digest as well costs nothing and still catches a run
+	// stamped before the binding existed.
 	if r.ApprovedSpecBinding != "" {
 		got, serr := outcome.SpecBinding(r)
 		if serr != nil {

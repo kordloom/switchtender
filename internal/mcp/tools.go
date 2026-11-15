@@ -280,10 +280,11 @@ func adhocTool(c *Client) Tool {
 			"playbook":     prop("string", "Playbook path, for the ansible tool."),
 			"command":      prop("string", "Script or working directory, for the non-ansible tools."),
 			"inventory_id": prop("string", "Stored inventory to target."),
-			"project_id":   prop("string", "Git project supplying the playbook."),
-			"limit":        prop("string", "Narrow the run to a host pattern."),
-			"dry_run":      prop("boolean", "Run in the tool's no-change mode."),
-			"reason":       prop("string", "Why this run is being proposed. Recorded as a label."),
+			"project_id": prop("string", "Git project supplying the playbook or Terraform root. "+
+				"A held run of the ansible, terraform, or opentofu tool must name one."),
+			"limit":   prop("string", "Narrow the run to a host pattern."),
+			"dry_run": prop("boolean", "Run in the tool's no-change mode."),
+			"reason":  prop("string", "Why this run is being proposed. Recorded as a label."),
 		}, nil),
 		Run: func(ctx context.Context, args json.RawMessage) (string, error) {
 			var in struct {

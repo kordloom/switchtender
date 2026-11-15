@@ -135,6 +135,9 @@ is submitted, accepted, and then fails with &quot;the playbook: site.yml could n
   -H &quot;Authorization: Bearer $ST_TOKEN&quot; \
   -d '{&quot;playbook&quot;: &quot;site.yml&quot;, &quot;inventory&quot;: &quot;hosts.ini&quot;}'
 </code></pre>
+<p>A run held for approval, by a rule or because an agent asked for it, must come from a project. One
+that names its playbook by a path on the server is refused, since an approval cannot bind what a
+file holds when the run is released.</p>
 <p>The response carries a run id. Fetch its status, its structured events, or its log:</p>
 <pre><code>curl -H &quot;Authorization: Bearer $ST_TOKEN&quot; localhost:8080/v1/runs/&lt;id&gt;
 curl -H &quot;Authorization: Bearer $ST_TOKEN&quot; localhost:8080/v1/runs/&lt;id&gt;/events

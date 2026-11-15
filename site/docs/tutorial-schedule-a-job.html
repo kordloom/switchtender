@@ -249,6 +249,8 @@ occurrence is fired again under the same key, so a run that lands in the meantim
 than started twice. A schedule disabled since the claim does not fire, and its last error says why.
 A deleted schedule takes its mark with it. While an occurrence is marked, the schedule's next
 occurrence is not claimed, so it fires late rather than leaving the earlier one unaccounted for.</p>
+<p>A schedule whose run a rule holds must fire a template from a project. A held fire by path starts
+no run, and the schedule's last error names the rule and says to put the playbook in a project.</p>
 <p>A tick that runs late on the night the clocks go back, after a restart, a database failover, or with
 a <code>--schedule-interval</code> longer than a minute, still fires a time that happens twice only once.</p>
 <h3 id="imported-schedules">Imported schedules</h3>

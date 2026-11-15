@@ -99,8 +99,10 @@ playbook across all three machines. Then it reads the files that playbook wrote 
 with a shared signing identity.</strong> Then it walks the arc the product exists for:</p>
 <ol>
 <li>A routine playbook runs ungated, because creating files grades reversible.</li>
-<li>A destructive playbook, submitted by an AI agent's token, is graded <strong>irreversible from its
-own text</strong>. Nothing in the file announces itself as dangerous; the scanner reads it.</li>
+<li>A destructive playbook, submitted by an AI agent's token from a project whose remote is a git
+folder on the server, is graded <strong>irreversible from its own text</strong>. Nothing in the file
+announces itself as dangerous; the scanner reads it. The same playbook named by its path is
+refused first, and the held run is pinned to the project's commit.</li>
 <li>A policy holding on that grade holds the run. The data still exists, checked from outside.</li>
 <li>The agent tries to approve its own request and is refused.</li>
 <li>A person approves. The run executes, and the deletion is real: the directory is gone on all

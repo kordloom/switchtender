@@ -117,6 +117,9 @@ review, fails the build when a new path appears without a test proving an agent 
    which rule exempted it. [Agent runs are held by
    default](policy.md#agent-runs-are-held-by-default) covers the exemption and what it risks.
 
+   Every run the agent asks for is held, so it names a project with `project_id` and a playbook or
+   Terraform root inside it. A path on the server is refused.
+
    Policies gate people's runs too. An approval policy with no criteria matches every run, so one
    empty policy is a gate-everything switch:
 

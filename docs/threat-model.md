@@ -50,6 +50,11 @@ since a requirements file names code from anywhere. Approval binds that file, bu
 an unpinned dependency may resolve to code the approver never reviewed. Pin each dependency to an
 exact version or commit to ensure execution uses the code that was approved.
 
+A held run must come from a project. A playbook or a Terraform root named by a path on the server
+is read when the run is claimed, so a held run naming one is refused at submission. A Terraform or
+OpenTofu apply that carries its saved plan is the exception, since the plan holds its configuration
+under the digest the approval binds.
+
 **"The requester cannot release their own change."** A rule can require a distinct approver, and
 the check runs before anything is recorded, so a refused self-approval leaves no decision entry
 behind. Approving is admin-only. An agent identity is operator-bound, so an agent can propose work
@@ -268,6 +273,15 @@ countersigns heads as they are served fixes them in a record the operator does n
 makes an entry true, and before the first anchor the operator's key is the only thing the record
 rests on.
 
+An anchor proves a time only as far as you trust the timestamp authority that signed it. A token is
+checked against the certificate it carries, and whoever holds the signing key could make a
+certificate and a backdated token of their own. So `verify` names each token's signer by subject and
+fingerprint, and counts an anchor only when that certificate, or the one the token carries that
+issued it, matches an authority pinned with `--tsa-cert`. With no pin a token is named and not
+counted, and with one a token from any other signer fails the receipt. The fingerprint to pin comes
+from the authority and not from the bundle, and
+[the configuration reference](configuration.md#verify) shows how to read it.
+
 The push witness has limits of its own, and [the hosted witness page](witness.md#limits) lists
 them. It bounds history only from the first root it countersigned for an install, and it sees
 nothing between two beats. Before it holds a countersigned head for an install it bounds nothing:
@@ -348,7 +362,8 @@ a grade, but a rule that holds only irreversible changes will not hold one whose
 sits somewhere the grade could not see. Where missing one is unacceptable, hold every change that
 alters state. And a run the gate lets through executes what the branch holds when it starts, a few
 seconds after the grade, so a push landing in that window runs on a grade of the commit before it.
-A held run has no such window, because it is pinned to the commit its approver was shown.
+A held run has no such window: it comes from a project and is pinned to the commit its approver was
+shown, and one that names its playbook by a path on the server is refused.
 
 **Isolation between runs on one executor.** A run without an execution image runs as the server's
 own user, so while two runs overlap, either one's code can read the other's materialized

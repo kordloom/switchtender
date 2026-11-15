@@ -174,10 +174,11 @@ func specRaw(r *run.Run) ([]byte, error) {
 // spec, so any change to what will execute moves it.
 //
 // SpecDigest cannot serve here. It is taken over the redacted spec because that is what a receipt
-// discloses, and redaction is lossy: an unquoted secret assignment is masked to the end of its line,
-// so two commands differing only after the secret reduce to the same bytes and share one digest. A
-// gate built on that value let an approved run be rewritten past its own approval, which is the one
-// thing the gate exists to stop.
+// discloses, and redaction is lossy: a masked secret reads the same whatever it held, and one that
+// opens a YAML entry or sits inside a quoted string is masked to the end of that line or string, so
+// two specs differing only inside what the mask took reduce to the same bytes and share one digest.
+// A gate built on that value let an approved run be rewritten past its own approval, which is the
+// one thing the gate exists to stop.
 func SpecBinding(r *run.Run) (string, error) {
 	raw, err := specRaw(r)
 	if err != nil {

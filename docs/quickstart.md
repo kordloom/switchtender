@@ -95,6 +95,10 @@ is submitted, accepted, and then fails with "the playbook: site.yml could not be
       -H "Authorization: Bearer $ST_TOKEN" \
       -d '{"playbook": "site.yml", "inventory": "hosts.ini"}'
 
+A run held for approval, by a rule or because an agent asked for it, must come from a project. One
+that names its playbook by a path on the server is refused, since an approval cannot bind what a
+file holds when the run is released.
+
 The response carries a run id. Fetch its status, its structured events, or its log:
 
     curl -H "Authorization: Bearer $ST_TOKEN" localhost:8080/v1/runs/<id>

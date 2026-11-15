@@ -89,6 +89,11 @@ retry on failure, and values a step publishes with <code>set_stats</code> flow t
 so history answers what version ran, not just what file name. A project can install its
 <code>requirements.yml</code> roles and collections on each sync, and can pin a container image its runs
 execute inside.</p>
+<p>A project's remote can be a git folder on the server, as a file URL or a path, which only a global
+admin may set, since it can name any git folder the server holds. A manage grant can still rename a
+local project but cannot point one there. A local remote syncs inside the server process, so no git
+binary is needed. A folder whose .git is a file, as in a linked worktree, is refused: point the
+project at the repository it links to.</p>
 <h2 id="templates">Templates</h2>
 <p>A template is a saved launch preset bundling a project, playbook, inventory, shard count,
 credentials, and extra vars. One click in the UI or one POST launches it. A template can also
@@ -201,16 +206,17 @@ seed on every process, or place the same <code>producer-key.json</code> in each 
 outcome record, its spec, and each approval decision and correction beside the digests the chain
 committed. Each is redacted before its bytes are fixed and disclosed as those same bytes, so a
 LoomSeal verifier from 1.7.0 on checks every one of them as carried, with none of this product's
-redaction rules. An outcome is committed under the exact digest form, <code>sha256e:</code>. A record whose
+redaction rules. The spec digest in a receipt covers the spec as shown, with secrets masked, and not
+what the mask hid. An outcome is committed under the exact digest form, <code>sha256e:</code>. A record whose
 redacted form is over 1 MiB is committed and disclosed as its summary: the run, its status, exit
 code, and spec digest, and the full record's size and SHA-256. An outcome recorded before the exact
 form keeps verifying with <code>switchtender verify</code>, and an open verifier reports it as carried and
 unchecked. A decision or correction an install recorded before nonces existed carries an unkeyed
 digest, which still verifies and is named as legacy, because anyone holding the receipt can confirm
-a guess of its body against it. Every entry after the first keyed one is keyed, so an unkeyed
-digest after that point fails. Records are read only on the entries the chain says they are, and a
-member whose name differs from a record member only in case fails the receipt, so a reader that
-folds case cannot be shown a value no verifier checked.</p>
+a guess of its body against it. Every entry after the first keyed one is keyed, so an unkeyed digest
+after that point fails. Records are read only on the entries the chain says they are, and a member
+whose name differs from a record member only in case fails the receipt, so a reader that folds case
+cannot be shown a value no verifier checked.</p>
 <p>A chain proves that what it holds was not altered. On its own it cannot prove that nothing is
 missing, because the same server decides both what happens and what gets written down, and because a
 prefix of a valid chain is itself a valid chain. Three things close that gap.</p>
@@ -223,7 +229,8 @@ authority to sign the moment it saw the current head. The token is embedded in e
 afterwards and is checked offline by any verifier, with no network and no trust in this install, so
 a chain that has quietly lost its tail no longer reaches its anchor and says so. Anchor on a
 schedule. An anchor bounds how much history can vanish unnoticed to whatever happened since the last
-one.</p>
+one. A token proves a time only as far as its authority is trusted, so <code>switchtender verify</code> names
+the certificate that signed each one and counts it only when <code>--tsa-cert</code> pins that authority.</p>
 <p><strong>A run created by a request points at the entry that authorized it.</strong> A run's creation is recorded before the
 handler runs, at a request path that names the template rather than the run it goes on to create,
 so the two cannot be matched by name. The run keeps the receipt instead, the same <code>seq:link</code> the
@@ -561,8 +568,9 @@ that arrives after a restart still runs the workflow that was approved.</p>
 <p>The approval binds the workflow as it was submitted: every step as written, with its tool, its
 command or playbook, its inventory, whether it is a dry run, and what it depends on, along with the
 workflow's variables, the digests of its secret answers, its credentials, its image, and the
-inventory snapshot it was submitted with. A held workflow that reads from a project is pinned to the
-commit its branch pointed at when it was held, and every step runs that commit. It does not bind
+inventory snapshot it was submitted with. A held workflow comes from a project and is pinned to the
+commit its branch pointed at when it was held, and every step runs that commit. One whose Ansible
+or Terraform step names a file by a path on the server is refused. It does not bind
 what a step works out when it runs: a Terraform or OpenTofu apply step plans and applies when the
 step runs, so the person who approves the workflow never sees that plan. To approve an exact plan,
 run the apply on its own, held for approval: it plans first, and the approval binds the saved plan.
@@ -576,7 +584,7 @@ an admin approves or denies it, and then it continues.</p>
 playbook, command, inventory, dry run, or retries, and it must have a name, since the approver is
 shown it. <code>description</code> is what the approver is asked to decide, and <code>approval_timeout</code> is how many
 seconds it waits, where zero waits until somebody decides.</p>
-<pre><code class="language-json">{&quot;name&quot;: &quot;release&quot;, &quot;steps&quot;: [
+<pre><code class="language-json">{&quot;name&quot;: &quot;release&quot;, &quot;project_id&quot;: &quot;proj_web&quot;, &quot;steps&quot;: [
   {&quot;name&quot;: &quot;build&quot;, &quot;tool&quot;: &quot;bash&quot;, &quot;command&quot;: &quot;make release&quot;},
   {&quot;name&quot;: &quot;gate&quot;, &quot;type&quot;: &quot;approval&quot;, &quot;description&quot;: &quot;Check the canary, then ship&quot;,
    &quot;approval_timeout&quot;: 3600, &quot;depends_on&quot;: [&quot;build&quot;]},
@@ -584,6 +592,9 @@ seconds it waits, where zero waits until somebody decides.</p>
   {&quot;name&quot;: &quot;notify&quot;, &quot;tool&quot;: &quot;bash&quot;, &quot;command&quot;: &quot;./page-oncall.sh&quot;, &quot;if_denied&quot;: [&quot;gate&quot;]}
 ]}
 </code></pre>
+<p>A workflow with an approval step comes from a project. It is not held: it starts at once, and it is
+pinned to the commit it started on, which every step after the approval runs. One naming a playbook
+by path is refused.</p>
 <p>The answer decides which path runs, matching AWX's approval node:</p>
 <ul>
 <li>Approved, the steps that depend on the approval step run. That is its approve path.</li>
