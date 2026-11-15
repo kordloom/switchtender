@@ -1,0 +1,852 @@
+{
+  "users": [],
+  "organizations": [
+    {
+      "name": "Default",
+      "description": "",
+      "max_hosts": 0,
+      "default_environment": null,
+      "related": {
+        "galaxy_credentials": [],
+        "notification_templates_started": [],
+        "notification_templates_success": [],
+        "notification_templates_error": [],
+        "notification_templates_approvals": []
+      },
+      "natural_key": {
+        "name": "Default",
+        "type": "organization"
+      }
+    }
+  ],
+  "teams": [],
+  "credential_types": [],
+  "credentials": [
+    {
+      "name": "prod-ssh",
+      "description": "",
+      "organization": {
+        "name": "Default",
+        "type": "organization"
+      },
+      "credential_type": {
+        "name": "Machine",
+        "kind": "ssh",
+        "type": "credential_type"
+      },
+      "inputs": {
+        "username": "deploy",
+        "password": "$encrypted$",
+        "become_method": "sudo",
+        "become_password": "$encrypted$"
+      },
+      "natural_key": {
+        "organization": {
+          "name": "Default",
+          "type": "organization"
+        },
+        "name": "prod-ssh",
+        "credential_type": {
+          "name": "Machine",
+          "kind": "ssh",
+          "type": "credential_type"
+        },
+        "type": "credential"
+      }
+    }
+  ],
+  "notification_templates": [],
+  "projects": [
+    {
+      "name": "Infra",
+      "description": "",
+      "local_path": "_6__infra",
+      "scm_type": "git",
+      "scm_url": "https://git.example.com/infra.git",
+      "scm_branch": "main",
+      "scm_refspec": "",
+      "scm_clean": false,
+      "scm_track_submodules": false,
+      "scm_delete_on_update": false,
+      "credential": null,
+      "timeout": 0,
+      "organization": {
+        "name": "Default",
+        "type": "organization"
+      },
+      "scm_update_on_launch": false,
+      "scm_update_cache_timeout": 0,
+      "allow_override": false,
+      "default_environment": null,
+      "signature_validation_credential": null,
+      "related": {
+        "notification_templates_started": [],
+        "notification_templates_success": [],
+        "notification_templates_error": []
+      },
+      "natural_key": {
+        "organization": {
+          "name": "Default",
+          "type": "organization"
+        },
+        "name": "Infra",
+        "type": "project"
+      }
+    }
+  ],
+  "inventory": [
+    {
+      "name": "Production",
+      "description": "",
+      "organization": {
+        "name": "Default",
+        "type": "organization"
+      },
+      "kind": "",
+      "host_filter": null,
+      "variables": "",
+      "prevent_instance_group_fallback": false,
+      "related": {
+        "labels": [],
+        "hosts": [
+          {
+            "name": "web01",
+            "description": "",
+            "inventory": {
+              "organization": {
+                "name": "Default",
+                "type": "organization"
+              },
+              "name": "Production",
+              "type": "inventory"
+            },
+            "enabled": true,
+            "instance_id": "",
+            "variables": "ansible_host: 10.0.0.11",
+            "related": {
+              "groups": [
+                {
+                  "name": "web",
+                  "inventory": {
+                    "organization": {
+                      "name": "Default",
+                      "type": "organization"
+                    },
+                    "name": "Production",
+                    "type": "inventory"
+                  },
+                  "type": "group"
+                }
+              ]
+            },
+            "natural_key": {
+              "name": "web01",
+              "inventory": {
+                "organization": {
+                  "name": "Default",
+                  "type": "organization"
+                },
+                "name": "Production",
+                "type": "inventory"
+              },
+              "type": "host"
+            }
+          },
+          {
+            "name": "web02",
+            "description": "",
+            "inventory": {
+              "organization": {
+                "name": "Default",
+                "type": "organization"
+              },
+              "name": "Production",
+              "type": "inventory"
+            },
+            "enabled": true,
+            "instance_id": "",
+            "variables": "ansible_host: 10.0.0.12",
+            "related": {
+              "groups": [
+                {
+                  "name": "web",
+                  "inventory": {
+                    "organization": {
+                      "name": "Default",
+                      "type": "organization"
+                    },
+                    "name": "Production",
+                    "type": "inventory"
+                  },
+                  "type": "group"
+                }
+              ]
+            },
+            "natural_key": {
+              "name": "web02",
+              "inventory": {
+                "organization": {
+                  "name": "Default",
+                  "type": "organization"
+                },
+                "name": "Production",
+                "type": "inventory"
+              },
+              "type": "host"
+            }
+          },
+          {
+            "name": "db01",
+            "description": "",
+            "inventory": {
+              "organization": {
+                "name": "Default",
+                "type": "organization"
+              },
+              "name": "Production",
+              "type": "inventory"
+            },
+            "enabled": true,
+            "instance_id": "",
+            "variables": "ansible_host: 10.0.0.21",
+            "related": {
+              "groups": [
+                {
+                  "name": "db",
+                  "inventory": {
+                    "organization": {
+                      "name": "Default",
+                      "type": "organization"
+                    },
+                    "name": "Production",
+                    "type": "inventory"
+                  },
+                  "type": "group"
+                }
+              ]
+            },
+            "natural_key": {
+              "name": "db01",
+              "inventory": {
+                "organization": {
+                  "name": "Default",
+                  "type": "organization"
+                },
+                "name": "Production",
+                "type": "inventory"
+              },
+              "type": "host"
+            }
+          }
+        ],
+        "groups": [
+          {
+            "name": "web",
+            "description": "",
+            "inventory": {
+              "organization": {
+                "name": "Default",
+                "type": "organization"
+              },
+              "name": "Production",
+              "type": "inventory"
+            },
+            "variables": "",
+            "related": {
+              "hosts": [
+                {
+                  "name": "web01",
+                  "inventory": {
+                    "organization": {
+                      "name": "Default",
+                      "type": "organization"
+                    },
+                    "name": "Production",
+                    "type": "inventory"
+                  },
+                  "type": "host"
+                },
+                {
+                  "name": "web02",
+                  "inventory": {
+                    "organization": {
+                      "name": "Default",
+                      "type": "organization"
+                    },
+                    "name": "Production",
+                    "type": "inventory"
+                  },
+                  "type": "host"
+                }
+              ],
+              "children": []
+            },
+            "natural_key": {
+              "name": "web",
+              "inventory": {
+                "organization": {
+                  "name": "Default",
+                  "type": "organization"
+                },
+                "name": "Production",
+                "type": "inventory"
+              },
+              "type": "group"
+            }
+          },
+          {
+            "name": "db",
+            "description": "",
+            "inventory": {
+              "organization": {
+                "name": "Default",
+                "type": "organization"
+              },
+              "name": "Production",
+              "type": "inventory"
+            },
+            "variables": "",
+            "related": {
+              "hosts": [
+                {
+                  "name": "db01",
+                  "inventory": {
+                    "organization": {
+                      "name": "Default",
+                      "type": "organization"
+                    },
+                    "name": "Production",
+                    "type": "inventory"
+                  },
+                  "type": "host"
+                }
+              ],
+              "children": []
+            },
+            "natural_key": {
+              "name": "db",
+              "inventory": {
+                "organization": {
+                  "name": "Default",
+                  "type": "organization"
+                },
+                "name": "Production",
+                "type": "inventory"
+              },
+              "type": "group"
+            }
+          }
+        ]
+      },
+      "natural_key": {
+        "organization": {
+          "name": "Default",
+          "type": "organization"
+        },
+        "name": "Production",
+        "type": "inventory"
+      }
+    }
+  ],
+  "inventory_sources": [],
+  "job_templates": [
+    {
+      "name": "Deploy",
+      "description": "",
+      "job_type": "run",
+      "inventory": {
+        "organization": {
+          "name": "Default",
+          "type": "organization"
+        },
+        "name": "Production",
+        "type": "inventory"
+      },
+      "project": {
+        "organization": {
+          "name": "Default",
+          "type": "organization"
+        },
+        "name": "Infra",
+        "type": "project"
+      },
+      "playbook": "deploy.yml",
+      "scm_branch": "",
+      "forks": 0,
+      "limit": "",
+      "verbosity": 0,
+      "extra_vars": "",
+      "job_tags": "",
+      "force_handlers": false,
+      "skip_tags": "",
+      "start_at_task": "",
+      "timeout": 0,
+      "use_fact_cache": false,
+      "execution_environment": null,
+      "host_config_key": "",
+      "ask_scm_branch_on_launch": false,
+      "ask_diff_mode_on_launch": false,
+      "ask_variables_on_launch": false,
+      "ask_limit_on_launch": false,
+      "ask_tags_on_launch": false,
+      "ask_skip_tags_on_launch": false,
+      "ask_job_type_on_launch": false,
+      "ask_verbosity_on_launch": false,
+      "ask_inventory_on_launch": false,
+      "ask_credential_on_launch": false,
+      "ask_execution_environment_on_launch": false,
+      "ask_labels_on_launch": false,
+      "ask_forks_on_launch": false,
+      "ask_job_slice_count_on_launch": false,
+      "ask_timeout_on_launch": false,
+      "ask_instance_groups_on_launch": false,
+      "survey_enabled": false,
+      "become_enabled": false,
+      "diff_mode": false,
+      "allow_simultaneous": false,
+      "job_slice_count": 1,
+      "webhook_service": "",
+      "webhook_credential": null,
+      "prevent_instance_group_fallback": false,
+      "related": {
+        "labels": [],
+        "credentials": [
+          {
+            "organization": {
+              "name": "Default",
+              "type": "organization"
+            },
+            "name": "prod-ssh",
+            "credential_type": {
+              "name": "Machine",
+              "kind": "ssh",
+              "type": "credential_type"
+            },
+            "type": "credential"
+          }
+        ],
+        "survey_spec": {},
+        "schedules": [],
+        "notification_templates_started": [],
+        "notification_templates_success": [],
+        "notification_templates_error": []
+      },
+      "natural_key": {
+        "organization": {
+          "name": "Default",
+          "type": "organization"
+        },
+        "name": "Deploy",
+        "type": "job_template"
+      }
+    },
+    {
+      "name": "Page on-call",
+      "description": "",
+      "job_type": "run",
+      "inventory": {
+        "organization": {
+          "name": "Default",
+          "type": "organization"
+        },
+        "name": "Production",
+        "type": "inventory"
+      },
+      "project": {
+        "organization": {
+          "name": "Default",
+          "type": "organization"
+        },
+        "name": "Infra",
+        "type": "project"
+      },
+      "playbook": "page.yml",
+      "scm_branch": "",
+      "forks": 0,
+      "limit": "",
+      "verbosity": 0,
+      "extra_vars": "",
+      "job_tags": "",
+      "force_handlers": false,
+      "skip_tags": "",
+      "start_at_task": "",
+      "timeout": 0,
+      "use_fact_cache": false,
+      "execution_environment": null,
+      "host_config_key": "",
+      "ask_scm_branch_on_launch": false,
+      "ask_diff_mode_on_launch": false,
+      "ask_variables_on_launch": false,
+      "ask_limit_on_launch": false,
+      "ask_tags_on_launch": false,
+      "ask_skip_tags_on_launch": false,
+      "ask_job_type_on_launch": false,
+      "ask_verbosity_on_launch": false,
+      "ask_inventory_on_launch": false,
+      "ask_credential_on_launch": false,
+      "ask_execution_environment_on_launch": false,
+      "ask_labels_on_launch": false,
+      "ask_forks_on_launch": false,
+      "ask_job_slice_count_on_launch": false,
+      "ask_timeout_on_launch": false,
+      "ask_instance_groups_on_launch": false,
+      "survey_enabled": false,
+      "become_enabled": false,
+      "diff_mode": false,
+      "allow_simultaneous": false,
+      "job_slice_count": 1,
+      "webhook_service": "",
+      "webhook_credential": null,
+      "prevent_instance_group_fallback": false,
+      "related": {
+        "labels": [],
+        "credentials": [
+          {
+            "organization": {
+              "name": "Default",
+              "type": "organization"
+            },
+            "name": "prod-ssh",
+            "credential_type": {
+              "name": "Machine",
+              "kind": "ssh",
+              "type": "credential_type"
+            },
+            "type": "credential"
+          }
+        ],
+        "survey_spec": {},
+        "schedules": [],
+        "notification_templates_started": [],
+        "notification_templates_success": [],
+        "notification_templates_error": []
+      },
+      "natural_key": {
+        "organization": {
+          "name": "Default",
+          "type": "organization"
+        },
+        "name": "Page on-call",
+        "type": "job_template"
+      }
+    }
+  ],
+  "workflow_job_templates": [
+    {
+      "name": "Release",
+      "description": "",
+      "extra_vars": "",
+      "organization": {
+        "name": "Default",
+        "type": "organization"
+      },
+      "survey_enabled": false,
+      "allow_simultaneous": false,
+      "ask_variables_on_launch": false,
+      "inventory": {
+        "organization": {
+          "name": "Default",
+          "type": "organization"
+        },
+        "name": "Production",
+        "type": "inventory"
+      },
+      "limit": null,
+      "scm_branch": null,
+      "ask_inventory_on_launch": false,
+      "ask_scm_branch_on_launch": false,
+      "ask_limit_on_launch": false,
+      "webhook_service": "",
+      "webhook_credential": null,
+      "ask_labels_on_launch": false,
+      "ask_skip_tags_on_launch": false,
+      "ask_tags_on_launch": false,
+      "skip_tags": "",
+      "job_tags": "",
+      "related": {
+        "labels": [],
+        "workflow_nodes": [
+          {
+            "extra_data": {},
+            "inventory": null,
+            "scm_branch": null,
+            "job_type": null,
+            "job_tags": null,
+            "skip_tags": null,
+            "limit": null,
+            "diff_mode": null,
+            "verbosity": null,
+            "execution_environment": null,
+            "forks": null,
+            "job_slice_count": null,
+            "timeout": null,
+            "workflow_job_template": {
+              "organization": {
+                "name": "Default",
+                "type": "organization"
+              },
+              "name": "Release",
+              "type": "workflow_job_template"
+            },
+            "all_parents_must_converge": false,
+            "identifier": "approve",
+            "related": {
+              "credentials": [],
+              "success_nodes": [
+                {
+                  "workflow_job_template": {
+                    "organization": {
+                      "name": "Default",
+                      "type": "organization"
+                    },
+                    "name": "Release",
+                    "type": "workflow_job_template"
+                  },
+                  "identifier": "deploy",
+                  "type": "workflow_job_template_node"
+                }
+              ],
+              "failure_nodes": [
+                {
+                  "workflow_job_template": {
+                    "organization": {
+                      "name": "Default",
+                      "type": "organization"
+                    },
+                    "name": "Release",
+                    "type": "workflow_job_template"
+                  },
+                  "identifier": "page",
+                  "type": "workflow_job_template_node"
+                }
+              ],
+              "always_nodes": [],
+              "create_approval_template": {
+                "timeout": 3600,
+                "name": "Approve the release",
+                "description": "Check the canary before production"
+              }
+            },
+            "natural_key": {
+              "workflow_job_template": {
+                "organization": {
+                  "name": "Default",
+                  "type": "organization"
+                },
+                "name": "Release",
+                "type": "workflow_job_template"
+              },
+              "identifier": "approve",
+              "type": "workflow_job_template_node"
+            }
+          },
+          {
+            "extra_data": {},
+            "inventory": null,
+            "scm_branch": null,
+            "job_type": null,
+            "job_tags": null,
+            "skip_tags": null,
+            "limit": null,
+            "diff_mode": null,
+            "verbosity": null,
+            "execution_environment": null,
+            "forks": null,
+            "job_slice_count": null,
+            "timeout": null,
+            "workflow_job_template": {
+              "organization": {
+                "name": "Default",
+                "type": "organization"
+              },
+              "name": "Release",
+              "type": "workflow_job_template"
+            },
+            "unified_job_template": {
+              "organization": {
+                "name": "Default",
+                "type": "organization"
+              },
+              "name": "Deploy",
+              "type": "job_template"
+            },
+            "all_parents_must_converge": false,
+            "identifier": "deploy",
+            "related": {
+              "credentials": [],
+              "success_nodes": [],
+              "failure_nodes": [],
+              "always_nodes": []
+            },
+            "natural_key": {
+              "workflow_job_template": {
+                "organization": {
+                  "name": "Default",
+                  "type": "organization"
+                },
+                "name": "Release",
+                "type": "workflow_job_template"
+              },
+              "identifier": "deploy",
+              "type": "workflow_job_template_node"
+            }
+          },
+          {
+            "extra_data": {},
+            "inventory": null,
+            "scm_branch": null,
+            "job_type": null,
+            "job_tags": null,
+            "skip_tags": null,
+            "limit": null,
+            "diff_mode": null,
+            "verbosity": null,
+            "execution_environment": null,
+            "forks": null,
+            "job_slice_count": null,
+            "timeout": null,
+            "workflow_job_template": {
+              "organization": {
+                "name": "Default",
+                "type": "organization"
+              },
+              "name": "Release",
+              "type": "workflow_job_template"
+            },
+            "unified_job_template": {
+              "organization": {
+                "name": "Default",
+                "type": "organization"
+              },
+              "name": "Page on-call",
+              "type": "job_template"
+            },
+            "all_parents_must_converge": false,
+            "identifier": "page",
+            "related": {
+              "credentials": [],
+              "success_nodes": [],
+              "failure_nodes": [],
+              "always_nodes": []
+            },
+            "natural_key": {
+              "workflow_job_template": {
+                "organization": {
+                  "name": "Default",
+                  "type": "organization"
+                },
+                "name": "Release",
+                "type": "workflow_job_template"
+              },
+              "identifier": "page",
+              "type": "workflow_job_template_node"
+            }
+          }
+        ],
+        "survey_spec": {},
+        "schedules": [
+          {
+            "extra_data": {},
+            "inventory": null,
+            "scm_branch": null,
+            "job_type": null,
+            "job_tags": null,
+            "skip_tags": null,
+            "limit": null,
+            "diff_mode": null,
+            "verbosity": null,
+            "execution_environment": null,
+            "forks": null,
+            "job_slice_count": null,
+            "timeout": null,
+            "name": "Nightly release",
+            "description": "",
+            "unified_job_template": {
+              "organization": {
+                "name": "Default",
+                "type": "organization"
+              },
+              "name": "Release",
+              "type": "workflow_job_template"
+            },
+            "enabled": true,
+            "rrule": "DTSTART;TZID=America/Chicago:20260105T020000 RRULE:FREQ=DAILY;INTERVAL=1",
+            "related": {
+              "credentials": []
+            },
+            "natural_key": {
+              "unified_job_template": {
+                "organization": {
+                  "name": "Default",
+                  "type": "organization"
+                },
+                "name": "Release",
+                "type": "workflow_job_template"
+              },
+              "name": "Nightly release",
+              "type": "schedule"
+            }
+          }
+        ],
+        "notification_templates_started": [],
+        "notification_templates_success": [],
+        "notification_templates_error": [],
+        "notification_templates_approvals": []
+      },
+      "natural_key": {
+        "organization": {
+          "name": "Default",
+          "type": "organization"
+        },
+        "name": "Release",
+        "type": "workflow_job_template"
+      }
+    }
+  ],
+  "execution_environments": [],
+  "applications": [],
+  "schedules": [
+    {
+      "extra_data": {},
+      "inventory": null,
+      "scm_branch": null,
+      "job_type": null,
+      "job_tags": null,
+      "skip_tags": null,
+      "limit": null,
+      "diff_mode": null,
+      "verbosity": null,
+      "execution_environment": null,
+      "forks": null,
+      "job_slice_count": null,
+      "timeout": null,
+      "name": "Nightly release",
+      "description": "",
+      "unified_job_template": {
+        "organization": {
+          "name": "Default",
+          "type": "organization"
+        },
+        "name": "Release",
+        "type": "workflow_job_template"
+      },
+      "enabled": true,
+      "rrule": "DTSTART;TZID=America/Chicago:20260105T020000 RRULE:FREQ=DAILY;INTERVAL=1",
+      "related": {
+        "credentials": []
+      },
+      "natural_key": {
+        "unified_job_template": {
+          "organization": {
+            "name": "Default",
+            "type": "organization"
+          },
+          "name": "Release",
+          "type": "workflow_job_template"
+        },
+        "name": "Nightly release",
+        "type": "schedule"
+      }
+    }
+  ]
+}
