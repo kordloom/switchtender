@@ -180,7 +180,7 @@ func (s *Syncer) Sync(p *Project, sshKey string) (*Worktree, error) {
 	l.Lock()
 	defer l.Unlock()
 
-	canonical, sha, wantRoles, wantCollections, err := s.update(p, sshKey)
+	canonical, sha, wantRoles, wantCollections, err := s.update(p, sshKey, true)
 	if err != nil {
 		return nil, err
 	}
@@ -202,9 +202,11 @@ func (s *Syncer) Sync(p *Project, sshKey string) (*Worktree, error) {
 	}, nil
 }
 
-// Fetch brings the project's canonical checkout up to date with its remote exactly as Sync does,
-// dependencies included, without copying it for a run, and returns the commit it now sits on. It
-// is for a caller that reads the checkout rather than executing in it.
+// Fetch brings the project's canonical checkout up to date with its remote as Sync does, without
+// copying it for a run, and returns the commit it now sits on. It is for a caller that reads the
+// checkout rather than executing in it, such as the approval gate and the pin a held run gets, so
+// it installs no dependencies: a requirements file names code from anywhere, and installing it is
+// work done for a run, which happens only when the run is claimed.
 func (s *Syncer) Fetch(p *Project, sshKey string) (string, error) {
 	if err := ValidateRepoURL(p.RepoURL); err != nil {
 		return "", err
@@ -212,15 +214,17 @@ func (s *Syncer) Fetch(p *Project, sshKey string) (string, error) {
 	l := s.lock(p.ID)
 	l.Lock()
 	defer l.Unlock()
-	_, sha, _, _, err := s.update(p, sshKey)
+	_, sha, _, _, err := s.update(p, sshKey, false)
 	return sha, err
 }
 
 // update brings the canonical checkout of p up to date with its remote, cloning it when there is
-// none or the one there no longer matches the project, installs its dependencies when the project
-// asks for that, and returns the checkout's path, the commit it sits on, and which kinds of
-// dependency were installed. The caller holds the project's lock.
-func (s *Syncer) update(p *Project, sshKey string) (canonical, sha string, wantRoles, wantCollections bool, err error) {
+// none or the one there no longer matches the project, installs its dependencies when install is
+// set and the project asks for that, and returns the checkout's path, the commit it sits on, and
+// which kinds of dependency were installed. Only a sync for a run being executed installs. The
+// caller holds the project's lock.
+func (s *Syncer) update(p *Project, sshKey string, install bool) (canonical, sha string, wantRoles,
+	wantCollections bool, err error) {
 	auth, err := authFor(sshKey)
 	if err != nil {
 		return "", "", false, false, err
@@ -269,7 +273,7 @@ func (s *Syncer) update(p *Project, sshKey string) (canonical, sha string, wantR
 	}
 	sha = head.Hash().String()
 
-	if p.InstallDeps {
+	if install && p.InstallDeps {
 		wantRoles, wantCollections, err = s.installGalaxy(canonical)
 		if err != nil {
 			return "", "", false, false, err

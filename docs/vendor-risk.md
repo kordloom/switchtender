@@ -25,7 +25,7 @@ when you configure them, and each is optional:
 | Advisory AI | You configure a provider | Your provider, including local Ollama; read-only, executes nothing |
 | Project sync | You add a git project | Your repository host |
 | Notifications and webhooks | You configure them | Your endpoints |
-| Terraform and OpenTofu modules | A plan's configuration calls registry or remote modules | The module sources the configuration names, from where the plan runs, with the run's own credentials |
+| Terraform and OpenTofu modules | A plan's configuration calls registry or remote modules | The module sources the configuration names, from where the plan runs. The approval gate's download carries no credential and none of the server's environment but `PATH`, the proxy variables, `SSL_CERT_FILE`, and `SSL_CERT_DIR`, and runs for no plan an agent asked for. A run downloading at execution carries the run's own credentials |
 
 The tools SwitchTender starts are held to the same promise. Terraform checks for a newer version of
 itself against HashiCorp's checkpoint service on every command unless `CHECKPOINT_DISABLE` is set,

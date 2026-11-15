@@ -11,24 +11,18 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/kordloom/switchtender/internal/audit"
-	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/trigger"
 )
 
-// reviewRegistryHost is the registry host the pull requests' configurations name. It resolves
-// nowhere: the CLI configuration the template's credential carries points it at the test registry.
-const reviewRegistryHost = "registry.example.test"
-
-// reviewModules are the modules the test registry serves: one that runs nothing, and one hiding an
+// reviewModules are the modules the test server serves: one that runs nothing, and one hiding an
 // external data source behind a nested module.
 func reviewModules() map[string]map[string]string {
 	return map[string]map[string]string{
@@ -38,8 +32,8 @@ func reviewModules() map[string]map[string]string {
 	}
 }
 
-// reviewRegistry serves the Terraform module registry protocol for its modules, each named
-// acme/<name>/null at version 1.0.0 and downloaded as a tar.gz archive from the same server.
+// reviewRegistry serves its modules as tar.gz archives at /archive/<name>.tar.gz, an address a
+// configuration names directly and the gate's download reaches with no credential.
 type reviewRegistry struct {
 	// modules holds each module's files by path, by module name.
 	modules map[string]map[string]string
@@ -51,16 +45,11 @@ type reviewRegistry struct {
 	downloads int
 }
 
-// serve answers the version listing, the download redirect, and the archive itself. Only a GET of
-// the archive counts as a download: the downloader asks its size first.
+// serve answers with the archive itself. Only a GET of the archive counts as a download: the
+// downloader asks its size first.
 func (reg *reviewRegistry) serve(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	switch {
-	case len(parts) == 6 && parts[5] == "versions" && reg.modules[parts[3]] != nil:
-		_, _ = io.WriteString(w, `{"modules":[{"versions":[{"version":"1.0.0"}]}]}`)
-	case len(parts) == 7 && parts[6] == "download":
-		w.Header().Set("X-Terraform-Get", "http://"+r.Host+"/archive/"+parts[3]+".tar.gz")
-		w.WriteHeader(http.StatusNoContent)
 	case len(parts) == 2 && parts[0] == "archive" &&
 		reg.modules[strings.TrimSuffix(parts[1], ".tar.gz")] != nil:
 		archive := tarGz(reg.modules[strings.TrimSuffix(parts[1], ".tar.gz")])
@@ -118,10 +107,10 @@ func (f reviewFetchRunner) FetchModules(ctx context.Context, spec roundhouse.Spe
 	return f.fetch.FetchModules(ctx, spec, out)
 }
 
-// newRegistryReviewServer builds a review server whose pull request calls module from reg, whose
-// template's credential carries the CLI configuration that reaches reg, and whose gate downloads
-// with real terraform. It returns the server and the log of what the fake plan runner executed.
-// A nil audits keeps the default store.
+// newRegistryReviewServer builds a review server whose pull request calls module by its archive's
+// address on reg, and whose gate downloads with real terraform. The template's credential is not
+// handed to that download, and the module needs none. It returns the server and the log of what
+// the fake plan runner executed. A nil audits keeps the default store.
 func newRegistryReviewServer(t *testing.T, reg *reviewRegistry, module string,
 	audits audit.Store) (*reviewServer, *specLog) {
 	t.Helper()
@@ -134,12 +123,6 @@ func newRegistryReviewServer(t *testing.T, reg *reviewRegistry, module string,
 	}
 	hub := httptest.NewServer(http.HandlerFunc(reg.serve))
 	t.Cleanup(hub.Close)
-	cli := filepath.Join(t.TempDir(), "cli.tfrc")
-	if err := os.WriteFile(cli, []byte(fmt.Sprintf(
-		"host %q {\n  services = {\n    \"modules.v1\" = %q\n  }\n}\n", reviewRegistryHost,
-		hub.URL+"/v1/modules/")), 0o600); err != nil {
-		t.Fatalf("write CLI configuration: %v", err)
-	}
 	fetch, ok := roundhouse.NewAnsibleRunner().(roundhouse.ModuleFetcher)
 	if !ok {
 		t.Fatal("the runner cannot fetch modules")
@@ -149,30 +132,21 @@ func newRegistryReviewServer(t *testing.T, reg *reviewRegistry, module string,
 		Runner: reviewFetchRunner{Runner: planRunner(executed), fetch: fetch},
 		PRFiles: map[string]string{
 			"infra/plan.txt": "  + aws_instance.web\nPlan: 1 to add, 0 to change, 0 to destroy.\n",
-			"infra/main.tf": fmt.Sprintf("module \"net\" {\n  source  = \"%s/acme/%s/null\"\n"+
-				"  version = \"1.0.0\"\n}\n", reviewRegistryHost, module),
+			"infra/main.tf": fmt.Sprintf("module \"net\" {\n  source = \"%s/archive/%s.tar.gz\"\n}\n",
+				hub.URL, module),
 		},
 		Audits: audits,
 	})
-	sealed, err := sharedSealer("pass", "salt").Seal("CLOUD_SECRET=" + reviewCloudSecret +
-		"\nTF_CLI_CONFIG_FILE=" + cli)
-	if err != nil {
-		t.Fatalf("Seal() error = %v", err)
-	}
-	if err := rs.srv.credentials.Save(context.Background(), &credential.Credential{ID: "cred_cloud",
-		Name: "cred_cloud", Kind: credential.KindEnv, Secret: sealed}); err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
 	return rs, executed
 }
 
-// TestReviewHookDownloadsModulesBeforeItPlans proves pull request review reads the registry modules
-// a configuration calls before it plans. A fresh commit holds no downloaded modules, so a pull
-// request calling a registry module was refused whatever the module held. The gate now downloads
-// them first, with real terraform and the template's own credential, which carries the CLI
-// configuration that reaches the registry. A clean module is planned with the download in the
-// plan's evidence, downloaded once for the review's question and the plan's submission together,
-// and a module hiding an external data source is still refused, by its address.
+// TestReviewHookDownloadsModulesBeforeItPlans proves pull request review reads the remote modules a
+// configuration calls before it plans. A fresh commit holds no downloaded modules, so a pull
+// request calling a remote module was refused whatever the module held. The gate now downloads them
+// first, with real terraform and none of the template's credentials. A clean module is planned
+// with the download in the plan's evidence, downloaded once for the review's question and the
+// plan's submission together, and a module hiding an external data source is still refused, by its
+// address.
 func TestReviewHookDownloadsModulesBeforeItPlans(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

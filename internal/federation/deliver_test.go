@@ -521,11 +521,10 @@ func TestDeliverRefusesAnOccupiedPath(t *testing.T) {
 	}
 }
 
-// TestAnAWSSessionSaysWhyItWasMinted pins the role session name CloudTrail records for a token
-// SwitchTender minted. A run's session names the run. The gate's module download names the run it
-// was judging and that it was the gate's, and a pull request review's pre-check, which no run
-// exists for, names the pull request.
-func TestAnAWSSessionSaysWhyItWasMinted(t *testing.T) {
+// TestAnAWSSessionNamesTheRun pins the role session name CloudTrail records for a token
+// SwitchTender minted. A token is minted only for a run executing, so the session names the run,
+// cut to the 64 characters STS allows.
+func TestAnAWSSessionNamesTheRun(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		// Claims are the token's claims.
@@ -534,12 +533,9 @@ func TestAnAWSSessionSaysWhyItWasMinted(t *testing.T) {
 		WantName string
 	}{{ // Test 0: A run.
 		Claims: Claims{RunID: "run_abc", Purpose: PurposeRun}, WantName: "switchtender-run_abc",
-	}, { // Test 1: The gate's download before the run is recorded.
-		Claims:   Claims{RunID: "run_abc", Purpose: PurposeGateDownload},
-		WantName: "switchtender-gate-run_abc",
-	}, { // Test 2: A review's pre-check, which names no run.
-		Claims:   Claims{Purpose: PurposeReviewPrecheck, PullRequest: "7"},
-		WantName: "switchtender-review-7",
+	}, { // Test 1: A run id too long for STS is cut to its limit.
+		Claims:   Claims{RunID: "run_" + strings.Repeat("a", 60), Purpose: PurposeRun},
+		WantName: "switchtender-run_" + strings.Repeat("a", 47),
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

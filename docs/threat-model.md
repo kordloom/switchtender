@@ -44,7 +44,9 @@ Terraform or OpenTofu apply that a rule gates or holds, and a drift reconcile, c
 plan file its approval bound, and the tool refuses that plan if the infrastructure changed since. Two inputs resolve at execution time.
 Dynamic inventory is inherently resolved at runtime. Approval binds the inventory source definition,
 while the execution record captures the actual hosts reached. Galaxy roles and collections are
-installed from the project's `requirements.yml` when execution begins. Approval binds that file, but
+installed from the project's `requirements.yml` when execution begins, and never before: the gate's
+refresh of the project and the commit pin a held run gets move the checkout and install nothing,
+since a requirements file names code from anywhere. Approval binds that file, but
 an unpinned dependency may resolve to code the approver never reviewed. Pin each dependency to an
 exact version or commit to ensure execution uses the code that was approved.
 
@@ -69,6 +71,19 @@ their own held run where a rule requires a second person. They cannot edit the s
 because the executor refuses a digest that no longer matches. And they cannot do any of it quietly,
 because the submission, the decision, and the outcome are all separate chain entries, each naming
 its actor, and the run itself records which rule held it.
+
+They also cannot borrow what the gate does before it decides. To read a person's Terraform or
+OpenTofu plan, the gate downloads the registry and remote modules its configuration calls, and the
+configuration's author picks every source. So the download runs this server's own binary with
+nothing of the run's: no credential, no credential file, no variable, and no container image. Of
+the server's environment it keeps only `PATH`, the proxy variables, `SSL_CERT_FILE`, and
+`SSL_CERT_DIR`, and its home is an empty directory of its own, so it reaches the module sources
+anyone on the network reaches and nothing a credential or the server's own configuration opens. A
+pull request's pre-check downloads the same way, with none of the template's credentials, so a
+branch nobody merged learns nothing from them. A plan that runs in a container image, its own, its
+project's, or the server's default, is not downloaded for, since the gate starts no image before a
+person approves, and it stays unclassified. So does a plan whose modules need a credential to
+download, unless its modules are vendored into the configuration.
 
 ### An operator who wants to rewrite history
 
@@ -274,6 +289,13 @@ chained with its actor type recorded, and with the human it acted for named when
 high-risk change it proposes is held by the same rules that hold a human's, decided by a human admin
 the agent cannot be.
 
+Nothing is fetched or installed for an agent's run before a person approves it. The gate downloads
+no Terraform or OpenTofu module for its plan, opens none of its run's credentials, and installs
+none of its project's dependencies, and the plan stays unclassified, which holds it and never lets
+it through. A path on this server its run names that the gate cannot read is recorded with one
+reason, whether the path is missing or unreadable, so the record cannot serve as a probe of which
+paths exist.
+
 ### A reader who does not trust this server
 
 They are the design's favorite adversary. Pull the bundle, walk away, and verify it on an
@@ -310,9 +332,11 @@ that do not print secrets.
 
 **A grade is a reading of what will run, not a proof of it.** The reversibility grade reads a
 playbook and everything it pulls in: roles, their dependencies, task includes, imported playbooks,
-and the Galaxy roles and collections a sync installs into the project. It reads them from the
-project at the commit the run executes, and the gate fetches the project before it grades, so a
-change pushed a moment before launch is the change that is graded. What it cannot read, it names in
+and the Galaxy roles and collections the last sync for a run installed into the project. It reads
+them from the project at the commit the run executes, and the gate fetches the project before it
+grades, so a change pushed a moment before launch is the change that is graded. The gate installs
+no dependency itself, so a role or collection the requirements name that no run's sync has
+installed yet is one the grade cannot read, and it names it. What it cannot read, it names in
 the grade: a role or include whose name is only computed at run time, one that lives outside the
 project, and a module this product does not know to be destructive. An unread include never lowers
 a grade, but a rule that holds only irreversible changes will not hold one whose destructive work

@@ -264,3 +264,108 @@ func standDown(t *testing.T, format string, args ...any) {
 	}
 	t.Skipf(format, args...)
 }
+
+// TestAGetAskedForAMinimalEnvironmentStartsFromItAlone holds the approval gate's module download to
+// what it may see. A get asked for a minimal environment keeps only the search path, the proxy
+// settings, and the trusted certificates' location of the runner's base environment, the server's
+// own, and gets a HOME of its own inside the private directory, so a cloud credential, a registry
+// token, an SSH agent, or a CLI configuration the server's environment carries never reaches it.
+// Those variables come from the server alone: a spec naming its own is not heard. Without the
+// request a get inherits the whole base environment, as the run's own get does. A minimal
+// environment with nowhere to put its home is refused, and so is one asked for inside an image. A
+// stub stands in for the tool and prints what it was handed.
+//
+//nolint:funlen // Test function.
+func TestAGetAskedForAMinimalEnvironmentStartsFromItAlone(t *testing.T) {
+	t.Parallel()
+	stub := filepath.Join(t.TempDir(), "tf")
+	writeStub(t, stub, "#!/bin/sh\n[ \"$1\" = stub-warmup ] && exit 0\nenv\n")
+	kept := []string{"PATH=/usr/bin:/bin", "HTTP_PROXY=http://proxy.example.test:3128",
+		"https_proxy=http://proxy.example.test:3128", "NO_PROXY=localhost",
+		"SSL_CERT_FILE=/etc/ssl/server.pem", "SSL_CERT_DIR=/etc/ssl/certs"}
+	left := []string{"HOME=/home/server", "AWS_PROFILE=prod",
+		"GOOGLE_APPLICATION_CREDENTIALS=/etc/gcp.json", "TF_TOKEN_app_terraform_io=token-2468",
+		"TF_CLI_CONFIG_FILE=/etc/cli.tfrc", "SSH_AUTH_SOCK=/tmp/agent.sock"}
+	base := append(slices.Clone(kept), left...)
+	added := []string{"TF_DATA_DIR=.terraform", "CHECKPOINT_DISABLE=1"}
+	tests := []struct {
+		// Minimal asks for the minimal environment.
+		Minimal bool
+		// NoRunDir leaves the spec with no private directory.
+		NoRunDir bool
+		// Env is what the spec's own environment adds beyond TF_DATA_DIR.
+		Env []string
+		// WantHome is whether the get's HOME is the one inside the private directory.
+		WantHome bool
+		// WantEnv is every entry the get is handed, HOME aside when WantHome is set.
+		WantEnv []string
+		// Want is the error, nil for none.
+		Want error
+	}{{ // Test 0: The minimal environment keeps the path, proxies, and certificates, and nothing else.
+		Minimal: true, WantHome: true, WantEnv: append(slices.Clone(kept), added...),
+	}, { // Test 1: Without the request the whole base environment is inherited.
+		WantEnv: append(slices.Clone(base), added...),
+	}, { // Test 2: A minimal environment with nowhere to put its home is refused.
+		Minimal: true, NoRunDir: true, Want: ErrLaunch,
+	}, { // Test 3: A spec cannot name the kept variables or HOME for a minimal environment.
+		Minimal: true, WantHome: true,
+		Env: []string{"SSL_CERT_FILE=/tmp/theirs.pem", "HTTPS_PROXY=http://theirs.example.test",
+			"HOME=/tmp/theirs"},
+		WantEnv: append(slices.Clone(kept), added...),
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			private := t.TempDir()
+			spec := Spec{Tool: run.ToolTerraform, Command: ".", Dir: t.TempDir(), DryRun: true,
+				MinimalEnv: test.Minimal, RunDir: private,
+				Env: append([]string{"TF_DATA_DIR=.terraform"}, test.Env...)}
+			if test.NoRunDir {
+				spec.RunDir = ""
+			}
+			var out bytes.Buffer
+			_, err := (&terraformRunner{binary: stub, baseEnv: base}).fetchModules(t.Context(), spec,
+				&out)
+			if !errors.Is(err, test.Want) {
+				t.Fatalf("fetchModules() error = %v, want %v", err, test.Want)
+			}
+			if test.Want != nil {
+				return
+			}
+			var got []string
+			home := ""
+			for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+				name, value, _ := strings.Cut(line, "=")
+				switch {
+				case slices.Contains([]string{"PWD", "OLDPWD", "SHLVL", "_"}, name):
+					// The shell running the stub sets these itself.
+				case name == "HOME" && test.WantHome:
+					home = value
+				default:
+					got = append(got, line)
+				}
+			}
+			slices.Sort(got)
+			want := slices.Sorted(slices.Values(test.WantEnv))
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Errorf("the get's environment mismatch (-want +got):\n%s", diff)
+			}
+			if test.WantHome && home != filepath.Join(private, "home") {
+				t.Errorf("HOME = %q, want the empty directory inside the private directory %q",
+					home, filepath.Join(private, "home"))
+			}
+		})
+	}
+	fetcher, ok := NewSelectiveRunner(true, "docker", "missing", false,
+		DefaultContainerLimits()).(ModuleFetcher)
+	if !ok {
+		t.Fatal("the runner cannot fetch modules")
+	}
+	_, err := fetcher.FetchModules(t.Context(), Spec{Tool: run.ToolTerraform, Command: ".",
+		Dir: t.TempDir(), RunDir: t.TempDir(), MinimalEnv: true,
+		Image: "registry.example.test/tf@sha256:" + strings.Repeat("a", 64)}, io.Discard)
+	if !errors.Is(err, ErrLaunch) {
+		t.Errorf("FetchModules() in an image with a minimal environment = %v, want %v", err,
+			ErrLaunch)
+	}
+}

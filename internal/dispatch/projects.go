@@ -125,6 +125,10 @@ func (d *Dispatcher) resolveProject(ctx context.Context, r *run.Run, spec *round
 // was current when the request was made, and execution already refuses a pin that no longer
 // matches. A sync failure downgrades to an unpinned hold, which is exactly the old behavior, but
 // says so on the run so the approver can see the guarantee is absent rather than assume it.
+//
+// The pin only moves the project's checkout and reads the commit. It installs none of the
+// project's dependencies, since the run is held and nothing is installed for it before a person
+// approves: the sync at claim installs them for the commit pinned here.
 func (d *Dispatcher) pinHeldRunCommit(r *run.Run) {
 	if r.Status != run.StatusPendingApproval || r.ProjectID == "" || r.PinnedCommit != "" ||
 		r.GitRef != "" {
@@ -152,13 +156,12 @@ func (d *Dispatcher) pinHeldRunCommit(r *run.Run) {
 		fail(err)
 		return
 	}
-	wt, err := d.syncer.Sync(p, sshKey)
+	sha, err := d.syncer.Fetch(p, sshKey)
 	if err != nil {
 		fail(err)
 		return
 	}
-	defer wt.Cleanup()
-	r.PinnedCommit = wt.SHA
+	r.PinnedCommit = sha
 }
 
 // projectKey returns the SSH key the project's syncs authenticate with, empty for a remote that
@@ -206,7 +209,8 @@ func (d *Dispatcher) projectKey(ctx context.Context, p *project.Project) (string
 // a reversibility floor does for any run and a dry-run exclusion or a risk floor does for a dry
 // run, so an install without one pays no fetch on the submit path. A failed fetch is logged and the
 // gate grades what the checkout already holds: the execution that follows syncs the same remote and
-// fails on the same fault, so it runs nothing the grade did not see.
+// fails on the same fault, so it runs nothing the grade did not see. The fetch installs none of the
+// project's dependencies, which only the sync for a claimed run does.
 func (d *Dispatcher) refreshForGate(policies []*policy.Policy, units ...*run.Run) {
 	if d.projects == nil || d.syncer == nil {
 		return
@@ -335,8 +339,7 @@ func (d *Dispatcher) resolvePullCredential(ctx context.Context, id string,
 // resolvePullFrom is resolvePullCredential with the login taken from src, so a relay worker pulls
 // with the login the control node delivered rather than one it has no store to open. r is the
 // claimed run the login is opened to execute, whose claim a minted login's recorded handle is bound
-// to, or nil for a login opened outside any claim, such as the plan gate's at submission, which is
-// held for one bounded scan and recorded nowhere.
+// to, or nil for a login opened outside any claim, which is recorded nowhere.
 func (d *Dispatcher) resolvePullFrom(ctx context.Context, src secretSource, r *run.Run, id string,
 	spec *roundhouse.Spec) (cleanup func(), err error) {
 	cleanup = func() {}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -129,7 +130,8 @@ func (t *terraformRunner) show(ctx context.Context, dir string, env []string, pl
 
 // fetchModules runs the get of spec's working directory and nothing else: it downloads the modules
 // the configuration calls, installs no provider, and plans nothing. It inherits the same base
-// environment and credential environment Run gives the tool, and no variables.
+// environment and credential environment Run gives the tool, or the minimal one getEnv builds when
+// spec asks for it, and no variables.
 func (t *terraformRunner) fetchModules(ctx context.Context, spec Spec, out io.Writer) (Result, error) {
 	if spec.Command == "" {
 		return Result{ExitCode: -1}, ErrNoCommand
@@ -142,11 +144,66 @@ func (t *terraformRunner) fetchModules(ctx context.Context, spec Spec, out io.Wr
 		return Result{ExitCode: -1}, fmt.Errorf("%w: %q, which is where %s would fetch modules",
 			ErrNoWorkDir, dir, t.binary)
 	}
+	env, err := t.getEnv(spec)
+	if err != nil {
+		return Result{ExitCode: -1}, err
+	}
 	get := exec.CommandContext(ctx, t.binary, terraformGetArgs()...)
 	get.Dir = dir
-	get.Env = append(append([]string{}, t.baseEnv...), spec.Env...)
-	get.Env = append(get.Env, checkpointEnv(spec.Env)...)
+	get.Env = append(env, checkpointEnv(spec.Env)...)
 	return runProcess(ctx, get, out)
+}
+
+// minimalGetEnv names the variables a get asked for a minimal environment keeps from the runner's
+// base environment, the server's own: the search path the binary and git are found on, the proxy
+// settings that let it reach a module source at all, in both cases, and where the trusted
+// certificates are, for a host whose network inspects TLS. Everything else the server's
+// environment holds stays behind, such as a cloud credential, a registry token, an SSH agent, or a
+// CLI configuration naming a private registry. HOME is not kept either: getEnv points it at an
+// empty directory inside the run's private directory, so nothing in the server's own home directory
+// is read.
+var minimalGetEnv = []string{
+	"PATH",
+	"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+	"http_proxy", "https_proxy", "no_proxy",
+	"SSL_CERT_FILE", "SSL_CERT_DIR",
+}
+
+// getEnv returns the environment a get of spec starts with: the runner's base environment, or, for
+// a spec asking for a minimal one, the variables minimalGetEnv names and a HOME inside spec's
+// private directory, created empty. spec's own environment is layered over either, except that a
+// minimal one takes those variables and HOME from the server alone, never from spec. A minimal
+// environment with no private directory to put the home in is refused rather than given the
+// server's.
+func (t *terraformRunner) getEnv(spec Spec) ([]string, error) {
+	if !spec.MinimalEnv {
+		return append(append([]string{}, t.baseEnv...), spec.Env...), nil
+	}
+	if spec.RunDir == "" {
+		return nil, fmt.Errorf("%w: a get with a minimal environment needs a private directory "+
+			"for its home", ErrLaunch)
+	}
+	home := filepath.Join(spec.RunDir, "home")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrLaunch, err)
+	}
+	kept := func(kv string) bool {
+		name, _, _ := strings.Cut(kv, "=")
+		return name == "HOME" || slices.Contains(minimalGetEnv, name)
+	}
+	env := make([]string, 0, len(minimalGetEnv)+1+len(spec.Env))
+	for _, kv := range t.baseEnv {
+		if kept(kv) && !strings.HasPrefix(kv, "HOME=") {
+			env = append(env, kv)
+		}
+	}
+	env = append(env, "HOME="+home)
+	for _, kv := range spec.Env {
+		if !kept(kv) {
+			env = append(env, kv)
+		}
+	}
+	return env, nil
 }
 
 // checkpointVar is the variable that turns off the version check Terraform and OpenTofu make on

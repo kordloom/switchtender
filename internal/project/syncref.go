@@ -58,7 +58,7 @@ func (s *Syncer) SyncRef(p *Project, sshKey, ref string) (*Worktree, error) {
 	l.Lock()
 	defer l.Unlock()
 
-	commit, err := s.fetchRefLocked(p, sshKey, ref)
+	commit, err := s.fetchRefLocked(p, sshKey, ref, true)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +88,8 @@ func (s *Syncer) SyncRef(p *Project, sshKey, ref string) (*Worktree, error) {
 
 // FetchRef fetches ref from the project's remote into the canonical checkout's object store and
 // returns the commit it points at, without writing a worktree. It lets the commit be read with
-// ReadCommit before any run is created, which is how a pull request's head is read for the gate.
+// ReadCommit before any run is created, which is how a pull request's head is read for the gate,
+// so like Fetch it installs no dependencies.
 func (s *Syncer) FetchRef(p *Project, sshKey, ref string) (string, error) {
 	if err := ValidateRepoURL(p.RepoURL); err != nil {
 		return "", err
@@ -99,17 +100,18 @@ func (s *Syncer) FetchRef(p *Project, sshKey, ref string) (string, error) {
 	l := s.lock(p.ID)
 	l.Lock()
 	defer l.Unlock()
-	commit, err := s.fetchRefLocked(p, sshKey, ref)
+	commit, err := s.fetchRefLocked(p, sshKey, ref, false)
 	if err != nil {
 		return "", err
 	}
 	return commit.Hash.String(), nil
 }
 
-// fetchRefLocked brings the canonical checkout up to date, fetches ref onto fetchedRef, and returns
-// the commit it points at. The caller holds the project's lock and has validated the URL and ref.
-func (s *Syncer) fetchRefLocked(p *Project, sshKey, ref string) (*object.Commit, error) {
-	canonical, _, _, _, err := s.update(p, sshKey)
+// fetchRefLocked brings the canonical checkout up to date, installing its dependencies only when
+// install is set, fetches ref onto fetchedRef, and returns the commit it points at. The caller
+// holds the project's lock and has validated the URL and ref.
+func (s *Syncer) fetchRefLocked(p *Project, sshKey, ref string, install bool) (*object.Commit, error) {
+	canonical, _, _, _, err := s.update(p, sshKey, install)
 	if err != nil {
 		return nil, err
 	}

@@ -120,17 +120,9 @@ func deliverAWS(ctx context.Context, cfg Config, c Claims, token, dir string, d 
 }
 
 // defaultSessionName names an AWS role session after the run, so CloudTrail shows which run used
-// the role, and after why the token was minted when it was not for a run executing: the gate's
-// module download names the run it was judging, and a review pre-check names its pull request,
-// since no run exists. STS caps a session name at 64 characters.
+// the role. STS caps a session name at 64 characters.
 func defaultSessionName(c Claims) string {
 	name := "switchtender-" + c.RunID
-	switch c.Purpose {
-	case PurposeGateDownload:
-		name = "switchtender-gate-" + c.RunID
-	case PurposeReviewPrecheck:
-		name = "switchtender-review-" + c.PullRequest
-	}
 	if len(name) > 64 {
 		name = name[:64]
 	}

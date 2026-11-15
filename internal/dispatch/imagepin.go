@@ -32,6 +32,28 @@ func WithRefuseUnpinnedImage(refuse bool) Option {
 	return func(c *config) { c.refuseUnpinnedImage = refuse }
 }
 
+// runImage returns the image a run of r executes in, and its pull credential, without changing r:
+// the run's own image, else its project's, else this server's default. pinImage pins what it
+// returns onto a run being submitted, and the approval gate asks it whether a plan runs in an image
+// at all, a pull request's pre-check included, which is never pinned. err says the project r names
+// could not be read, and image and pull are then what the run and the default alone give.
+func (d *Dispatcher) runImage(ctx context.Context, r *run.Run) (image, pull string, err error) {
+	image, pull = r.Image, r.PullCredentialID
+	if image == "" && r.ProjectID != "" && d.projects != nil {
+		p, gerr := d.projects.Get(ctx, r.ProjectID)
+		switch {
+		case gerr != nil:
+			err = fmt.Errorf("project %s: %w", r.ProjectID, gerr)
+		case p.Image != "":
+			image, pull = p.Image, p.PullCredentialID
+		}
+	}
+	if image == "" {
+		image = d.defaultImage
+	}
+	return image, pull, err
+}
+
 // pinImage resolves the image r will execute in when it is submitted, and pins it onto r: the run's
 // own image, which a template launch has already set from the template, then its project's, then this
 // server's default. When the registry answers, the tag is pinned to the digest it serves and the run
@@ -56,14 +78,9 @@ func (d *Dispatcher) pinImage(ctx context.Context, r *run.Run) error {
 		_, err := d.pullCredential(ctx, r.PullCredentialID)
 		return err
 	}
-	if r.Image == "" && r.ProjectID != "" && d.projects != nil {
-		if p, err := d.projects.Get(ctx, r.ProjectID); err == nil && p.Image != "" {
-			r.Image, r.PullCredentialID = p.Image, p.PullCredentialID
-		}
-	}
-	if r.Image == "" {
-		r.Image = d.defaultImage
-	}
+	// A project that cannot be read here leaves the server's default, as it always did: submission
+	// has already refused a run naming a project that does not exist.
+	r.Image, r.PullCredentialID, _ = d.runImage(ctx, r)
 	pull, err := d.pullCredential(ctx, r.PullCredentialID)
 	if err != nil {
 		return err

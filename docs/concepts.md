@@ -412,14 +412,29 @@ of it is not exempt either:
   one read covers.
 
 A commit does not hold `.terraform`, so before it reads a plan whose configuration calls registry
-or remote modules, the gate downloads them. It runs the tool's own `terraform get` or `tofu get` in
-a private copy of the configuration, which is removed afterward. A get downloads modules and
-nothing else. It installs no provider and runs no program a configuration names. It runs with the
-run's own credentials, opened the way execution opens them, with the binary or image the plan would
-use, and only where the plan itself may run. A plan routed to a named queue runs on a worker whose
-network the server does not share, so its modules are not downloaded for it. The download is
-bounded at two minutes and at 512 MiB or 50,000 files. One that fails, runs too long, writes too
-much, or cannot run leaves the modules unread, with the reason, so the plan is not exempt.
+or remote modules, the gate downloads them. It runs the tool's own `terraform get` or `tofu get`
+with this server's binary in a private copy of the configuration, which is removed afterward. A
+get downloads modules and nothing else. It installs no provider and runs no program a
+configuration names. It is handed nothing of the run's: no credential, no credential file, no
+variable, and no container image. Of the server's own environment it keeps only `PATH`, the proxy
+variables `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` in either case, `SSL_CERT_FILE`, and
+`SSL_CERT_DIR`, and its `HOME` is an empty directory of its own, so no CLI configuration, token, or
+key the server holds reaches it. It reaches the module sources anyone on the server's network
+reaches, such as the public registries and public repositories, and nothing a credential opens.
+So a plan whose modules need a credential or the server's own environment to download, such as a
+module in a private registry or a private repository, is not read at the gate: it stays
+unclassified and is held, unless its modules are vendored into the configuration and called by a
+local path.
+
+The download runs only where the plan itself may run. A plan routed to a named queue runs on a
+worker whose network the server does not share, so its modules are not downloaded for it. A plan
+that runs in a container image, its own, its project's, or the server's `--default-image`, is not
+downloaded either, since the gate starts no image before a person approves and the host's get is
+not the image's. A pull request's pre-check resolves the image the same way, so it gets the gate's
+answer. Nothing is downloaded for a run an agent asked for, which waits for a person whatever its
+scan finds. The download is bounded at two minutes and at 512 MiB or 50,000 files. One that fails,
+runs too long, writes too much, or cannot run leaves the modules unread, with the reason, so the
+plan is not exempt.
 
 The gate then reads each module where the get installed it, which `.terraform/modules/modules.json`
 names, and only when that copy is the one the run's own `init` keeps: the same source, and for a
@@ -446,7 +461,13 @@ the gate reads the current modules. The kept copies live under the run-files dir
 Only a dry run whose input was read in full and showed none of these keeps the exemption, and that
 is true whichever way it arrives: from a person, a schedule, a webhook, a template, or a pull
 request. An agent's dry run, through MCP or the API, waits for a person under the built-in hold
-whatever the scan finds, and the scan is recorded on it as evidence.
+whatever the scan finds, and the scan is recorded on it as evidence. Nothing is fetched or
+installed for it before a person approves: the gate downloads no module for it, and its project's
+Ansible requirements are installed only by the sync of the claimed run, as for every run. The
+gate's refresh of the project and the commit pin a held run gets move the checkout and install
+nothing. A path on this server that an agent's run names and the gate cannot read is recorded
+with one reason, whether it is missing or unreadable, so the record does not say which paths
+exist.
 
 The run records each scan as `dry_run_scans`: the scanner and its version, the files it read, what
 it found, what it could not read, and the classification, `change_free`, `not_change_free`, or
@@ -500,13 +521,16 @@ that come up most:
 - A tool a plugin or the SDK added. Its dry run is never exempt, since nothing scans it, so a rule
   that holds the tool holds its dry runs too. Narrow the rule so it leaves the tool out, or let
   those dry runs wait.
-- A registry or remote module. The gate downloads it before it reads the plan, so a hold here
-  means the download did not complete, and the hold says why. To keep the exemption, make the
-  module reachable with the run's own credentials from where the plan runs, such as an `env`
-  credential carrying `TF_TOKEN_<host>` or `TF_CLI_CONFIG_FILE` for a private registry, keep it
-  within the download's bounds, or vendor it into the repository and call it by a local path. A
-  plan routed to a named queue is not downloaded for, so its modules have to be vendored. Otherwise
-  drop `exclude_dry_run`.
+- A registry or remote module. The gate downloads it before it reads the plan, with no credential
+  and none of the server's own environment but its search path, proxies, and certificate
+  locations, so a hold here means the download did not complete or did not run, and the hold says
+  why. A module that needs a credential or the server's own environment to download, such as one
+  in a private registry or a private repository, is not read at the gate, so the plan stays
+  unclassified and is held. To keep the exemption, vendor the module into the repository and call
+  it by a local path, or keep a public module within the download's bounds. A plan routed to a
+  named queue is not downloaded for, so its modules have to be vendored. A plan that runs in a
+  container image is not downloaded for either: vendor its modules, or run the plan on the host
+  with no default image. Otherwise drop `exclude_dry_run`.
 
 The apply that a plan proposes is pinned to the commit the plan was read from, and it inherits the
 plan's requester. So an approval releases the code the approver actually saw: if the project's branch

@@ -189,9 +189,7 @@ settings key the kind does not read, so a misspelling fails when the credential 
 </tbody>
 </table>
 <p>The AWS settings: <code>role_arn</code> is the role to assume in any partition. <code>session_name</code> names the session in
-CloudTrail and defaults to <code>switchtender-</code> followed by the run id, <code>switchtender-gate-</code> followed by
-the run id for the approval gate's module download, and <code>switchtender-review-</code> followed by the pull
-request number for a review's pre-check, which no run exists for. <code>session_duration</code> is the session
+CloudTrail and defaults to <code>switchtender-</code> followed by the run id. <code>session_duration</code> is the session
 length in seconds from 900 to 43200 and applies to the exchange delivery. <code>sts_endpoint</code> overrides the
 STS endpoint, for a FIPS, GovCloud, China, or VPC endpoint. With the exchange delivery SwitchTender sends
 the token there itself. With the file delivery the tool makes the exchange, and the setting reaches it
@@ -279,15 +277,15 @@ not apply, so a policy condition never meets a missing claim.</p>
 </tr>
 <tr>
 <td><code>run_id</code></td>
-<td>The run the token was minted for, empty for a review's pre-check, which no run exists for.</td>
+<td>The run the token was minted for.</td>
 </tr>
 <tr>
 <td><code>purpose</code></td>
-<td>Why the token was minted: <code>run</code> for a run executing, <code>gate_download</code> for the module download the approval gate runs with the run's credentials before it records the run, or <code>review_precheck</code> for the module download a pull request review runs before it plans.</td>
+<td>Why the token was minted: always <code>run</code>, for a run executing.</td>
 </tr>
 <tr>
 <td><code>pull_request</code></td>
-<td>The pull or merge request number a review's plan or pre-check is for, empty otherwise.</td>
+<td>The pull or merge request number a review's plan is for, empty otherwise.</td>
 </tr>
 <tr>
 <td><code>parent_run_id</code></td>
@@ -351,14 +349,11 @@ not apply, so a policy condition never meets a missing claim.</p>
 </tr>
 </tbody>
 </table>
-<p>A token can be minted before a run exists. The approval gate downloads the modules a Terraform or
-OpenTofu plan calls with the run's own credentials before it records the run, and a pull request
-review does the same before it plans, to learn whether the plan is safe to run at all. The gate's
-token carries <code>purpose</code> <code>gate_download</code> and the id the run will be recorded under, so a run id with
-no run behind it, because the gate refused the run, says why. A review's pre-check carries <code>purpose</code>
-<code>review_precheck</code>, names no run, and names the pull request in <code>pull_request</code> and the commit it read
-in <code>commit_sha</code>. Both carry the subject the run itself would, so a trust policy grants the download
-exactly the access the run would have.</p>
+<p>A token is minted only for a run executing, never before. The approval gate downloads the modules
+a Terraform or OpenTofu plan calls before it records the run, and a pull request review does the
+same before it plans, but neither opens the run's credentials, so neither mints a token. No token
+exists for a run the gate refuses, and none for a held run until a person releases it and it
+executes.</p>
 <p>A shard or a pipeline step reads <code>launcher_type</code>, the actor, and the approval from the run that was
 launched, since that run's requester and that run's approval are what released it. <code>approved</code> is true
 only when the decision was recorded in the audit chain and bound to the run's spec, and execution has

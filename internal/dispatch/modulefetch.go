@@ -13,14 +13,13 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
-	"github.com/kordloom/switchtender/internal/federation"
+	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/runfiles"
@@ -87,11 +86,17 @@ func WithModuleFetchLimits(timeout time.Duration, maxBytes int64) Option {
 // planFetcher returns what downloads the modules of r's configuration for the gate, or why nothing
 // can, worded as the reason a module stays unread.
 //
-// The download runs where the plan itself runs and nowhere else: this server's runner, for a plan
-// this server executes. A plan routed to a worker runs with the worker's network, which this server
-// does not share, so its modules are not downloaded here, where the download would reach what the
-// plan could not.
+// Nothing is downloaded for a run an agent asked for. The built-in agent hold decides on such a run
+// whatever its scan finds, so a download buys the decision nothing, and anything fetched for it
+// before a person approves would be work done on an agent's word alone. Otherwise the download runs
+// where the plan itself runs and nowhere else: this server's runner, for a plan this server
+// executes. A plan routed to a worker runs with the worker's network, which this server does not
+// share, so its modules are not downloaded here, where the download would reach what the plan could
+// not. A plan that runs in a container image is left to imageBarsDownload.
 func (d *Dispatcher) planFetcher(r *run.Run) (roundhouse.ModuleFetcher, string) {
+	if policy.AgentRequested(r) {
+		return nil, agentNotDownloaded
+	}
 	fetcher, ok := d.runner.(roundhouse.ModuleFetcher)
 	switch {
 	case !ok:
@@ -100,35 +105,67 @@ func (d *Dispatcher) planFetcher(r *run.Run) (roundhouse.ModuleFetcher, string) 
 		return nil, fmt.Sprintf("not downloaded, since the plan runs on a worker for queue %q and "+
 			"the gate downloads modules only where the plan itself runs", r.Queue)
 	}
+	if why := d.imageBarsDownload(r); why != "" {
+		return nil, why
+	}
 	return fetcher, ""
 }
 
+// agentNotDownloaded is why the registry and remote modules of a run an agent asked for stay
+// unread.
+const agentNotDownloaded = "not downloaded, since an agent asked for this run and nothing is " +
+	"fetched for it before a person approves"
+
+// Why the modules of a plan that runs, or may run, in a container image stay unread. Neither names
+// the image, since a scan's reasons reach a pull request's refusal comment.
+const (
+	// imageNotDownloaded is why for a plan that runs in a container image.
+	imageNotDownloaded = "not downloaded, since the plan runs in a container image and the gate " +
+		"downloads modules only for a plan that runs on this server's host"
+	// imageUnknownNotDownloaded is why for a plan whose project could not be read to learn whether
+	// it does.
+	imageUnknownNotDownloaded = "not downloaded, since the gate could not read the project to " +
+		"learn whether the plan runs in a container image"
+)
+
+// imageBarsDownload says why the gate downloads nothing for r because of the container image r
+// runs in, and is empty when nothing bars it. The gate starts no image before a person approves,
+// and a get with this server's own binary is not the get a plan in an image runs, so a plan that
+// runs in one is not downloaded and stays unclassified. The image is resolved by runImage, the way
+// pinImage resolves it, so a pull request's pre-check, which is never pinned, gets the gate's
+// answer: the run's own image, else its project's, else the server's default. A project that
+// cannot be read to say which is not downloaded either.
+func (d *Dispatcher) imageBarsDownload(r *run.Run) string {
+	image, _, err := d.runImage(context.Background(), r)
+	switch {
+	case err != nil:
+		return imageUnknownNotDownloaded
+	case image != "":
+		return imageNotDownloaded
+	}
+	return ""
+}
+
 // scanPlan reads the Terraform or OpenTofu configuration a dry run of r plans, the way the gate
-// reads it, and downloads the registry and remote modules it calls first when that is what stands
-// between the plan and a classification.
+// reads it and a pull request review's pre-check asks it, and downloads the registry and remote
+// modules it calls first when that is what stands between the plan and a classification.
 //
 // A fresh commit holds no downloaded modules, so without the download almost every configuration
-// calling a registry module stayed unclassified. The download is the tool's own get, run in a
-// private copy of what the scan read, with the credentials, network, binary, and image the plan
-// itself would use. It installs modules and nothing else: no provider is installed and no program a
-// configuration names runs. A download that fails, runs too long, writes too much, or cannot run
-// leaves the plan unclassified, with the reason in the record.
+// calling a registry module stayed unclassified. The download is the tool's own get, started with
+// this server's binary in a private copy of what the scan read, and handed nothing of the run's: no
+// credential, no credential file, and no image. Of the server's own environment it keeps only the
+// search path, the proxy settings, and where the trusted certificates are, with a home directory
+// of its own, so it reaches the module sources anyone on this network reaches and nothing a
+// credential opens. It installs modules and nothing else: no provider is installed and no program
+// a configuration names runs. Nothing is downloaded for a run an agent asked for, a plan that runs
+// in a container image, or one that runs on a worker. A download that fails, runs too long, writes
+// too much, or cannot run, and a module only a credential reaches, leaves the plan unclassified,
+// with the reason in the record.
 func (d *Dispatcher) scanPlan(r *run.Run, checkouts CheckoutReader) run.DryRunScan {
-	return d.scanPlanFor(r, checkouts, federation.PurposeGateDownload)
-}
-
-// precheckPlan is scanPlan for a pull request review's pre-check, which asks before any run exists,
-// so a federated token the download mints says so rather than naming a run.
-func (d *Dispatcher) precheckPlan(r *run.Run, checkouts CheckoutReader) run.DryRunScan {
-	return d.scanPlanFor(r, checkouts, federation.PurposeReviewPrecheck)
-}
-
-// scanPlanFor is scanPlan with the purpose a federated token minted for the download names.
-func (d *Dispatcher) scanPlanFor(r *run.Run, checkouts CheckoutReader, purpose string) run.DryRunScan {
 	fetcher, why := d.planFetcher(r)
 	opts := tfscan.Options{Tool: r.Tool, NotDownloaded: why}
 	if r.ProjectID == "" {
-		return d.scanLocalPlan(r, fetcher, opts, purpose)
+		return d.scanLocalPlan(r, fetcher, opts)
 	}
 	if checkouts == nil {
 		return unreadConfiguration(r, noCheckout)
@@ -159,15 +196,14 @@ func (d *Dispatcher) scanPlanFor(r *run.Run, checkouts CheckoutReader, purpose s
 		return out
 	}
 	opts.NotDownloaded = ""
-	return d.fetchAndScan(r, fetcher, staged, dir, opts, out, purpose)
+	return d.fetchAndScan(r, fetcher, staged, dir, opts, out)
 }
 
 // scanLocalPlan is scanPlan for a configuration named by a working directory on this server.
-func (d *Dispatcher) scanLocalPlan(r *run.Run, fetcher roundhouse.ModuleFetcher, opts tfscan.Options,
-	purpose string) run.DryRunScan {
+func (d *Dispatcher) scanLocalPlan(r *run.Run, fetcher roundhouse.ModuleFetcher, opts tfscan.Options) run.DryRunScan {
 	root, _, err := openLocal(r.Command, false)
 	if err != nil {
-		return unreadConfiguration(r, unreadWhy(err, "not on this server"))
+		return unreadConfiguration(r, localUnread(r, err))
 	}
 	defer func() { _ = root.Close() }()
 	opts.Place = "the working directory"
@@ -176,8 +212,7 @@ func (d *Dispatcher) scanLocalPlan(r *run.Run, fetcher roundhouse.ModuleFetcher,
 		return out
 	}
 	opts.NotDownloaded = ""
-	return d.fetchAndScan(r, fetcher, d.stagePlan(r, root.FS(), ".", out.Inputs), ".", opts, out,
-		purpose)
+	return d.fetchAndScan(r, fetcher, d.stagePlan(r, root.FS(), ".", out.Inputs), ".", opts, out)
 }
 
 // fetchHelps reports whether downloading a configuration's modules could change a scan's answer:
@@ -260,7 +295,7 @@ func (s *stagedPlan) remove() {
 // staged copy is always removed. pre is the scan of the configuration before the download, whose
 // source the result keeps.
 func (d *Dispatcher) fetchAndScan(r *run.Run, fetcher roundhouse.ModuleFetcher, staged *stagedPlan, dir string,
-	opts tfscan.Options, pre run.DryRunScan, purpose string) run.DryRunScan {
+	opts tfscan.Options, pre run.DryRunScan) run.DryRunScan {
 	defer staged.remove()
 	if staged.err != nil {
 		reason := "the gate could not copy the configuration to download its modules: " +
@@ -268,12 +303,12 @@ func (d *Dispatcher) fetchAndScan(r *run.Run, fetcher roundhouse.ModuleFetcher, 
 		pre.Fetch = &run.ModuleFetch{Command: getCommand(r.Tool), ExitStatus: -1, Error: reason}
 		return pre
 	}
-	key := d.planScanKey(r, dir, staged.digest)
+	key := planScanKey(r, dir, staged.digest)
 	if cached, ok := d.planScans.get(key); ok {
 		cached.Source = pre.Source
 		return cached
 	}
-	fetch := d.runFetch(r, fetcher, staged, dir, purpose)
+	fetch := d.runFetch(r, fetcher, staged, dir)
 	if fetch.Fetched() {
 		fetch = d.pinFetched(r, fetch, filepath.Join(staged.tree, filepath.FromSlash(dir),
 			modulesDataDir, "modules"))
@@ -319,51 +354,25 @@ func (d *Dispatcher) pinFetched(r *run.Run, fetch *run.ModuleFetch, modules stri
 	return &pinned
 }
 
-// runFetch runs the download for a staged configuration and reports how it went. It opens the run's
-// credentials for the download alone, the way execution opens them, and removes them and revokes
-// anything they minted once it returns.
+// runFetch runs the gate's download for a staged configuration and reports how it went. It opens
+// nothing of the run's: no credential, no credential file, and no image. The get is this server's
+// own binary, started from the minimal environment the runner keeps for it, with a home directory
+// inside the staged copy's private directory, so it reaches the module sources anyone on this
+// network reaches and nothing more.
 func (d *Dispatcher) runFetch(r *run.Run, fetcher roundhouse.ModuleFetcher, staged *stagedPlan,
-	dir, purpose string) *run.ModuleFetch {
-	command := getCommand(r.Tool)
-	fail := func(mask *masker, format string, args ...any) *run.ModuleFetch {
-		reason := redactFetchText(mask, fmt.Sprintf(format, args...))
-		d.log.Warn("dispatch: the gate could not download modules: "+reason,
-			zap.String("run_id", r.ID))
-		return &run.ModuleFetch{Command: command, ExitStatus: -1, Error: reason}
-	}
-	// Preparing the image and opening the credentials fall under the same bound as the download, so
-	// a credential source that never answers cannot hold up a submission either.
-	ctx, cancel := context.WithTimeoutCause(context.Background(), d.moduleFetchTimeout,
-		errFetchTimeout)
-	defer cancel()
-	ctx = withMintPurpose(ctx, purpose)
-
-	spec := roundhouse.Spec{Tool: r.Tool, Command: dir, Dir: staged.tree, DryRun: true}
-	imageCleanup, err := d.fetchImage(ctx, r, &spec)
-	defer imageCleanup()
-	if err != nil {
-		return fail(nil, "the gate could not prepare the image the plan runs in for its %s: %v",
-			command, err)
-	}
-	materialized, secrets, err := d.materializeCredentials(ctx, r, &spec)
-	credCleanup := sync.OnceFunc(materialized)
-	defer credCleanup()
-	mask := &masker{}
-	mask.set(append(secrets, registrySecrets(&spec)...))
-	if err != nil {
-		return fail(mask, "the gate could not open the run's credentials for its %s: %v", command,
-			err)
-	}
+	dir string) *run.ModuleFetch {
+	spec := roundhouse.Spec{Tool: r.Tool, Command: dir, Dir: staged.tree, DryRun: true,
+		MinimalEnv: true, RunDir: staged.dir.Path()}
 	workdir := filepath.Join(staged.tree, filepath.FromSlash(dir))
-	return d.fetchBounded(ctx, r.ID, "the gate's", fetcher, spec, workdir, staged.dir.Path(), mask,
-		nil)
+	return d.fetchBounded(context.Background(), r.ID, "the gate's", fetcher, spec, workdir,
+		staged.dir.Path(), nil, nil)
 }
 
 // fetchBounded runs fetcher's get for spec in workdir within the dispatcher's time and size bounds,
 // and reports how it went, naming the get as whose it is, such as "the gate's". spec already
-// carries the credentials the get runs with, and mask their values, so nothing the get prints
-// reaches a record unmasked. measure is the directory the size bound weighs. The get's output also
-// goes to out when out is not nil.
+// carries whatever credentials the get runs with, none for the gate's, and mask their values, nil
+// when there are none, so nothing the get prints reaches a record unmasked. measure is the
+// directory the size bound weighs. The get's output also goes to out when out is not nil.
 //
 // The download writes where the scan reads and where the size bound looks, whatever the environment
 // would otherwise say, and it never stops to ask anything. The data directory is named relative to
@@ -421,22 +430,6 @@ func (d *Dispatcher) fetchBounded(ctx context.Context, runID, whose string, fetc
 				res.ExitCode, fetchErrorLine(output.String())))}
 	}
 	return &run.ModuleFetch{Command: command, ExitStatus: 0}
-}
-
-// fetchImage puts on spec the image a run of r executes in, resolved the way execution resolves it,
-// with its pull login: the image pinned onto the run when it was submitted, which already took its
-// project's or the server's default when the run named none, else this executor's own default. It
-// returns a cleanup for the login, always safe to call.
-func (d *Dispatcher) fetchImage(ctx context.Context, r *run.Run, spec *roundhouse.Spec) (func(), error) {
-	image, pull := r.Image, r.PullCredentialID
-	if image == "" {
-		image, pull = d.defaultImage, ""
-	}
-	spec.Image = image
-	if image == "" {
-		return func() {}, nil
-	}
-	return d.resolvePullCredential(ctx, pull, spec)
 }
 
 // watchFetchSize measures the directory a download writes into until ctx ends, and stops the
@@ -513,13 +506,10 @@ func getCommand(tool string) string {
 }
 
 // planScanKey is what a scan a download fed is reused under: everything that decides what the
-// download installs. That is the files the scan read, the tool, where the plan runs, and the
-// credentials it downloads with.
-func (d *Dispatcher) planScanKey(r *run.Run, dir, digest string) string {
-	creds := append([]string(nil), d.effectiveCredentialIDs(context.Background(), r)...)
-	sort.Strings(creds)
-	parts := []string{run.NormalizeTool(r.Tool), r.ProjectID, path.Clean(dir), r.Queue, r.Image,
-		r.PullCredentialID, strings.Join(creds, ","), digest}
+// download installs. That is the files the scan read, the tool, and where the plan runs. The
+// download is handed nothing of the run's, so nothing else of the run's decides it.
+func planScanKey(r *run.Run, dir, digest string) string {
+	parts := []string{run.NormalizeTool(r.Tool), r.ProjectID, path.Clean(dir), r.Queue, digest}
 	if r.ProjectID == "" {
 		parts = append(parts, r.Command)
 	}

@@ -72,23 +72,6 @@ func (d *Dispatcher) checkFederated(c *credential.Credential,
 	return cfg, nil
 }
 
-// mintPurposeKey is the context key carrying why a federated token is being minted.
-type mintPurposeKey struct{}
-
-// withMintPurpose returns ctx saying a token minted under it is for purpose.
-func withMintPurpose(ctx context.Context, purpose string) context.Context {
-	return context.WithValue(ctx, mintPurposeKey{}, purpose)
-}
-
-// mintPurposeOf returns why a token minted under ctx is being minted: a run executing, unless the
-// gate or a review's pre-check said otherwise.
-func mintPurposeOf(ctx context.Context) string {
-	if p, ok := ctx.Value(mintPurposeKey{}).(string); ok && p != "" {
-		return p
-	}
-	return federation.PurposeRun
-}
-
 // deliverFederated mints the run's identity token for c and returns what it contributes to the run,
 // writing any file into dir.
 func (d *Dispatcher) deliverFederated(ctx context.Context, r *run.Run, c *credential.Credential,
@@ -110,7 +93,7 @@ func (d *Dispatcher) deliverFederated(ctx context.Context, r *run.Run, c *creden
 func (d *Dispatcher) runClaims(ctx context.Context, r *run.Run, credID string, dryRun bool) federation.Claims {
 	root := d.launchedRun(ctx, r)
 	c := federation.Claims{
-		RunID: r.ID, Purpose: mintPurposeOf(ctx), PullRequest: r.Labels[run.LabelPullRequest],
+		RunID: r.ID, Purpose: federation.PurposeRun, PullRequest: r.Labels[run.LabelPullRequest],
 		OrgID: r.OrgID, ProjectID: r.ProjectID, TemplateID: r.TemplateID,
 		CredentialID: credID, Tool: run.NormalizeTool(r.Tool), Source: root.Source,
 		CommitSHA: r.CommitSHA, LauncherType: launcherType(r, root),
@@ -122,14 +105,6 @@ func (d *Dispatcher) runClaims(ctx context.Context, r *run.Run, credID string, d
 	}
 	if dryRun {
 		c.RunType = federation.RunTypeDryRun
-	}
-	// A review's pre-check asks before any run exists, so its token names no run. It names the pull
-	// request and the commit the pre-check read, which is what it was for.
-	if c.Purpose == federation.PurposeReviewPrecheck {
-		c.RunID = ""
-		if c.CommitSHA == "" {
-			c.CommitSHA = r.PinnedCommit
-		}
 	}
 	// The digest is stamped only by an approval decision that the chain recorded, and execution has
 	// already refused a run whose spec moved since, so its presence is what approved means here.
