@@ -171,6 +171,78 @@ func TestYAMLValue(t *testing.T) {
 	}
 }
 
+// TestYAMLWordLen pins how far a name: value value written inside a command line runs and whether
+// its quotes stay around the mask.
+func TestYAMLWordLen(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// In is the text from where the value starts.
+		In string
+		// WantLen is how many bytes the value spans.
+		WantLen int
+		// WantQuotes is whether the quotes stay around the mask.
+		WantQuotes bool
+	}{{ // Test 0: A bare word ends at a space, and the command after it is not the value.
+		In: "hunter2 --limit all --tags destroy", WantLen: 7,
+	}, { // Test 1: A redirect after the word.
+		In: "x > /etc/passwd", WantLen: 1,
+	}, { // Test 2: A separator ends the word.
+		In: "abc123;deploy", WantLen: 6,
+	}, { // Test 3: A quoted word ends at its quote when a space follows.
+		In: `"a b" --all`, WantLen: 5,
+	}, { // Test 4: A quoted scalar in a flow mapping keeps its quotes.
+		In: `"hunter2","user":"bob"}`, WantLen: 9, WantQuotes: true,
+	}, { // Test 5: Text joined onto a quoted run is part of the word.
+		In: `'a'b c`, WantLen: 4,
+	}, { // Test 6: An escaped space is part of the word.
+		In: `x\ y z`, WantLen: 4,
+	}, { // Test 7: A word that runs to the end of the text.
+		In: "hunter2", WantLen: 7,
+	}, { // Test 8: A pipe right after the colon leaves no word.
+		In: "| tee x", WantLen: 0,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			n, quotes := yamlWordLen(test.In, "", 0)
+			if diff := cmp.Diff(test.WantLen, n); diff != "" {
+				t.Errorf("yamlWordLen(%q) length mismatch (-want +got):\n%s", test.In, diff)
+			}
+			if diff := cmp.Diff(test.WantQuotes, quotes); diff != "" {
+				t.Errorf("yamlWordLen(%q) quotes mismatch (-want +got):\n%s", test.In, diff)
+			}
+		})
+	}
+}
+
+// TestYAMLWordDecode pins the value a program receives from a name: value value read as one word of
+// a command line.
+func TestYAMLWordDecode(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// In is the value as written.
+		In string
+		// WantResult is what a program receives.
+		WantResult string
+	}{
+		{In: "hunter2", WantResult: "hunter2"},             // Test 0: A bare word.
+		{In: `"a\"b\/c"`, WantResult: `a"b/c`},             // Test 1: A JSON string.
+		{In: `'it''s'`, WantResult: "it's"},                // Test 2: A YAML single-quoted scalar.
+		{In: `x\ y`, WantResult: "x y"},                    // Test 3: An escaped space.
+		{In: `'a'b`, WantResult: "ab"},                     // Test 4: Joined runs, read by the shell.
+		{In: `$'p\x40ss'`, WantResult: "p@ss"},             // Test 5: ANSI-C quoting.
+		{In: `"unterminated`, WantResult: `"unterminated`}, // Test 6: An unclosed quote.
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			if diff := cmp.Diff(test.WantResult, yamlWordDecode(test.In, 0)); diff != "" {
+				t.Errorf("yamlWordDecode(%q) mismatch (-want +got):\n%s", test.In, diff)
+			}
+		})
+	}
+}
+
 // TestYAMLValueDecode pins the value a program receives from a name: value value as written.
 func TestYAMLValueDecode(t *testing.T) {
 	t.Parallel()

