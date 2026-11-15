@@ -518,6 +518,12 @@ func filterHosts(ctx context.Context, filter *inventory.HostFilter, inputs []*co
 // for the name rule to catch, so a constructed inventory on an older release is refused.
 const constructedFloor = "2.19"
 
+// ConstructedSupported reports whether a constructed inventory can be composed with an
+// ansible-core version, which is constructedFloor or later.
+func ConstructedSupported(version string) bool {
+	return atLeastRelease(version, constructedFloor)
+}
+
 // composeConstructed runs the constructed plugin over every input at once, the way AWX runs a
 // constructed inventory update, and applies the limit after the groups are built so the limit may
 // name a group the options construct. Every input read is recorded as drawn from. A constructed
@@ -558,7 +564,7 @@ func (d *Dispatcher) composeConstructed(ctx context.Context, inv *inventory.Inve
 	if err != nil {
 		return nil, nil, "", err
 	}
-	if !atLeastRelease(version, constructedFloor) {
+	if !ConstructedSupported(version) {
 		return nil, nil, "", fmt.Errorf("%w: constructed inventory %s needs ansible-core %s or "+
 			"later, and this server has %s", inventory.ErrResolve, quoted(inv.Name), constructedFloor,
 			quoted(version))

@@ -391,7 +391,7 @@ func TestConstructedWithAnsible(t *testing.T) {
 	}
 	d := New(run.NewMemStore(), roundhouse.NewAnsibleRunner(), zap.NewNop(), WithInventories(invs))
 	t.Cleanup(d.Close)
-	if version := realAnsibleCore(t); !atLeastRelease(version, constructedFloor) {
+	if version := realAnsibleCore(t); !ConstructedSupported(version) {
 		_, err := d.PreviewInventory(ctx, &inventory.Inventory{
 			ID: "inv_k", Kind: inventory.KindConstructed, InputIDs: []string{"inv_ini", "inv_yaml"},
 		})
@@ -664,7 +664,7 @@ func TestConstructedInputNeverRunsOnTheServer(t *testing.T) {
 				WithInventories(invs))
 			t.Cleanup(d.Close)
 			want := test.Want
-			if !atLeastRelease(realAnsibleCore(t), constructedFloor) {
+			if !ConstructedSupported(realAnsibleCore(t)) {
 				want = inventory.ErrResolve
 			}
 			_, err := d.PreviewInventory(ctx, &inventory.Inventory{ID: "inv_k", Name: "view",
@@ -687,7 +687,7 @@ func TestConstructedInputNeverRunsOnTheServer(t *testing.T) {
 func TestConstructedHandsThePlayPlainStrings(t *testing.T) {
 	t.Parallel()
 	requireAnsibleInventory(t)
-	if version := realAnsibleCore(t); !atLeastRelease(version, constructedFloor) {
+	if version := realAnsibleCore(t); !ConstructedSupported(version) {
 		t.Skipf("ansible-core %s is below the constructed floor, which another test pins", version)
 	}
 	ctx := context.Background()
