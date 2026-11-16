@@ -122,7 +122,7 @@ homebrew_casks:
       # plain .Env is the only portable form.
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://switchtender.com"
-    description: "One gate for every change to production, including the ones AI agents make"
+    description: "Self-hosted automation server: approve exactly what runs, prove it to anyone"
 
 # Linux packages: deb, rpm, and apk built with nfpm. No secrets required.
 nfpms:
@@ -130,7 +130,7 @@ nfpms:
     package_name: switchtender
     maintainer: "SwitchTender <noreply@switchtender.com>"
     homepage: "https://switchtender.com"
-    description: "One gate for every change to production, including the ones AI agents make. Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go run behind one identity, policy, approval, and evidence trail."
+    description: "The self-hosted automation server. Approve exactly what runs. Prove it to anyone. Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, with pipelines, drift detection, and a live host-by-task matrix. AI agents wait for a person by default and can never approve. Every finished run leaves a signed receipt anyone can verify offline."
     license: "BUSL-1.1"
     formats:
       - deb
