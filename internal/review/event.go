@@ -40,6 +40,14 @@ type Event struct {
 	Fork bool
 	// URL is the pull request's web address, for display.
 	URL string
+	// SenderID is the forge's numeric id of the account that sent the event, the one that opened
+	// the pull request or pushed to it: GitHub's sender, GitLab's user. Zero when the forge did not
+	// say. The login is never read.
+	SenderID int64
+	// SenderBot reports that the forge marks the sender as a bot, which is how GitHub marks an app
+	// acting as itself. GitLab says so only through its users API, so on GitLab it is read
+	// separately.
+	SenderBot bool
 }
 
 // shaPattern matches a full SHA-1 or SHA-256 commit id.
@@ -80,6 +88,13 @@ type githubRef struct {
 type githubPayload struct {
 	// Action is what happened to the pull request.
 	Action string `json:"action"`
+	// Sender is the account that caused the event.
+	Sender struct {
+		// ID is the account's numeric id.
+		ID int64 `json:"id"`
+		// Type is User, Bot, or Organization.
+		Type string `json:"type"`
+	} `json:"sender"`
 	// Number is the pull request number.
 	Number int `json:"number"`
 	// PullRequest is the pull request itself.
@@ -123,7 +138,8 @@ func ParseGitHub(eventName string, body []byte) (*Event, error) {
 	return &Event{
 		Provider: trigger.ProviderGitHub, Action: p.Action, Plannable: githubPlanActions[p.Action],
 		Repository: pr.Base.Repo.FullName, Number: p.Number, HeadSHA: sha, HeadBranch: pr.Head.Ref,
-		Fork: fork, URL: pr.HTMLURL,
+		Fork: fork, URL: pr.HTMLURL, SenderID: p.Sender.ID,
+		SenderBot: strings.EqualFold(p.Sender.Type, "Bot"),
 	}, nil
 }
 
@@ -131,6 +147,11 @@ func ParseGitHub(eventName string, body []byte) (*Event, error) {
 type gitlabPayload struct {
 	// ObjectKind is merge_request for a merge request event.
 	ObjectKind string `json:"object_kind"`
+	// User is the account that caused the event.
+	User struct {
+		// ID is the account's numeric id.
+		ID int64 `json:"id"`
+	} `json:"user"`
 	// Project is the target project, the one the hook is configured on.
 	Project struct {
 		// PathWithNamespace is group/project.
@@ -188,7 +209,7 @@ func ParseGitLab(eventName string, body []byte) (*Event, error) {
 		Provider: trigger.ProviderGitLab, Action: attrs.Action, Plannable: plannable,
 		Repository: p.Project.PathWithNamespace, Number: attrs.IID, HeadSHA: sha,
 		HeadBranch: attrs.SourceBranch, Fork: attrs.SourceProjectID != attrs.TargetProjectID,
-		URL: attrs.URL,
+		URL: attrs.URL, SenderID: p.User.ID,
 	}, nil
 }
 

@@ -22,6 +22,7 @@ import (
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
 	"github.com/kordloom/switchtender/internal/trigger"
+	"github.com/kordloom/switchtender/internal/user"
 )
 
 // WithReviewReporting configures how pull request review triggers report back: the server's public
@@ -101,8 +102,9 @@ type reviewHookDeps struct {
 }
 
 // serveReviewHook handles a webhook for a pull request review trigger: it verifies the delivery,
-// reads the pull request event, refuses one from a fork unless the trigger allows forks, and
-// launches the trigger's template as a plan of the pull request's head commit. The plan is a dry
+// reads the pull request event, refuses one from a fork unless the trigger allows forks, refuses
+// one whose sender is not a person linked to a SwitchTender account that may plan the template, and
+// launches the trigger's template as a plan of the pull request's head commit, as that account. The plan is a dry
 // run pinned to that commit and fetched from the ref the base repository publishes it under, so it
 // can change nothing and can run nothing but the code the pull request proposes. Its result is
 // reported back to the pull request in the background.
@@ -167,14 +169,90 @@ func serveReviewHook(w http.ResponseWriter, r *http.Request, tg *trigger.Trigger
 			map[string]string{"trigger": tg.ID, "refused": "pull request from a fork"}, wantsPretty(r))
 		return
 	}
-	launchReviewPlan(w, r, tg, d, ev, t, body)
+	ctx, u, ok := planSender(w, r, tg, d, ev, t, hookPath)
+	if !ok {
+		return
+	}
+	launchReviewPlan(w, r.WithContext(ctx), tg, d, ev, t, body,
+		run.WithActor(u.Username), run.WithActorAccount(u.ID), run.WithAccount(u.Username),
+		run.WithActorType(actorTypePullRequest))
+}
+
+// senderReply is what a pull request is told, once per sender, when its event starts no plan
+// because of who sent it.
+const senderReply = "SwitchTender plans a pull request on its own only when a person whose " +
+	"forge account is linked to a SwitchTender account that may plan this template opens it or " +
+	"pushes to it, so this push was not planned. A linked person who may plan it can start the " +
+	"plan by commenting `/switchtender plan`."
+
+// planSender resolves the SwitchTender account a pull request event's plan runs as: the one the
+// event's sender is linked to, held to exactly what a /switchtender plan comment is held to. A plan
+// executes the pull request's head with the template's credentials, so who proposed the code is
+// what keeps a branch nobody merged from reaching them. A sender the forge marks as a bot, or one
+// that is unlinked or may not plan the template, starts nothing: the refusal is recorded, and the
+// pull request is told once per sender that a linked person can start the plan with a comment, the
+// claim-once reply a refused comment command gets. It writes the answer and returns false when the
+// event starts nothing.
+func planSender(w http.ResponseWriter, r *http.Request, tg *trigger.Trigger, d reviewHookDeps,
+	ev *review.Event, t *template.Template, hookPath string) (context.Context, *user.User, bool) {
+	refuse := func(why string) {
+		if _, ok := recordReviewEntry(w, r, d.audits, d.log, tg, hookPath+"/refused"); !ok {
+			return
+		}
+		d.reviews.ReplyRefusal(tg, &review.CommentEvent{Provider: ev.Provider,
+			Repository: ev.Repository, Number: ev.Number, AuthorID: ev.SenderID}, "sender", senderReply)
+		respondJSON(w, d.log, http.StatusAccepted, map[string]string{"trigger": tg.ID,
+			"pull_request": strconv.Itoa(ev.Number), "refused": why}, wantsPretty(r))
+	}
+	if ev.SenderBot {
+		refuse("the sender is a bot")
+		return nil, nil, false
+	}
+	ctx, u, denied := d.comments.mayPlan(r.Context(), tg, t, ev.Provider, ev.SenderID,
+		actorTypePullRequest)
+	switch {
+	case denied == nil:
+	case denied.err != nil:
+		d.log.Error("server: check a pull request's sender: "+denied.err.Error(),
+			zap.String("trigger_id", tg.ID))
+		respondError(w, d.log, http.StatusInternalServerError,
+			"could not check who sent the pull request event")
+		return nil, nil, false
+	case denied.why == planUnlinked:
+		refuse("the sender is not linked to a SwitchTender account")
+		return nil, nil, false
+	default:
+		refuse("the sender's SwitchTender account may not plan this template")
+		return nil, nil, false
+	}
+	// GitLab marks a bot only through its users API, so a linked sender is read there. An unlinked
+	// one was refused without reading the forge.
+	if ev.Provider == trigger.ProviderGitLab {
+		forge, release, err := d.reviews.Commenter(ctx, tg)
+		defer release()
+		bot := false
+		if err == nil {
+			bot, err = forge.IsBot(ctx, ev.SenderID)
+		}
+		if err != nil {
+			d.log.Warn("server: read a pull request's sender from the forge: " + err.Error())
+			respondError(w, d.log, http.StatusBadGateway,
+				"could not read the pull request's sender from the forge")
+			return nil, nil, false
+		}
+		if bot {
+			refuse("the sender is a bot")
+			return nil, nil, false
+		}
+	}
+	return ctx, u, true
 }
 
 // launchReviewPlan plans the head commit ev names for the pull request it names, the plan a push to
 // the pull request launches and the one a /switchtender plan comment asks for: deduped on the
 // verified body, held to the template's unattended survey, recorded before anything acts, and then
-// pre-checked and launched apart from the request. extra adds to the plan's submit options, such as
-// the account a comment acts as.
+// pre-checked and launched apart from the request. extra adds to the plan's submit options: the
+// account the plan runs as, the linked person who pushed or commented.
 func launchReviewPlan(w http.ResponseWriter, r *http.Request, tg *trigger.Trigger, d reviewHookDeps,
 	ev *review.Event, t *template.Template, body []byte, extra ...run.SubmitOption) {
 	number := strconv.Itoa(ev.Number)
@@ -321,8 +399,6 @@ func reviewPlanOptions(t *template.Template, tg *trigger.Trigger, ev *review.Eve
 		run.WithPinnedCommit(ev.HeadSHA),
 		run.WithIdempotencyKey(key),
 		run.WithSource(review.Source, tg.ID),
-		run.WithActor("trigger "+tg.Name),
-		run.WithActorType("webhook"),
 		run.WithLabels(map[string]string{review.LabelPullRequest: strconv.Itoa(ev.Number)}),
 		func(r *run.Run) { r.Notifications = nil },
 	)

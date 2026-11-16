@@ -9,9 +9,11 @@
 
 A review trigger plans a pull request before it merges and posts the result on the pull request. It
 works with GitHub, GitHub Enterprise Server, GitLab, and self-managed GitLab. When a pull request is
-opened or receives new commits, SwitchTender runs the trigger's template at the pull request's head
-commit in the tool's no-change mode, then writes one comment for that template on the pull request and
-sets a commit status on the head commit. Every later push updates the same comment in place.
+opened or receives new commits from a person whose account is linked to a SwitchTender account that
+may plan the template, SwitchTender runs the trigger's template at the pull request's head commit in
+the tool's no-change mode, as that account, then writes one comment for that template on the pull
+request and sets a commit status on the head commit. Every later push updates the same comment in
+place. See [who a pull request's plan runs as](#who-a-pull-requests-plan-runs-as).
 
 Applying stays in SwitchTender's hands. After the pull request merges, the apply is an ordinary run
 of the template, launched the way it always is, and it goes through the same gate and approval queue
@@ -26,8 +28,8 @@ pull request can approve or release a change.
 A plan faces your approval rules like any other run. There is no built-in exemption, because a plan
 is not free of side effects: a Terraform plan runs provider code and data sources with the
 template's credentials, and an Ansible check runs for real any task that sets `check_mode: false`
-and any command a `pipe` lookup names. So a rule that holds every Terraform run holds the plan of
-every pull request too, and the pull request waits for a person.
+and any lookup plugin that runs a command, such as `pipe` or `lines`. So a rule that holds every
+Terraform run holds the plan of every pull request too, and the pull request waits for a person.
 
 To let plans run unattended, add one line to the rule that holds them:
 
@@ -38,14 +40,13 @@ To let plans run unattended, add one line to the rule that holds them:
 
 `exclude_dry_run: true` leaves dry runs, and so pull request plans, out of that rule. The apply
 after merge is not a dry run and is still held. The line does not change what a plan refuses: a
-playbook that forces real tasks under check mode or runs a `pipe` lookup is still refused on a pull
-request, and so is a Terraform or OpenTofu configuration with an `external` or
+playbook that forces real tasks under check mode or calls a lookup the scan cannot clear is still
+refused on a pull request, and so is a Terraform or OpenTofu configuration with an `external` or
 `aws_lambda_invocation` data source, an `http` data source that writes, or anything the review
 cannot read in full, as described in [plans that are not change
-free](#plans-that-are-not-change-free). A plan of a tool a plugin or the SDK added is refused
-before it runs, since nothing can read what it runs. The scan
-finds the known ways a plan acts, and it does not prove a plan harmless, so the line trusts the
-playbooks and configurations it lets through. See [dry runs and
+free](#plans-that-are-not-change-free). A plan of a tool a plugin or the SDK added is refused before
+it runs, since nothing can read what it runs. The scan does not prove a plan harmless, so the line
+trusts the playbooks and configurations it lets through. See [dry runs and
 `exclude_dry_run`](concepts.md#dry-runs-and-exclude-dry-run) for how the gate decides.
 
 A plan a rule holds is reported as waiting for approval. Its comment names the rule and, when
@@ -66,9 +67,10 @@ The plan is the template's own run with three changes:
 - The template's notification channels are left off. A plan of a proposal is not a change those
   channels were set up to hear about.
 
-The run's source is `review`, its actor is the trigger, and it carries a `pull_request` label with the
-pull request number, so the runs page can filter to one pull request's plans. The plan's run page
-shows the pull request and what it was last told, and says so when a report to it is failing.
+The run's source is `review`, its actor is the linked person whose push or comment started it, and
+it carries a `pull_request` label with the pull request number, so the runs page can filter to one
+pull request's plans. The plan's run page shows the pull request and what it was last told, and says
+so when a report to it is failing.
 
 Nobody answers the template's survey when a pull request is planned, so every question takes its
 default, a secret question's sealed default included, the way a schedule fires the template. A
@@ -147,23 +149,57 @@ from then on. Turn `allow_forks` on only for a template whose credentials a fork
 already have. Even then, remember that a Terraform plan executes provider code and data sources, and an
 `external` data source runs any program the configuration names.
 
+## Who a pull request's plan runs as
+
+A plan executes the pull request's head with the template's credentials, so who proposed the code
+decides whether it runs. A pull request event starts a plan only when the account that sent it, the
+one that opened the pull request or pushed to it, is linked to a SwitchTender account that passes
+the same checks a `/switchtender plan` comment passes: the operator role, and use of the template
+and everything it runs with. The plan runs as that account, recorded with the actor type
+`forge_pull_request`. GitHub names that account in the event's `sender` and GitLab in its `user`.
+
+An event from anyone else starts nothing: an account that is not linked, one linked to an account
+that lacks the role or a grant, an event that names no sender, and a bot. A bot is a GitHub account
+of type Bot, which is how a GitHub App acting as itself appears, or a GitLab bot user, read from
+GitLab's users API for a linked sender. The refusal is recorded on the chain, and the pull request
+gets one reply, once per sender, saying that a linked person who may plan the template can start the
+plan by commenting `/switchtender plan`. That person reads the change first, and the plan runs as
+them.
+
+This check is what keeps a branch nobody merged from the template's credentials. The scan in the
+next section is a second line behind it, and it is not the defense: a scan cannot prove what a
+playbook does, and a check of who proposed the code does not have to.
+
 ## Plans that are not change free
 
 An Ansible plan is `ansible-playbook --check`, and a play, block, task, role, or include that sets
-`check_mode: false` runs that work for real even under `--check`, as does the command a `pipe`
-lookup names, which runs on the controller while a template renders. A Terraform or OpenTofu plan
-runs the program every `external` data source names, invokes every `aws_lambda_invocation` data
-source's function, and sends every `http` data source's request, with the template's credentials.
-Before it plans, the review reads the playbook, or the configuration and every module it calls, at
-the pull request's head, the same way the approval gate does. A playbook that forces real tasks or
-runs a `pipe` lookup is not planned, since its plan would act from a branch nobody merged, and
-neither is a configuration that declares an `external` or `aws_lambda_invocation` data source, or an
-`http` data source whose method is anything but GET or HEAD or that carries a request body, since
-its plan would run that program or send that call. Neither is one that cannot be read in full, such
-as a playbook including a file named only at run time, since what was not read could do the same.
-Nor is a plan of a tool a plugin or the SDK added, whose plan runs whatever the plugin coded and
-which the review cannot read at all. No run is created, the refusal is recorded on the chain, and the pull request gets a comment naming
-what was found, or what could not be read, and an `error` status.
+`check_mode: false` runs that work for real even under `--check`, as does a lookup plugin that runs a
+command, such as `pipe` or `lines`, which runs on the controller while a template renders. A
+Terraform or OpenTofu plan runs the program every `external` data source names, invokes every
+`aws_lambda_invocation` data source's function, and sends every `http` data source's request, with
+the template's credentials. Before it plans, the review reads the playbook, or the configuration and
+every module it calls, at the pull request's head, the same way the approval gate does.
+
+The Ansible scan clears what it knows runs nothing and counts everything else. A playbook is
+planned only when every `lookup`, `query`, and `q` call names, as a quoted literal, one of the
+lookup plugins `vars`, `items`, `list`, `dict`, `indexed_items`, `subelements`, `together`,
+`nested`, or `sequence`, with or without the `ansible.builtin.` prefix, every `with_` loop names one
+of those too, and the words `lookup` and `query` appear nowhere else in what the scan reads, a
+task's name included. The repository must also carry no `library`, `module_utils`, or `*_plugins`
+directory, no `ansible.cfg`, and no requirements file that installs collections, since Ansible loads
+code and settings from each of those without a task naming them. The scan reads the playbook, what
+it imports and includes, and its roles' tasks, handlers, and dependencies. It does not read variable
+files or templates, which is why it is the second line.
+
+A playbook that forces real tasks or fails any of those is not planned, since its plan would act
+from a branch nobody merged, and neither is a configuration that declares an `external` or
+`aws_lambda_invocation` data source, or an `http` data source whose method is anything but GET or
+HEAD or that carries a request body, since its plan would run that program or send that call.
+Neither is one that cannot be read in full, such as a playbook including a file named only at run
+time, since what was not read could do the same. Nor is a plan of a tool a plugin or the SDK added,
+whose plan runs whatever the plugin coded and which the review cannot read at all. No run is
+created, the refusal is recorded on the chain, and the pull request gets a comment naming what was
+found, or what could not be read, and an `error` status.
 
 The pull request's commit does not hold the registry and remote modules its configuration calls, so
 the review downloads them first, the same way the approval gate does. It runs `terraform get` or
@@ -233,7 +269,7 @@ cannot be recorded is refused, the same as a push trigger's fire:
 |---|---|
 | `/hooks/<trigger>/review/<N>/accepted` | A pull request event passed its checks, before the pre-check downloads anything with the template's credentials. |
 | `/hooks/<trigger>/review/<N>/planned` | A plan is about to launch. The plan run carries this entry's receipt. |
-| `/hooks/<trigger>/review/<N>/refused` | A fork's pull request, or one whose plan is not change free, such as a playbook forcing real tasks under check mode or running a `pipe` lookup, or a configuration with an `external`, `aws_lambda_invocation`, or writing `http` data source, was not planned. |
+| `/hooks/<trigger>/review/<N>/refused` | A fork's pull request, one whose sender is not a linked person who may plan the template, or one whose plan is not change free, such as a playbook forcing real tasks under check mode or calling a lookup the scan cannot clear, or a configuration with an `external`, `aws_lambda_invocation`, or writing `http` data source, was not planned. |
 | `/hooks/<trigger>/review/<N>/refused/survey/<questions>` | The template's survey has a required question with no default, so the pull request was not planned. |
 | `/hooks/<trigger>/review/<N>/skipped` | The template's inventory matched no hosts, so the plan was skipped. The entry commits to the trigger, the template, the inventory, and the reason. |
 | `/runs/<run>/outcome/<status>` | The plan run finished, committed like every run's outcome. |
@@ -407,9 +443,13 @@ It happens in two steps, the same way a reconcile is proposed from a drift check
    queue's approve button.
 
 Approving needs the admin role, as it does in the queue, and use of everything the plan runs. An
-operator's `/switchtender apply` proposes the apply and leaves it waiting for an approver. Because
-the pull request's author is the requester, a rule that requires a different approver keeps the
-author from approving their own change, whoever asked for the apply first.
+operator's `/switchtender apply` proposes the apply and leaves it waiting for an approver. Approving
+from a comment also takes two forge accounts, whatever the rules say: the pull request's author
+cannot approve its apply from a comment, since one person's forge token can open a pull request and
+comment on it. The apply stays held for another linked approver's comment, or for an approver in
+SwitchTender. A pull request whose author the forge does not name is approved from no comment.
+Because the pull request's author is the requester, a rule that requires a different approver keeps
+the author from approving their own change in SwitchTender too, whoever asked for the apply first.
 
 ### When a comment does nothing
 
@@ -428,6 +468,7 @@ author from approving their own change, whoever asked for the apply first.
 | The plan failed, was rejected, or has not finished | One reply. |
 | A Terraform or OpenTofu plan kept no plan file | One reply. A plan that found no changes keeps none, and a newer plan of the same configuration replaces an older one's. |
 | The account lacks the role or a grant | One reply. An operator's apply is proposed and left waiting. |
+| The commenter opened the pull request, or the forge does not say who did | The apply stays held, and one reply says so, whatever the rules say. Another linked approver's `/switchtender apply` approves it, or an approver releases it in SwitchTender. |
 | A rule requires a different approver than the pull request's author or the person who asked for the apply | The apply stays held, and one reply says so. Another linked approver's `/switchtender apply` approves it, or an approver releases it in SwitchTender. |
 | A rule requires a reason to approve | The apply stays held. A comment carries no reason, so approve it in SwitchTender. |
 | The plan's apply was already decided, or was decided while the comment was on its way | One reply naming the apply's run. |
@@ -570,8 +611,8 @@ signing secret with `POST /v1/triggers/{id}/rotate-secret` and update the forge'
 - A comment acts on the plan of the trigger its webhook arrived through. When several review
   triggers watch one repository, each acts on its own template's plan, and each answers the comment.
 - Ansible's check mode is only as safe as the playbook. A playbook that sets `check_mode: false` or
-  runs a `pipe` lookup is refused, as described above, but another lookup or plugin that runs code
-  on the controller, or a custom module that claims to support check mode and acts anyway, is not
+  calls a lookup the scan cannot clear is refused, as described above, but a lookup in a variable
+  file or a template, or a module that claims to support check mode and acts anyway, is not
   something the read can see. Review the playbooks a review trigger plans, and do not allow forks on
   one whose playbooks you have not read.
 - A Terraform or OpenTofu plan runs provider code with the template's credentials. Providers are

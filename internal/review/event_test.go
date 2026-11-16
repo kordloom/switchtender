@@ -132,3 +132,53 @@ func TestParseGitLab(t *testing.T) {
 		})
 	}
 }
+
+// TestParseReadsTheSender pins who a pull request event says sent it: GitHub's sender, with its
+// account type, and GitLab's user. A plan starts only for a sender linked to a SwitchTender
+// account, so an event that names nobody is read as sent by nobody.
+func TestParseReadsTheSender(t *testing.T) {
+	t.Parallel()
+	pr := githubBody("synchronize", "acme/infra", headSHA)
+	mr := gitlabBody("update", "ffff", 5, 5, headSHA)
+	withSender := func(body []byte, sender string) []byte {
+		return append(append(append([]byte(nil), body[:len(body)-1]...), ","+sender...), '}')
+	}
+	tests := []struct {
+		Provider      string
+		Event         string
+		Body          []byte
+		WantSenderID  int64
+		WantSenderBot bool
+	}{{ // Test 0: A person pushing to a GitHub pull request.
+		Provider: "github", Event: "pull_request",
+		Body:         withSender(pr, `"sender":{"id":1001,"login":"someone","type":"User"}`),
+		WantSenderID: 1001,
+	}, { // Test 1: A GitHub App's bot account pushing to a pull request.
+		Provider: "github", Event: "pull_request",
+		Body:         withSender(pr, `"sender":{"id":2002,"login":"helper[bot]","type":"Bot"}`),
+		WantSenderID: 2002, WantSenderBot: true,
+	}, { // Test 2: A GitHub event that names no sender is sent by nobody.
+		Provider: "github", Event: "pull_request", Body: pr,
+	}, { // Test 3: A person pushing to a GitLab merge request.
+		Provider: "gitlab", Event: "Merge Request Hook",
+		Body:         withSender(mr, `"user":{"id":3003,"username":"someone"}`),
+		WantSenderID: 3003,
+	}, { // Test 4: A GitLab event that names no user is sent by nobody.
+		Provider: "gitlab", Event: "Merge Request Hook", Body: mr,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			ev, err := Parse(test.Provider, test.Event, test.Body)
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+			if diff := cmp.Diff(test.WantSenderID, ev.SenderID); diff != "" {
+				t.Errorf("SenderID mismatch (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(test.WantSenderBot, ev.SenderBot); diff != "" {
+				t.Errorf("SenderBot mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}

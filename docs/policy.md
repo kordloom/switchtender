@@ -444,7 +444,7 @@ an empty value when the run has none, so a module never meets a missing field.
 | `run.queue` | The worker queue the run is routed to. |
 | `run.project_id` | The git project the run reads from. |
 | `run.dry_run` | Whether the run was asked for as a no-change preview: the tool's dry-run flag, `--check` for Ansible. |
-| `run.dry_run_findings` | For a dry run, why the gate's scan did not find it change free. For Ansible, each play, block, task, role, or include that sets `check_mode` to anything but true, and each play or task that runs a `pipe` lookup, naming the file. For Terraform and OpenTofu, each `external` or `aws_lambda_invocation` data source, and each `http` data source with a write method or a request body, by its address, naming the file and line. For both, whatever the scan could not read. Empty for a dry run read in full that found none of these, for a dry run of a tool nothing scans, and for any other run. |
+| `run.dry_run_findings` | For a dry run, why the gate's scan did not find it change free. For Ansible, each play, block, task, role, or include that sets `check_mode` to anything but true, and each play, task, or role dependency that uses a lookup the scan cannot clear, naming the file, and each plugin or module directory, `ansible.cfg`, or collections requirements file in the project, by its path. For Terraform and OpenTofu, each `external` or `aws_lambda_invocation` data source, and each `http` data source with a write method or a request body, by its address, naming the file and line. For both, whatever the scan could not read. Empty for a dry run read in full that found none of these, for a dry run of a tool nothing scans, and for any other run. |
 | `run.change_free` | Whether the gate reads the run as a dry run that changes nothing: `dry_run` is true, `dry_run_findings` is empty, and the tool is one the gate scans or a built-in one whose dry run runs nothing. A dry run of a tool a plugin or the SDK added is never change free. |
 | `run.kind` | Empty for a plain run, or `split` or `pipeline` for a coordinator. |
 | `run.step_name` | The pipeline step's name, for a step. |
@@ -588,17 +588,25 @@ carrying one is refused at restore.
 
 A dry run is a promise about the tool, not about what it is given. An Ansible dry run is
 `ansible-playbook --check`, and a playbook can set `check_mode: false` on a play, block, task, role,
-or include to run that work for real anyway, and a `pipe` lookup runs its command on the controller
-whenever a template renders, under `--check` too. A Terraform or OpenTofu dry run is `plan`, and a
+or include to run that work for real anyway, and a lookup plugin such as `pipe` or `lines` runs its
+command on the controller whenever a template renders, under `--check` too. A Terraform or OpenTofu dry run is `plan`, and a
 plan reads every data source with the run's credentials: an `external` data source runs the program
 it names, an `aws_lambda_invocation` data source invokes its function, and an `http` data source
 sends its request. The gate reads the playbook, or the configuration and every module it calls,
 before it judges a dry run, and records what it found in `run.dry_run_findings`:
 
 - Each task that forces real work with `check_mode`, by its file.
-- Each `pipe` lookup in a play's `vars` or `environment` or anywhere in a task, written as `lookup`,
-  `query`, or `q`, with or without the `ansible.builtin.` prefix, or as a `with_pipe` loop, by its
-  play or task and file.
+- Each use of a lookup the scan cannot clear, by its play, task, or role dependency and file. The
+  Ansible scan clears rather than catches: a dry run is change free only when every `lookup`,
+  `query`, and `q` call names, as a quoted literal, one of `vars`, `items`, `list`, `dict`,
+  `indexed_items`, `subelements`, `together`, `nested`, or `sequence`, with or without the
+  `ansible.builtin.` prefix, every `with_` loop names one of those too, and the words `lookup` and
+  `query` appear nowhere else in what the scan reads, a task's name included. Any other plugin, a
+  plugin named by a variable or built from pieces, and the function passed around or called
+  through parentheses all count.
+- Each `library`, `module_utils`, or `*_plugins` directory, `ansible.cfg`, and requirements file
+  that installs collections in the project, by its path, since Ansible loads code and settings from
+  each without a task naming it.
 - Each `external` or `aws_lambda_invocation` data source, and each `http` data source whose method
   is anything but GET or HEAD or that carries a `request_body`, by its address, file, and line. A
   method the scan cannot read as a plain value counts as a write.
@@ -608,9 +616,10 @@ a role that is not in the project, a registry module the gate could not download
 only known at run time, or a file that does not parse. A dry run of a tool a plugin or the SDK added
 is never change free, since the plugin runs its dry run as it was coded and nothing scans it.
 
-The scan finds the known ways a check or a plan acts. It does not prove a preview harmless: other
-lookups and plugins run code on the controller under `--check`, a module that claims to support
-check mode can act anyway, and a plan runs provider code, all with the run's credentials. A rule
+The scan does not prove a preview harmless. The Ansible scan reads the playbook, what it imports and
+includes, and its roles' tasks, handlers, and dependencies, and not variable files or templates,
+which can call lookups too. A module that claims to support check mode can act anyway, and a plan
+runs provider code, all with the run's credentials. A rule
 that exempts dry runs trusts the playbooks and configurations it lets through, so keep it to code
 your team reviews. An agent's dry run is held by the [built-in
 hold](#agent-runs-are-held-by-default) whatever the scan finds, unless an exemption covers it, and
