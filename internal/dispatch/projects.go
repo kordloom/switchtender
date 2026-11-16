@@ -115,15 +115,72 @@ func (d *Dispatcher) resolveProject(ctx context.Context, r *run.Run, spec *round
 }
 
 // bindHeldRun binds a run an approval stands in front of to what that approval is shown. A run that
-// names its playbook or its Terraform configuration by a path on the server is refused, and a run
-// drawn from a project is pinned to the commit the project holds now. Every submit path that can
-// hold a run calls it once the hold is decided and before anything is saved, so a refused run is
-// never stored, whoever or whatever asked for it.
-func (d *Dispatcher) bindHeldRun(r *run.Run) error {
+// names its playbook or its Terraform configuration by a path on the server is refused, a run drawn
+// from a project is pinned to the commit the project holds now, and the run is graded again at that
+// commit and held to gate, what the gate decided. Every submit path that can hold a run calls it
+// once the hold is decided and before anything is saved, so a refused run is never stored, whoever
+// or whatever asked for it.
+func (d *Dispatcher) bindHeldRun(r *run.Run, gate gateVerdict) error {
 	if err := refuseHeldPath(r); err != nil {
 		return err
 	}
-	return d.pinHeldRunCommit(r)
+	if err := d.pinHeldRunCommit(r); err != nil {
+		return err
+	}
+	return d.regradeAtPin(r, gate)
+}
+
+// regradeAtPin grades a run an approval stands in front of again, at the commit it was just pinned
+// to, and refuses it when the rules decide there anything other than gate, what the gate decided.
+// Otherwise what the gate's scans read, what the rules noted, and the hold note are replaced with
+// what the regrade wrote, so the evidence an approver reads describes the commit the approval
+// binds.
+//
+// The gate reads the project's checkout and the pin fetches it again, so the two can see different
+// commits: a push can land between the fetches, the gate's fetch can fail, or the project may never
+// have been synced. Every one of those ends here in a read by hash of the pinned commit. A regrade
+// that decides differently means the run was held, or not, on a commit it will not execute, so it
+// is refused and the submitter tries again, which grades and pins one commit.
+//
+// The regrade runs on a copy carrying the status the gate saw, since the plan gate's rule reads the
+// status and the run's own status has since moved to held. A run held by a ref fetches the ref
+// first, so its commit is read rather than left unread.
+func (d *Dispatcher) regradeAtPin(r *run.Run, gate gateVerdict) error {
+	if !awaitsApproval(r) {
+		return nil
+	}
+	ctx := context.Background()
+	if r.GitRef != "" {
+		d.fetchRefForGate(ctx, r)
+	}
+	policies, err := d.listPolicies(ctx)
+	if err != nil {
+		return fmt.Errorf("%w: approval policies could not be read, so the run is refused rather "+
+			"than run past a gate that could not be checked: %w", ErrPolicyUnavailable, err)
+	}
+	c := r.Clone()
+	c.Status, c.DryRunScans, c.PolicyNotes = gate.Status, nil, nil
+	var v gateVerdict
+	var rec gateRecord
+	if r.Kind == run.KindPipeline {
+		v, rec = d.decidePipeline(policies, c, c.Steps)
+	} else {
+		v, rec = d.decideHold(policies, c)
+	}
+	if v != gate || r.PolicySet == nil || v.PolicySet != r.PolicySet.Digest {
+		return fmt.Errorf("%w: try again: the rules decide on this run differently at %s than "+
+			"they did when it was submitted", ErrCommitUnpinned, pinnedAt(r))
+	}
+	r.DryRunScans, r.PolicyNotes, r.HoldNote = rec.DryRunScans, rec.PolicyNotes, rec.HoldNote
+	return nil
+}
+
+// pinnedAt names the commit r is pinned to, for a refusal.
+func pinnedAt(r *run.Run) string {
+	if r.PinnedCommit == "" {
+		return "this moment"
+	}
+	return "commit " + r.PinnedCommit[:min(12, len(r.PinnedCommit))]
 }
 
 // awaitsApproval reports whether a person's approval stands between r and some of what it runs: r
@@ -285,13 +342,18 @@ func (d *Dispatcher) projectKey(ctx context.Context, p *project.Project) (string
 //
 // It fetches only when a rule in force reads what the run's playbook or configuration does, which
 // a reversibility floor does for any run and a dry-run exclusion or a risk floor does for a dry
-// run, so an install without one pays no fetch on the submit path. A failed fetch is logged and the
-// gate grades what the checkout already holds: the execution that follows syncs the same remote and
-// fails on the same fault, so it runs nothing the grade did not see. The fetch installs none of the
+// run, so an install without one pays no fetch on the submit path. The fetch installs none of the
 // project's dependencies, which only the sync for a claimed run does.
-func (d *Dispatcher) refreshForGate(policies []*policy.Policy, units ...*run.Run) {
+//
+// A failed fetch of a branch refuses the submission, held or not, and the submitter tries again.
+// The checkout would otherwise be graded at whatever its last sync left, of any age, and a run that
+// is not held is claimed later by a sync of its own, often in another process, which can succeed
+// where this fetch failed and run a commit no rule graded. A gate that cannot be evaluated has not
+// passed. A run tied to a ref is not refused here: it is read by hash, and a commit the fetch did
+// not bring in reads as unread, which the rules treat as the worst case.
+func (d *Dispatcher) refreshForGate(policies []*policy.Policy, units ...*run.Run) error {
 	if d.projects == nil || d.syncer == nil {
-		return
+		return nil
 	}
 	ctx := context.Background()
 	fetched := map[string]bool{}
@@ -308,19 +370,29 @@ func (d *Dispatcher) refreshForGate(policies []*policy.Policy, units ...*run.Run
 			continue
 		}
 		fetched[r.ProjectID] = true
-		p, err := d.projects.Get(ctx, r.ProjectID)
-		if err != nil {
-			continue
-		}
-		sshKey, release, err := d.projectKey(ctx, p)
-		if err == nil {
-			_, err = d.syncer.Fetch(p, sshKey)
-		}
-		release()
-		if err != nil {
-			d.log.Warn("dispatch: fetch project for the gate: "+err.Error(), zap.String("project", p.ID))
+		if err := d.fetchForGate(ctx, r.ProjectID); err != nil {
+			d.log.Warn("dispatch: fetch project for the gate: "+err.Error(),
+				zap.String("project", r.ProjectID))
+			return fmt.Errorf("%w: try again: project %s could not be fetched to read what the run "+
+				"executes: %w", ErrCommitUnpinned, r.ProjectID, err)
 		}
 	}
+	return nil
+}
+
+// fetchForGate fetches the branch of the project with id into its checkout.
+func (d *Dispatcher) fetchForGate(ctx context.Context, id string) error {
+	p, err := d.projects.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	sshKey, release, err := d.projectKey(ctx, p)
+	defer release()
+	if err != nil {
+		return err
+	}
+	_, err = d.syncer.Fetch(p, sshKey)
+	return err
 }
 
 // fetchRefForGate fetches the ref r names into its project's checkout, so the commit r is pinned

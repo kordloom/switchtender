@@ -246,15 +246,11 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 	// governed, but whoever asked for it could approve it themselves. Every path that submits with
 	// approval already requested reaches this, including the AI proposal and the drift reconcile,
 	// which is exactly where a second pair of eyes is the point.
-	held, perr := d.requiresApproval(ctx, r)
+	gate, perr := d.requiresApproval(ctx, r)
 	if perr != nil {
 		return nil, perr
 	}
-	if held {
-		r.Status = run.StatusPendingApproval
-	}
-	recordHold(r, holdRequested)
-	if err := d.bindHeldRun(r); err != nil {
+	if err := d.bindHeldRun(r, gate); err != nil {
 		return nil, err
 	}
 	created, dup, err := d.idempotentSave(ctx, r)
@@ -380,15 +376,11 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		return nil, err
 	}
 	// Consulted even when the parent arrives held, so the rule governing it binds its approval.
-	held, perr := d.requiresApproval(ctx, parent)
+	gate, perr := d.requiresApproval(ctx, parent)
 	if perr != nil {
 		return nil, perr
 	}
-	if held {
-		parent.Status = run.StatusPendingApproval
-	}
-	recordHold(parent, holdRequested)
-	if err := d.bindHeldRun(parent); err != nil {
+	if err := d.bindHeldRun(parent, gate); err != nil {
 		return nil, err
 	}
 	created, dup, err := d.idempotentSave(ctx, parent)
@@ -695,20 +687,16 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string, opt
 	if err := d.denied(ctx, retry); err != nil {
 		return nil, err
 	}
-	held, perr := d.requiresApproval(ctx, retry)
+	gate, perr := d.requiresApproval(ctx, retry)
 	if perr != nil {
 		return nil, perr
 	}
-	if held {
-		retry.Status = run.StatusPendingApproval
-	}
-	recordHold(retry, holdRequested)
 	// Pinned while it is held, the same as the other submit paths. Without the pin, approving a
 	// retry released whatever the branch happened to hold when a claim finally picked it up, so
 	// the approver signed off on one change and a later one executed. A retry is exactly where
 	// that gap stays open longest, since it sits in front of an approver by the same rules that
 	// held the run it retries.
-	if err := d.bindHeldRun(retry); err != nil {
+	if err := d.bindHeldRun(retry, gate); err != nil {
 		return nil, err
 	}
 	saved, dup, err := d.idempotentSave(ctx, retry)

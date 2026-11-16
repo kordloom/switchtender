@@ -369,25 +369,15 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 		return nil, err
 	}
 	// Consulted even when the parent arrives held, so the rule governing it binds its approval.
-	held, perr := d.pipelineRequiresApproval(ctx, parent, steps)
+	gate, perr := d.pipelineRequiresApproval(ctx, parent, steps)
 	if perr != nil {
 		return nil, perr
 	}
-	if held {
-		parent.Status = run.StatusPendingApproval
-	}
-	if err := d.approvalStepsRequireDistinct(ctx, parent, steps); err != nil {
-		return nil, err
-	}
-	if err := d.approvalStepsRequireReason(ctx, parent, steps); err != nil {
-		return nil, err
-	}
-	recordHold(parent, holdRequested)
 	// Bound while it is held, like every other submit path, and so is a workflow with an approval
 	// step, which nothing holds at its start. Each step copies the parent's pin, so without it an
 	// approved pipeline ran whatever the branch held when its steps started, which is code the
 	// approver never read, and a workflow naming a playbook by path is refused here.
-	if err := d.bindHeldRun(parent); err != nil {
+	if err := d.bindHeldRun(parent, gate); err != nil {
 		return nil, err
 	}
 	created, dup, err := d.idempotentSave(ctx, parent)

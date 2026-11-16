@@ -42,10 +42,12 @@ var (
 	// to a digest and this server refuses unpinned images. An approval of a tag would cover whatever
 	// the tag names when the run executes, not the image the approver saw.
 	ErrImageUnpinned = errors.New("image not pinned to a digest")
-	// ErrCommitUnpinned is returned when a run about to be held names a project whose commit could
-	// not be read, so its approval would bind no commit and the run is not saved.
-	ErrCommitUnpinned = errors.New("the project's commit could not be pinned, so the held run " +
-		"was not saved")
+	// ErrCommitUnpinned is returned when a run names a project whose commit could not be fetched for
+	// the gate or pinned for a hold, or whose rules decide differently at the commit a hold pins than
+	// at the commit the gate read. Its approval or its grade would describe a commit it may not
+	// execute, so the run is not saved and the submitter tries again.
+	ErrCommitUnpinned = errors.New("the project's commit could not be pinned, so the run was " +
+		"not saved")
 	// ErrHeldByPath is returned when a run an approval stands in front of names its playbook or its
 	// Terraform configuration by a path on the server rather than from a project. An approval binds
 	// a project's commit, and nothing binds what a path holds when the run is released.
