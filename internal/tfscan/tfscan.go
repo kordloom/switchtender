@@ -15,10 +15,13 @@
 //
 // Providers run code during a plan as well. They are code the team chose and installs, and this
 // does not judge them: it looks for explicit program execution and for configuration it could not
-// read, nothing else.
+// read, nothing else. Providers reads which providers a configuration installs, so a caller can
+// tell when a commit changes that set from the one the team already runs.
 package tfscan
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -386,30 +389,8 @@ func (s *scan) parse(name string) *parsedFile {
 	}
 	f := &parsedFile{}
 	s.parsed[name] = f
-	src, err := s.read(name)
-	if err != nil {
-		s.skip("file "+quote(name), s.why(err))
-		return f
-	}
-	// The HCL parsers recurse once per nesting level with no depth guard, so a file nested past what
-	// any configuration holds would overflow the stack and crash this process before it could be
-	// read. It is left unread instead, the same fail-closed answer an unreadable file gets.
-	if !withinNestingBound(src) {
-		s.skip("file "+quote(name), fmt.Sprintf("its brackets nest deeper than the %d levels one "+
-			"file may, so it is not parsed", maxNestingDepth))
-		return f
-	}
-	var file *hcl.File
-	var diags hcl.Diagnostics
-	if strings.HasSuffix(name, ".json") {
-		file, diags = hcljson.Parse(src, name)
-	} else {
-		file, diags = hclsyntax.ParseConfig(src, name, hcl.InitialPos)
-	}
-	if diags.HasErrors() {
-		s.skip("file "+quote(name), "it could not be parsed: "+firstError(diags))
-	}
-	if file == nil || file.Body == nil {
+	file := s.load(name)
+	if file == nil {
 		return f
 	}
 	override := overrideFile(name)
@@ -444,6 +425,38 @@ func (s *scan) parse(name string) *parsedFile {
 		}
 	}
 	return f
+}
+
+// load reads and parses the configuration file at name. A file that cannot be read or parsed is
+// listed as unread, and whatever did parse is still returned, nil when nothing did.
+func (s *scan) load(name string) *hcl.File {
+	src, err := s.read(name)
+	if err != nil {
+		s.skip("file "+quote(name), s.why(err))
+		return nil
+	}
+	// The HCL parsers recurse once per nesting level with no depth guard, so a file nested past what
+	// any configuration holds would overflow the stack and crash this process before it could be
+	// read. It is left unread instead, the same fail-closed answer an unreadable file gets.
+	if !withinNestingBound(src) {
+		s.skip("file "+quote(name), fmt.Sprintf("its brackets nest deeper than the %d levels one "+
+			"file may, so it is not parsed", maxNestingDepth))
+		return nil
+	}
+	var file *hcl.File
+	var diags hcl.Diagnostics
+	if strings.HasSuffix(name, ".json") {
+		file, diags = hcljson.Parse(src, name)
+	} else {
+		file, diags = hclsyntax.ParseConfig(src, name, hcl.InitialPos)
+	}
+	if diags.HasErrors() {
+		s.skip("file "+quote(name), "it could not be parsed: "+firstError(diags))
+	}
+	if file == nil || file.Body == nil {
+		return nil
+	}
+	return file
 }
 
 // externalOf returns the block as a finding when it runs work during a plan: a data or ephemeral
@@ -556,7 +569,13 @@ func repeatOf(attrs hcl.Attributes) string {
 // evaluating anything. A reference, a function call, or an interpolation of either is only known
 // when the run plans, so it is reported as not known rather than guessed at.
 func literal(a *hcl.Attribute) (string, bool) {
-	v, diags := a.Expr.Value(nil)
+	return literalExpr(a.Expr)
+}
+
+// literalExpr returns the string expr holds when it is a literal the scan can read without
+// evaluating anything, the way literal reads an attribute.
+func literalExpr(expr hcl.Expression) (string, bool) {
+	v, diags := expr.Value(nil)
 	if diags.HasErrors() || v.IsNull() || !v.IsWhollyKnown() || !v.Type().Equals(cty.String) {
 		return "", false
 	}
@@ -987,4 +1006,307 @@ func quote(s string) string {
 // clip bounds a name read from a file to maxLabel characters.
 func clip(s string) string {
 	return util.Clip(s, maxLabel)
+}
+
+// ErrProvidersUnknown marks a provider set that could not be read in full, which a caller treats as
+// a set that changed.
+var ErrProvidersUnknown = errors.New("provider set unknown")
+
+// lockFile is the dependency lock file an init writes beside the root module.
+const lockFile = ".terraform.lock.hcl"
+
+// The schemas the provider read selects blocks through. Each is partial, like the scan's own.
+var (
+	// providerRootSchema selects the top-level blocks that name or imply a provider, or call a
+	// module that can.
+	providerRootSchema = &hcl.BodySchema{Blocks: []hcl.BlockHeaderSchema{
+		{Type: "terraform"},
+		{Type: "provider", LabelNames: []string{"name"}},
+		{Type: "resource", LabelNames: []string{"type", "name"}},
+		{Type: "data", LabelNames: []string{"type", "name"}},
+		{Type: "ephemeral", LabelNames: []string{"type", "name"}},
+		{Type: "module", LabelNames: []string{"name"}},
+		{Type: "check", LabelNames: []string{"name"}},
+	}}
+	// terraformSchema selects the required_providers blocks of a terraform block.
+	terraformSchema = &hcl.BodySchema{Blocks: []hcl.BlockHeaderSchema{{Type: "required_providers"}}}
+	// aliasSchema selects a provider block's alias.
+	aliasSchema = &hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "alias"}}}
+	// providerArgSchema selects the provider meta-argument of a resource, data, or ephemeral block.
+	providerArgSchema = &hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "provider"}}}
+)
+
+// Providers reads the configuration in directory dir of fsys, and every local module it calls, and
+// returns its provider set as sorted, distinct entries: each required_providers entry with its
+// source and version constraint, the local name every resource, data, and ephemeral type implies
+// and every provider meta-argument names, each provider block with its alias, and a digest of the
+// dependency lock file beside the root module when there is one, and each registry or remote module
+// call by its source and version constraint. Nothing outside fsys is read.
+//
+// A registry or remote module is not fetched, so its call stands for whatever it requires. A module
+// whose source or version is only known when the run plans, or a file the read could not parse,
+// leaves the set unknown, and an error wrapping ErrProvidersUnknown names the first such thing.
+func Providers(fsys fs.FS, dir string) ([]string, error) {
+	s := &scan{
+		fsys: fsys, tool: run.ToolTerraform, place: "the configuration's tree",
+		files: map[string]bool{}, parsed: map[string]*parsedFile{}, listed: map[string]bool{},
+	}
+	set := map[string]bool{}
+	root := path.Clean(strings.ReplaceAll(dir, `\`, "/"))
+	switch {
+	case !fs.ValidPath(root):
+		s.skip("the working directory "+quote(dir), "outside "+s.place)
+	case !s.isDir(root):
+		s.skip("the working directory "+quote(dir), "not in "+s.place)
+	default:
+		s.root = root
+		s.lockDigest(root, set)
+		s.providerModule(call{dir: root}, set)
+	}
+	if len(s.unread) > 0 {
+		return nil, fmt.Errorf("%w: %s", ErrProvidersUnknown, s.unread[0])
+	}
+	out := make([]string, 0, len(set))
+	for entry := range set {
+		out = append(out, entry)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// lockDigest adds a digest of the dependency lock file in dir to set, when there is one.
+func (s *scan) lockDigest(dir string, set map[string]bool) {
+	name := path.Join(dir, lockFile)
+	content, err := s.read(name)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return
+	case err != nil:
+		s.skip("the lock file "+quote(name), s.why(err))
+		return
+	}
+	sum := sha256.Sum256(content)
+	set["lock file sha256 "+hex.EncodeToString(sum[:])] = true
+}
+
+// providerModule adds the provider set of the module c names, and of every local module it calls,
+// to set. Each directory is read once, since the set does not depend on where a module is called.
+func (s *scan) providerModule(c call, set map[string]bool) {
+	if s.listed["providers\x00"+c.dir] {
+		return
+	}
+	s.listed["providers\x00"+c.dir] = true
+	names, err := s.moduleFiles(c.dir)
+	if err != nil {
+		s.skip(moduleWhat(c, ""), s.why(err))
+		return
+	}
+	for _, name := range names {
+		for _, m := range s.providerFile(name, set) {
+			s.providerCall(c, m, set)
+		}
+	}
+}
+
+// providerCall follows a module call for its providers when it names a local module. Any other
+// source is installed only by init, so it is not fetched: the call itself, its source and version
+// constraint exactly as written, is the entry. A head whose call matches the one the template runs
+// today introduces no provider the template would not run on its own next plan, and what a version
+// range resolves to belongs to the template, not to the head.
+func (s *scan) providerCall(parent call, m moduleBlock, set map[string]bool) {
+	if m.override && !m.hasSource {
+		// It merges into the call it overrides, whose source is read where that call is declared.
+		return
+	}
+	child := call{address: parent.address + "module." + clip(m.name) + ".", depth: parent.depth + 1}
+	what := moduleWhat(child, "")
+	switch {
+	case !m.hasSource:
+		s.skip(what, "it names no source")
+		return
+	case !m.sourceKnown:
+		s.skip(what, "its source is only known when the run plans")
+		return
+	case !localSource(strings.ReplaceAll(m.source, `\`, "/")):
+		if m.hasVersion && !m.versionKnown {
+			s.skip(moduleWhat(child, m.source), "its version is only known when the run plans")
+			return
+		}
+		set["module source "+strconv.Quote(m.source)+" version "+strconv.Quote(m.constraint)] = true
+		return
+	case child.depth > maxDepth:
+		s.skip(moduleWhat(child, m.source), fmt.Sprintf("nested more than %d deep", maxDepth))
+		return
+	case s.calls >= maxCalls:
+		s.skip(moduleWhat(child, m.source), fmt.Sprintf("past the %d module calls one scan follows",
+			maxCalls))
+		return
+	}
+	s.calls++
+	dir, ok := s.resolve(parent, child, m)
+	if !ok {
+		return
+	}
+	child.dir = dir
+	s.providerModule(child, set)
+}
+
+// providerFile adds what the configuration file at name says about providers to set, and returns
+// the module calls it declares.
+func (s *scan) providerFile(name string, set map[string]bool) []moduleBlock {
+	file := s.load(name)
+	if file == nil {
+		return nil
+	}
+	content, _, diags := file.Body.PartialContent(providerRootSchema)
+	if diags.HasErrors() {
+		s.skip("file "+quote(name), "it could not be read as configuration: "+firstError(diags))
+	}
+	if content == nil {
+		return nil
+	}
+	var modules []moduleBlock
+	for _, b := range content.Blocks {
+		switch b.Type {
+		case "terraform":
+			s.requiredProviders(name, b, set)
+		case "provider":
+			s.providerBlock(name, b, set)
+		case "resource", "data", "ephemeral":
+			s.typedBlock(name, b, set)
+		case "module":
+			modules = append(modules, moduleOf(b, overrideFile(name)))
+		case "check":
+			inner, _, cdiags := b.Body.PartialContent(checkSchema)
+			if cdiags.HasErrors() {
+				s.skip("file "+quote(name), "a check block could not be read: "+firstError(cdiags))
+			}
+			if inner == nil {
+				continue
+			}
+			for _, d := range inner.Blocks {
+				s.typedBlock(name, d, set)
+			}
+		}
+	}
+	return modules
+}
+
+// requiredProviders adds each entry of a terraform block's required_providers blocks to set.
+func (s *scan) requiredProviders(name string, b *hcl.Block, set map[string]bool) {
+	content, _, diags := b.Body.PartialContent(terraformSchema)
+	if diags.HasErrors() {
+		s.skip("file "+quote(name), "a terraform block could not be read: "+firstError(diags))
+	}
+	if content == nil {
+		return
+	}
+	for _, rp := range content.Blocks {
+		attrs, adiags := rp.Body.JustAttributes()
+		if adiags.HasErrors() {
+			s.skip("file "+quote(name), "a required_providers block could not be read: "+
+				firstError(adiags))
+		}
+		for _, a := range attrs {
+			entry, ok := requiredEntry(a)
+			if !ok {
+				s.skip("file "+quote(name), "the required provider "+quote(a.Name)+
+					" is not written as literals")
+				continue
+			}
+			set[entry] = true
+		}
+	}
+}
+
+// requiredEntry renders one required_providers entry as its local name, source, and version
+// constraint, read from the object form or the older bare version string. It reports false when a
+// source or version is not a literal.
+func requiredEntry(a *hcl.Attribute) (string, bool) {
+	render := func(source, constraint string) string {
+		return "required_providers " + a.Name + " source " + strconv.Quote(source) + " version " +
+			strconv.Quote(constraint)
+	}
+	if constraint, ok := literal(a); ok {
+		return render("", constraint), true
+	}
+	pairs, diags := hcl.ExprMap(a.Expr)
+	if diags.HasErrors() {
+		return "", false
+	}
+	var source, constraint string
+	for _, p := range pairs {
+		key := hcl.ExprAsKeyword(p.Key)
+		if key == "" {
+			var ok bool
+			if key, ok = literalExpr(p.Key); !ok {
+				return "", false
+			}
+		}
+		var value *string
+		switch key {
+		case "source":
+			value = &source
+		case "version":
+			value = &constraint
+		default:
+			continue
+		}
+		v, ok := literalExpr(p.Value)
+		if !ok {
+			return "", false
+		}
+		*value = v
+	}
+	return render(source, constraint), true
+}
+
+// providerBlock adds a provider block's name and alias to set.
+func (s *scan) providerBlock(name string, b *hcl.Block, set map[string]bool) {
+	entry := "provider " + b.Labels[0]
+	attrs, _, diags := b.Body.PartialContent(aliasSchema)
+	if diags.HasErrors() {
+		s.skip("file "+quote(name), "provider "+quote(b.Labels[0])+" could not be read: "+
+			firstError(diags))
+	}
+	if attrs != nil {
+		if a, ok := attrs.Attributes["alias"]; ok {
+			alias, known := literal(a)
+			if !known {
+				s.skip("file "+quote(name), "the alias of provider "+quote(b.Labels[0])+
+					" is not a literal")
+				return
+			}
+			entry += " alias " + strconv.Quote(alias)
+		}
+	}
+	set[entry] = true
+}
+
+// typedBlock adds the local provider name a resource, data, or ephemeral block uses to set: the
+// one its provider meta-argument names, and the one its type implies, the prefix before the type's
+// first underscore, such as aws for aws_instance.
+func (s *scan) typedBlock(name string, b *hcl.Block, set map[string]bool) {
+	if len(b.Labels) == 0 {
+		return
+	}
+	implied, _, _ := strings.Cut(b.Labels[0], "_")
+	set["local name "+implied] = true
+	attrs, _, diags := b.Body.PartialContent(providerArgSchema)
+	if diags.HasErrors() {
+		s.skip("file "+quote(name), quote(b.Labels[0])+" could not be read: "+firstError(diags))
+	}
+	if attrs == nil {
+		return
+	}
+	a, ok := attrs.Attributes["provider"]
+	if !ok {
+		return
+	}
+	traversal, tdiags := hcl.AbsTraversalForExpr(a.Expr)
+	if tdiags.HasErrors() || len(traversal) == 0 {
+		s.skip("file "+quote(name), "the provider of "+quote(b.Labels[0])+" is not a reference")
+		return
+	}
+	set["local name "+traversal.RootName()] = true
 }

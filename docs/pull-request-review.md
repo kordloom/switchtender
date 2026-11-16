@@ -247,6 +247,34 @@ the forge within five seconds: with the plan, or the refusal, when the pre-check
 pre-check and the plan are done. A redelivery that arrives while they are still going joins them
 rather than starting again.
 
+## Heads that change their providers
+
+A Terraform or OpenTofu provider is a program: `init` installs it and `plan` runs it, with the
+template's credentials. So a pull request event plans a Terraform or OpenTofu head on its own only
+when the head runs the same providers as the commit the template runs today, which is the commit
+the project last synced from its branch. Once the scan above passes, the review reads both commits
+and compares what they install:
+
+- Every `required_providers` entry, with its source and version constraint.
+- The provider each `resource`, `data`, and `ephemeral` type implies, such as `aws` from
+  `aws_instance`, and each one a `provider` argument names.
+- Each `provider` block, with its alias.
+- The `.terraform.lock.hcl` file beside the configuration, when there is one.
+- Each registry or remote module call, by its source and version constraint exactly as written.
+
+Local modules are read the same way, all the way down. Registry and remote modules are not
+downloaded for this comparison, so a call is compared as written: a head that keeps the call the
+template already makes compares equal, and a head that adds a call or changes its source or version
+does not. A module whose source or version is known only when the run plans, or a file that cannot
+be parsed, leaves the set unknown, and an unknown set counts as changed.
+
+A head whose set differs starts no run. The refusal is recorded on the chain, and the pull request
+gets one reply, once per pull request, saying the head changes the providers the template runs and
+that a linked person who may plan it can start the plan by commenting `/switchtender plan`. A plan
+started that way is not held to this check, since a person read the change and asked for it. When
+either commit cannot be read, the forge is answered with an error and nothing is planned. Ansible
+templates are not affected.
+
 ## When the inventory matches no hosts
 
 A template whose inventory is smart or constructed is resolved when the plan is requested. When it
@@ -617,8 +645,10 @@ signing secret with `POST /v1/triggers/{id}/rotate-secret` and update the forge'
   one whose playbooks you have not read.
 - A Terraform or OpenTofu plan runs provider code with the template's credentials. Providers are
   trusted code the team chose, and the review does not judge them: it refuses `external` and
-  `aws_lambda_invocation` data sources, `http` data sources that write, and configuration it cannot
-  read, nothing else.
+  `aws_lambda_invocation` data sources, `http` data sources that write, configuration it cannot
+  read, and a pull request event whose head changes the providers the template runs, nothing else.
+  A version constraint resolves when `init` runs, so a provider or module range the template
+  already allows can still install a newer release without the head changing anything.
 - The apply preview grades an Ansible playbook from the project's checkout, which holds the branch
   until the pull request merges. A rule with a reversibility floor that depends on what the pull
   request changes in the playbook can decide differently when the apply is submitted.

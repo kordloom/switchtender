@@ -128,14 +128,16 @@ func newRegistryReviewServer(t *testing.T, reg *reviewRegistry, module string,
 		t.Fatal("the runner cannot fetch modules")
 	}
 	executed := &specLog{}
+	mainTF := fmt.Sprintf("module \"net\" {\n  source = \"%s/archive/%s.tar.gz\"\n}\n", hub.URL,
+		module)
 	rs := newReviewServer(t, reviewSetup{
 		Runner: reviewFetchRunner{Runner: planRunner(executed), fetch: fetch},
 		PRFiles: map[string]string{
 			"infra/plan.txt": "  + aws_instance.web\nPlan: 1 to add, 0 to change, 0 to destroy.\n",
-			"infra/main.tf": fmt.Sprintf("module \"net\" {\n  source = \"%s/archive/%s.tar.gz\"\n}\n",
-				hub.URL, module),
+			"infra/main.tf":  mainTF,
 		},
-		Audits: audits,
+		MainFiles: map[string]string{"infra/main.tf": mainTF},
+		Audits:    audits,
 	})
 	return rs, executed
 }

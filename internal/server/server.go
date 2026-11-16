@@ -938,7 +938,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /v1/notifications/{id}/attachments/{attachment}",
 		detachNotificationHandler(s.notifications, authz, s.log))
 	mux.Handle("POST /hooks/{token}", hookHandler(s.triggers, s.templates, s.submitter, s.store,
-		s.sealer, s.audits, s.reviews, s.hooks, s.commentCommands(authz), s.log))
+		s.sealer, s.audits, s.reviews, s.hooks, s.commentCommands(authz), s.checkouts(), s.log))
 	mux.Handle("POST /v1/templates",
 		createTemplateHandler(s.templates, s.credentials, s.sealer, authz, s.log))
 	mux.Handle("PUT /v1/templates/{id}",

@@ -21,6 +21,8 @@ func TestReviewHookRefusesAPlanThatRunsAProgram(t *testing.T) {
 	tests := []struct {
 		// Files is what the pull request's head carries.
 		Files map[string]string
+		// MainFiles is what main carries, nil for the default.
+		MainFiles map[string]string
 		// WantRefused is whether the plan is refused.
 		WantRefused bool
 		// WantComment are fragments the refusal comment must carry.
@@ -53,12 +55,13 @@ func TestReviewHookRefusesAPlanThatRunsAProgram(t *testing.T) {
 	}, { // Test 3: A configuration that runs nothing is planned.
 		Files: map[string]string{"infra/plan.txt": plan,
 			"infra/main.tf": "resource \"terraform_data\" \"x\" {\n}\n"},
+		MainFiles: map[string]string{"infra/main.tf": "resource \"terraform_data\" \"x\" {\n}\n"},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
-			rs := newReviewServer(t, reviewSetup{PRFiles: test.Files})
+			rs := newReviewServer(t, reviewSetup{PRFiles: test.Files, MainFiles: test.MainFiles})
 			rec := rs.fire(t, rs.eventName(), rs.payload(rs.opened(), rs.headSHA, ""), "")
 			if rec.Code != http.StatusAccepted {
 				t.Fatalf("webhook = %d %s, want 202", rec.Code, rec.Body.String())
