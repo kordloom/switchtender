@@ -871,6 +871,7 @@ async function loadRunNotifications(runID) {
 	for (const label of ["Target", "Event", "Status", "Attempts", "Detail"]) {
 		const th = document.createElement("th");
 		th.textContent = label;
+		if (label === "Status") th.dataset.card = "status";
 		hr.appendChild(th);
 	}
 	thead.appendChild(hr);

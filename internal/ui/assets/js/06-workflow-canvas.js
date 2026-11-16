@@ -543,6 +543,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 	mountTableExport();
 	mountTablePager();
 	mountTableSort();
+	mountTableCards();
 	if (isReadOnly()) applyReadOnly();
 	setInterval(refreshRelTimes, 20000);
 	mountTour();

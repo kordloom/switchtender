@@ -96,6 +96,10 @@ code, pre { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, 
 .prose tbody tr:last-child td { border-bottom: none; }
 .prose tbody tr:hover td { background: var(--surface); }
 .prose td:first-child { color: var(--text); font-weight: 500; }
+/* A four-column table fits a phone once its cells give back some of their side padding. */
+@media (max-width: 560px) {
+	.prose th, .prose td { padding: 9px 10px; }
+}
 
 /* Responsive */
 @media (max-width: 900px) {
