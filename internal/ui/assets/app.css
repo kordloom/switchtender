@@ -676,6 +676,16 @@ table.matrix.dense .cell { width: 30px; height: 24px; border-radius: 4px; }
 .shard-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); transition: border-color 0.08s ease; }
 .shard-row:hover { border-color: var(--accent); text-decoration: none; }
 .shard-label { font-size: 13px; font-family: var(--mono); }
+.step-entry { display: flex; flex-direction: column; gap: 6px; }
+.step-entry > .what-will-run { margin: 0 0 4px 14px; }
+.what-will-run { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.what-will-run-head { display: flex; align-items: center; gap: 8px; }
+.what-will-run-caption, .what-will-run-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; }
+.what-will-run-command { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; margin: 0; max-height: 320px; overflow: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; white-space: pre; color: var(--text); }
+.what-will-run-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.what-will-run-label { flex: 0 0 132px; }
+.what-will-run-value { flex: 1 1 220px; min-width: 0; font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
+.explain-hidden { margin: 8px 0 0; font-size: 13px; }
 
 /* Drill panel */
 /* Above the sticky topbar (62) and the side rail (70): a drawer whose close button paints under
