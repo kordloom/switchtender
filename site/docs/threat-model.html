@@ -401,8 +401,12 @@ loudly, and it is the right trade for a system whose product is the record.</p>
 refused before it runs, naming what does not match.</li>
 <li><strong>The chain cannot be read while a run is checked.</strong> The run fails closed, and its error says the
 check could not be made rather than that the run was changed.</li>
-<li><strong>Project fetch fails at the gate.</strong> The grade reads the commit the last sync left and says which
-commit that was. The execution that follows syncs the same remote and fails on the same fault.</li>
+<li><strong>Project fetch fails at the gate.</strong> When a rule in force reads what the run executes, the
+submission is refused and says to try again, whether or not the run would be held. A grade of
+the commit the last sync left could pass a run whose own sync later succeeds on newer code.</li>
+<li><strong>Branch moves between the gate and a hold's pin.</strong> A held run is graded again at the commit it
+is pinned to. If the rules decide differently there, the submission is refused and says to try
+again. Otherwise the scans and notes an approver reads are the ones from the pinned commit.</li>
 <li><strong>Database restored from an older backup.</strong> The head moves backward. A witness raises a finding,
 and bundles exported after the restore point no longer extend the ones exported before it.</li>
 <li><strong>Witness offline.</strong> The witness sees nothing while it is down, and nothing records its downtime.

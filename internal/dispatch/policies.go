@@ -23,8 +23,8 @@ func WithPolicies(store policy.Store) Option {
 // rather than because a stored rule matched it. The register has to distinguish the two.
 const holdRequested = "requested at submission"
 
-// requiresApproval reports whether any stored policy requires approval for r, and refuses the
-// submission when it cannot tell.
+// requiresApproval decides whether any stored policy holds r for approval, writes the decision onto
+// r, and returns it. It refuses the submission when it cannot tell.
 //
 // A lookup failure used to be logged and treated as no match, on the reasoning that a policy store
 // failure implied a broader store failure the run's own save would surface. That held while policies
@@ -35,47 +35,119 @@ const holdRequested = "requested at submission"
 // A gate that cannot be evaluated is not a gate that passed. The submission fails instead, loudly,
 // which is disruptive exactly once and in the direction that does not execute something an approver
 // was meant to see.
-func (d *Dispatcher) requiresApproval(ctx context.Context, r *run.Run) (bool, error) {
+func (d *Dispatcher) requiresApproval(ctx context.Context, r *run.Run) (gateVerdict, error) {
 	policies, err := d.listPolicies(ctx)
 	if err != nil {
-		return false, fmt.Errorf("%w: approval policies could not be read, so the run is refused "+
-			"rather than run past a gate that could not be checked: %w", ErrPolicyUnavailable, err)
+		return gateVerdict{}, fmt.Errorf("%w: approval policies could not be read, so the run is "+
+			"refused rather than run past a gate that could not be checked: %w",
+			ErrPolicyUnavailable, err)
 	}
+	v, rec := d.decideHold(policies, r)
+	v.apply(r, rec)
+	return v, nil
+}
+
+// gateVerdict is what the rules decided about a submission, as the values the run stores. It is one
+// comparable value so that a held run's regrade at its pinned commit is compared with the gate's
+// decision whole: a field added here later is written by apply and compared by the regrade without
+// anyone listing it a second time.
+type gateVerdict struct {
+	// Status is the status the run carried into the gate, which the plan gate's rule reads.
+	Status run.Status
+	// PolicySet is the digest of the rule set the decision was made under.
+	PolicySet string
+	// Denying names the deny rule that matches the run or any step of its workflow, empty when none
+	// does.
+	Denying string
+	// Held reports whether a rule holds the run for approval.
+	Held bool
+	// HeldByPolicy is what the run records as having held it.
+	HeldByPolicy string
+	// RequireDistinctApprover reports whether the approval must come from somebody other than the
+	// requester.
+	RequireDistinctApprover bool
+	// RequireReason is the reason requirement a decision on the run must meet.
+	RequireReason string
+}
+
+// gateRecord is what the gate's grade wrote on a run for its approver to read. A held run's regrade
+// replaces it rather than comparing it, since its text names the commit it read.
+type gateRecord struct {
+	// DryRunScans is what the gate's scans read of the run's dry runs.
+	DryRunScans []run.DryRunScan
+	// PolicyNotes is what the rules noted about the run without holding it.
+	PolicyNotes []string
+	// HoldNote says why the rule that held the run did so, when the rule wrote one.
+	HoldNote string
+}
+
+// apply writes the verdict v and the record rec onto r.
+func (v gateVerdict) apply(r *run.Run, rec gateRecord) {
+	if v.Held {
+		r.Status = run.StatusPendingApproval
+	}
+	r.HeldByPolicy = v.HeldByPolicy
+	r.RequireDistinctApprover = v.RequireDistinctApprover
+	r.RequireReason = v.RequireReason
+	r.DryRunScans = rec.DryRunScans
+	r.PolicyNotes = rec.PolicyNotes
+	r.HoldNote = rec.HoldNote
+}
+
+// settle completes the verdict v with what every held run records: a run that arrived held, because
+// its caller asked for approval or because it is a child of a held parent, never consulted a rule
+// for its hold, and it is recorded as held at submission. Such runs used to store an empty rule,
+// which the register renders as "nothing held it" beside an outcome showing the change waited for
+// an approver: the exact inverse of what happened.
+func (v *gateVerdict) settle() {
+	if (v.Held || v.Status == run.StatusPendingApproval) && v.HeldByPolicy == "" {
+		v.HeldByPolicy = holdRequested
+	}
+}
+
+// decideHold grades r under policies and returns what the gate decides about it and what it records
+// on it. The gate and a held run's regrade at its pinned commit both decide through it, so the two
+// decisions compare as one value.
+func (d *Dispatcher) decideHold(policies []*policy.Policy, r *run.Run) (gateVerdict, gateRecord) {
 	// The rule that held the run is recorded on it here, while the rule is in hand. Looking it up
 	// when the evidence is read would answer with today's policies rather than the one that
 	// actually stopped the change, and would answer with nothing at all once it is deleted.
 	gr := d.graded(r)
+	v := gateVerdict{
+		Status: r.Status, PolicySet: policy.InForce(policies).Digest, HeldByPolicy: r.HeldByPolicy,
+		RequireDistinctApprover: r.RequireDistinctApprover, RequireReason: r.RequireReason,
+	}
 	// What the gate's scan read is recorded on the run itself, held or not, so the evidence says
-	// what a dry run was found to run, and why it waited or went through.
-	r.DryRunScans = gr.DryRunScans
-	// So is what a policy noted rather than held on, for the same reason: a run nothing holds is
-	// the run whose record has to say what it was warned about.
-	r.PolicyNotes = policyNotes(policies, gr)
-	if p := policy.Requiring(policies, gr); p != nil {
-		// A terraform or opentofu apply a rule holds is planned first, and the request is not held:
-		// the apply its plan proposes is, carrying the saved plan, after the rules decide on it. A
-		// request held here would be approved without its plan and then plan when it ran.
-		//
-		// An agent's apply is the exception. Planning it runs provider code and data sources with
-		// this server's credentials before anybody approved anything, so it is held here, before
-		// anything plans. Its release is a release to plan: the plan gate plans it then, and the
-		// apply its plan proposes is held again carrying the saved plan.
-		if !policy.AgentPlansFirst(policies, gr) && r.Status != run.StatusPendingApproval &&
-			policy.PlanGated(policies, gr) {
-			return false, nil
-		}
-		r.HeldByPolicy = maskPolicyText(gr, p.Label())
-		r.HoldNote = exemptionHoldNote(policies, gr, p)
-		r.HoldNote = agentHoldNote(policies, gr, r.HoldNote)
+	// what a dry run was found to run, and why it waited or went through. So is what a policy noted
+	// rather than held on, for the same reason: a run nothing holds is the run whose record has to
+	// say what it was warned about.
+	rec := gateRecord{DryRunScans: gr.DryRunScans, PolicyNotes: policyNotes(policies, gr),
+		HoldNote: r.HoldNote}
+	if p := policy.Denying(policies, gr); p != nil {
+		v.Denying = maskPolicyText(gr, p.Label())
+	}
+	// A terraform or opentofu apply a rule holds is planned first, and the request is not held: the
+	// apply its plan proposes is, carrying the saved plan, after the rules decide on it. A request
+	// held here would be approved without its plan and then plan when it ran.
+	//
+	// An agent's apply is the exception. Planning it runs provider code and data sources with this
+	// server's credentials before anybody approved anything, so it is held here, before anything
+	// plans. Its release is a release to plan: the plan gate plans it then, and the apply its plan
+	// proposes is held again carrying the saved plan.
+	if p := policy.Requiring(policies, gr); p != nil && (policy.AgentPlansFirst(policies, gr) ||
+		r.Status == run.StatusPendingApproval || !policy.PlanGated(policies, gr)) {
+		v.Held = true
+		v.HeldByPolicy = maskPolicyText(gr, p.Label())
+		rec.HoldNote = agentHoldNote(policies, gr, exemptionHoldNote(policies, gr, p))
 		// The label names the first rule for the evidence; the flag is the OR of every matching
 		// rule, and an explicitly requested distinct approver is never lowered by a policy.
-		r.RequireDistinctApprover = r.RequireDistinctApprover || policy.RequireDistinct(policies, gr)
+		v.RequireDistinctApprover = v.RequireDistinctApprover || policy.RequireDistinct(policies, gr)
 		// The reason requirement composes the same way: the strictest of every rule covering the
 		// run, copied now so a rule edited while the run waits cannot loosen it.
-		r.RequireReason = decision.Stricter(r.RequireReason, policy.ReasonRequirement(policies, gr))
-		return true, nil
+		v.RequireReason = decision.Stricter(v.RequireReason, policy.ReasonRequirement(policies, gr))
 	}
-	return false, nil
+	v.settle()
+	return v, rec
 }
 
 // agentHoldNote returns the hold note for the graded run gr: why the built-in hold keeps it waiting
@@ -158,18 +230,6 @@ func planFirstOnRequest(r *run.Run) {
 	r.Status, r.ApprovalRequested = run.StatusPending, true
 }
 
-// recordHold makes sure a held run says what held it.
-//
-// A run can arrive already held, because the caller asked for approval at submission or because it
-// is a child of a held parent, and those paths never consult a policy. They used to store an empty
-// rule, which the register renders as "nothing held it" beside an outcome showing the change waited
-// for an approver: the exact inverse of what happened. Every held run now names its reason.
-func recordHold(r *run.Run, reason string) {
-	if r.Status == run.StatusPendingApproval && r.HeldByPolicy == "" {
-		r.HeldByPolicy = reason
-	}
-}
-
 // denied refuses r's submission when a deny policy matches it, naming the rule. It fails closed
 // exactly as requiresApproval does: a gate that cannot be evaluated is not a gate that passed.
 func (d *Dispatcher) denied(ctx context.Context, r *run.Run) error {
@@ -191,7 +251,9 @@ func (d *Dispatcher) denied(ctx context.Context, r *run.Run) error {
 	stampPolicySet(r, policies)
 	// The first rule check of every submission path, so the fetch happens once, here, and the hold
 	// check that follows reads the same commit.
-	d.refreshForGate(policies, r)
+	if err := d.refreshForGate(policies, r); err != nil {
+		return err
+	}
 	gr := d.graded(r)
 	if p := policy.Denying(policies, gr); p != nil {
 		d.recordRefusal(ctx, r, policies, p)
@@ -238,6 +300,9 @@ func stampPolicySet(r *run.Run, policies []*policy.Policy) {
 // workflow must not launder it past the rule.
 func (d *Dispatcher) pipelineDenied(ctx context.Context, parent *run.Run, steps []run.PipelineStep) error {
 	if d.policies == nil {
+		// Recorded for the reason denied records it, and so that a held workflow's regrade has the
+		// set the gate decided under to compare against.
+		stampPolicySet(parent, nil)
 		return nil
 	}
 	policies, err := d.policies.List(ctx)
@@ -246,10 +311,13 @@ func (d *Dispatcher) pipelineDenied(ctx context.Context, parent *run.Run, steps 
 		return fmt.Errorf("%w: approval policies could not be read, so the pipeline is refused "+
 			"rather than run past a gate that could not be checked: %w", ErrPolicyUnavailable, err)
 	}
+	stampPolicySet(parent, policies)
 	units, names := policyUnits(parent, steps)
 	// The pipeline's first rule check, as denied is a single run's, so the steps are graded on the
 	// commit fetched here.
-	d.refreshForGate(policies, append([]*run.Run{parent}, units...)...)
+	if err := d.refreshForGate(policies, append([]*run.Run{parent}, units...)...); err != nil {
+		return err
+	}
 	gp := d.graded(parent)
 	if p := policy.Denying(policies, gp); p != nil {
 		d.recordRefusal(ctx, parent, policies, p)
@@ -323,100 +391,98 @@ func policyUnits(parent *run.Run, steps []run.PipelineStep) ([]*run.Run, []strin
 	return units, names
 }
 
-// pipelineRequiresApproval reports whether a pipeline must be held, which it must when the parent
-// itself matches a blanket policy or when any of its steps does. A pipeline is submitted through a
-// different path than a single run, so without this the same command an operator gated would execute
-// freely by being wrapped in a one-step workflow. The whole pipeline is held rather than the matching
-// step, because the graph walk cannot park a step midway and a partly applied change is worse than
-// one that never started.
+// pipelineRequiresApproval decides whether a pipeline must be held, writes the decision onto the
+// parent, and returns it. A pipeline is submitted through a different path than a single run, so
+// without this the same command an operator gated would execute freely by being wrapped in a
+// one-step workflow.
 func (d *Dispatcher) pipelineRequiresApproval(ctx context.Context, parent *run.Run,
-	steps []run.PipelineStep) (bool, error) {
+	steps []run.PipelineStep) (gateVerdict, error) {
 	policies, err := d.listPolicies(ctx)
 	if err != nil {
-		return false, fmt.Errorf("%w: approval policies could not be read, so the pipeline is "+
-			"refused rather than run past a gate that could not be checked: %w",
+		return gateVerdict{}, fmt.Errorf("%w: approval policies could not be read, so the pipeline "+
+			"is refused rather than run past a gate that could not be checked: %w",
 			ErrPolicyUnavailable, err)
 	}
+	v, rec := d.decidePipeline(policies, parent, steps)
+	v.apply(parent, rec)
+	return v, nil
+}
+
+// decidePipeline grades a pipeline under policies and returns what the gate decides about it and
+// what it records on the parent. The gate and a held workflow's regrade at its pinned commit both
+// decide through it, so the two decisions compare as one value.
+//
+// A pipeline must be held when the parent itself matches a blanket policy or when any of its steps
+// does. The whole pipeline is held rather than the matching step, because the graph walk cannot
+// park a step midway and a partly applied change is worse than one that never started.
+func (d *Dispatcher) decidePipeline(policies []*policy.Policy, parent *run.Run,
+	steps []run.PipelineStep) (gateVerdict, gateRecord) {
 	gp := d.graded(parent)
-	units := make([]*run.Run, 0, len(steps)+1)
-	units = append(units, gp)
-	held := false
-	parent.DryRunScans = gp.DryRunScans
-	parent.PolicyNotes = policyNotes(policies, gp)
-	if p := policy.Requiring(policies, gp); p != nil {
-		parent.HeldByPolicy = maskPolicyText(gp, p.Label())
-		parent.HoldNote = exemptionHoldNote(policies, gp, p)
-		held = true
+	v := gateVerdict{
+		Status: parent.Status, PolicySet: policy.InForce(policies).Digest,
+		HeldByPolicy: parent.HeldByPolicy, RequireDistinctApprover: parent.RequireDistinctApprover,
+		RequireReason: parent.RequireReason,
 	}
+	rec := gateRecord{DryRunScans: gp.DryRunScans, PolicyNotes: policyNotes(policies, gp),
+		HoldNote: parent.HoldNote}
+	if p := policy.Denying(policies, gp); p != nil {
+		v.Denying = maskPolicyText(gp, p.Label())
+	}
+	if p := policy.Requiring(policies, gp); p != nil {
+		v.Held = true
+		v.HeldByPolicy = maskPolicyText(gp, p.Label())
+		rec.HoldNote = exemptionHoldNote(policies, gp, p)
+	}
+	units := []*run.Run{gp}
 	stepUnits, unitNames := policyUnits(parent, steps)
 	for i, unit := range stepUnits {
-		// A pipeline held because one of its steps matches records that rule too: the whole graph
-		// is held, so the evidence has to say which step's rule stopped it.
 		gs := d.graded(unit)
 		units = append(units, gs)
+		if p := policy.Denying(policies, gs); p != nil && v.Denying == "" {
+			v.Denying = fmt.Sprintf("%s in step %q", maskPolicyText(gs, p.Label()), unitNames[i])
+		}
 		// What the gate's scan of each step read is recorded on the pipeline, which is what an
 		// approver decides on, named by the step it belongs to.
 		named := stepNamed(gs, unitNames[i])
-		parent.DryRunScans = append(parent.DryRunScans, named.DryRunScans...)
+		rec.DryRunScans = append(rec.DryRunScans, named.DryRunScans...)
 		// So is what a policy noted about a step, under the step's prefix, so each step run takes
 		// back its own share.
 		for _, note := range policyNotes(policies, gs) {
-			parent.PolicyNotes = append(parent.PolicyNotes, run.StepPrefix(unitNames[i])+note)
+			rec.PolicyNotes = append(rec.PolicyNotes, run.StepPrefix(unitNames[i])+note)
 		}
-		if !held {
+		// A pipeline held because one of its steps matches records that rule too: the whole graph
+		// is held, so the evidence has to say which step's rule stopped it.
+		if !v.Held {
 			if p := policy.Requiring(policies, gs); p != nil {
-				parent.HeldByPolicy = maskPolicyText(gs, p.Label())
-				parent.HoldNote = exemptionHoldNote(policies, named, p)
-				held = true
+				v.Held = true
+				v.HeldByPolicy = maskPolicyText(gs, p.Label())
+				rec.HoldNote = exemptionHoldNote(policies, named, p)
 			}
 		}
 	}
-	if !held {
-		return false, nil
-	}
 	// Approving the parent releases every step, so the separation-of-duties answer must be the
-	// strictest across the parent and all steps, not the answer of whichever unit happened to
-	// match first. Computed from the first match, a pipeline held by a plain rule on the parent
-	// never asked its steps, and a step whose own rule demanded a second person released on the
-	// requester's say-so. The policy package holds this property across its rule list; this holds
-	// it across the pipeline's units.
-	for _, gu := range units {
-		if policy.RequireDistinct(policies, gu) {
-			parent.RequireDistinctApprover = true
-			break
+	// strictest across the parent and all steps, not the answer of whichever unit happened to match
+	// first. Computed from the first match, a pipeline held by a plain rule on the parent never asked
+	// its steps, and a step whose own rule demanded a second person released on the requester's say
+	// so. The reason requirement composes the same way.
+	//
+	// A workflow's approval steps take the same answer, from the rules in force at submission whether
+	// or not they hold the workflow. A rule that demands a second person or a reason for a step's
+	// change demands it for the approval that releases that step, and a workflow nothing held would
+	// otherwise reach its approval step with no separation at all.
+	if v.Held || run.HasApproval(steps) {
+		for _, gu := range units {
+			if policy.RequireDistinct(policies, gu) {
+				v.RequireDistinctApprover = true
+				break
+			}
+		}
+		for _, gu := range units {
+			v.RequireReason = decision.Stricter(v.RequireReason, policy.ReasonRequirement(policies, gu))
 		}
 	}
-	for _, gu := range units {
-		parent.RequireReason = decision.Stricter(parent.RequireReason,
-			policy.ReasonRequirement(policies, gu))
-	}
-	return true, nil
-}
-
-// approvalStepsRequireDistinct records whether the workflow's approval steps must be decided by
-// somebody other than whoever launched it. It is the same answer a hold of the whole workflow
-// computes, the strictest across the parent and every step, taken from the rules in force at
-// submission whether or not they hold the workflow. A rule that demands a second person for a
-// step's change demands it for the approval that releases that step, and a workflow nothing held
-// would otherwise reach its approval step with no separation at all.
-func (d *Dispatcher) approvalStepsRequireDistinct(ctx context.Context, parent *run.Run,
-	steps []run.PipelineStep) error {
-	if d.policies == nil || parent.RequireDistinctApprover || !run.HasApproval(steps) {
-		return nil
-	}
-	policies, err := d.policies.List(ctx)
-	if err != nil {
-		return fmt.Errorf("%w: approval policies could not be read, so the pipeline is refused "+
-			"rather than run past a gate that could not be checked: %w", ErrPolicyUnavailable, err)
-	}
-	units, _ := policyUnits(parent, steps)
-	for _, unit := range append([]*run.Run{parent}, units...) {
-		if policy.RequireDistinct(policies, d.graded(unit)) {
-			parent.RequireDistinctApprover = true
-			return nil
-		}
-	}
-	return nil
+	v.settle()
+	return v, rec
 }
 
 // stepNamed returns a copy of the graded step gs whose scans name the step, the way the pipeline
@@ -425,26 +491,4 @@ func stepNamed(gs *run.Run, name string) *run.Run {
 	named := *gs
 	named.DryRunScans = run.ScansForStep(name, gs.DryRunScans)
 	return &named
-}
-
-// approvalStepsRequireReason records whether a decision on the workflow's approval steps must carry
-// the decider's reason, the strictest requirement across the parent and every step, from the rules
-// in force at submission whether or not they hold the workflow. It is the reason requirement's half
-// of approvalStepsRequireDistinct, for the same reason.
-func (d *Dispatcher) approvalStepsRequireReason(ctx context.Context, parent *run.Run,
-	steps []run.PipelineStep) error {
-	if d.policies == nil || !run.HasApproval(steps) {
-		return nil
-	}
-	policies, err := d.policies.List(ctx)
-	if err != nil {
-		return fmt.Errorf("%w: approval policies could not be read, so the pipeline is refused "+
-			"rather than run past a gate that could not be checked: %w", ErrPolicyUnavailable, err)
-	}
-	units, _ := policyUnits(parent, steps)
-	for _, unit := range append([]*run.Run{parent}, units...) {
-		parent.RequireReason = decision.Stricter(parent.RequireReason,
-			policy.ReasonRequirement(policies, d.graded(unit)))
-	}
-	return nil
 }

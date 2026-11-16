@@ -384,8 +384,12 @@ loudly, and it is the right trade for a system whose product is the record.
   refused before it runs, naming what does not match.
 - **The chain cannot be read while a run is checked.** The run fails closed, and its error says the
   check could not be made rather than that the run was changed.
-- **Project fetch fails at the gate.** The grade reads the commit the last sync left and says which
-  commit that was. The execution that follows syncs the same remote and fails on the same fault.
+- **Project fetch fails at the gate.** When a rule in force reads what the run executes, the
+  submission is refused and says to try again, whether or not the run would be held. A grade of
+  the commit the last sync left could pass a run whose own sync later succeeds on newer code.
+- **Branch moves between the gate and a hold's pin.** A held run is graded again at the commit it
+  is pinned to. If the rules decide differently there, the submission is refused and says to try
+  again. Otherwise the scans and notes an approver reads are the ones from the pinned commit.
 - **Database restored from an older backup.** The head moves backward. A witness raises a finding,
   and bundles exported after the restore point no longer extend the ones exported before it.
 - **Witness offline.** The witness sees nothing while it is down, and nothing records its downtime.
