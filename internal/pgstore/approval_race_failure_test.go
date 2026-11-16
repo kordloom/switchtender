@@ -17,6 +17,7 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -151,13 +152,17 @@ func TestHAApprovalThatLosesItsRaceLeavesTheChainVerifiable(t *testing.T) {
 			gated := &apprGatedDecisions{Store: dbA.Decisions(), actor: "approver-a",
 				reached: make(chan struct{}), release: make(chan struct{})}
 			runner := &commandCounter{seen: map[string]int{}}
+			src := dispatchtest.LocalProject(t, map[string]string{"play.yml": dispatchtest.HeldPlaybook})
+			projects := dispatch.WithProjects(src.Store, src.Syncer)
 			replicaA := dispatch.New(dbA.Runs(), runner, zap.NewNop(), dispatch.WithNoJanitor(),
 				dispatch.WithAudits(dbA.Audits()), dispatch.WithDecisions(gated),
-				dispatch.WithOwner("replica-a"), dispatch.WithClaimInterval(20*time.Millisecond))
+				dispatch.WithOwner("replica-a"), dispatch.WithClaimInterval(20*time.Millisecond),
+				projects)
 			defer replicaA.Close()
 			replicaB := dispatch.New(dbB.Runs(), runner, zap.NewNop(), dispatch.WithNoJanitor(),
 				dispatch.WithAudits(dbB.Audits()), dispatch.WithDecisions(dbB.Decisions()),
-				dispatch.WithOwner("replica-b"), dispatch.WithClaimInterval(20*time.Millisecond))
+				dispatch.WithOwner("replica-b"), dispatch.WithClaimInterval(20*time.Millisecond),
+				projects)
 			defer replicaB.Close()
 			store := dbB.Runs()
 
@@ -187,7 +192,7 @@ func TestHAApprovalThatLosesItsRaceLeavesTheChainVerifiable(t *testing.T) {
 				workID = parent.ID
 			} else {
 				held, err := replicaB.Submit(ctx, "play.yml", "inv", run.WithRequireApproval(true),
-					run.WithActor("requester"))
+					run.WithActor("requester"), run.WithProject(src.ID))
 				if err != nil {
 					t.Fatalf("Submit() error = %v", err)
 				}

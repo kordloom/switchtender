@@ -1,3 +1,8 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { test, expect } from "@playwright/test";
 
 // These drive the mutating flows the read-only demo disables, against a writable serve instance: filling
@@ -24,6 +29,19 @@ function attachErrorGuards(page) {
 // objects distinct within it.
 function unique(prefix) {
   return `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// localRepo commits files on main in a git repository of its own and returns the folder, which the
+// serve instance clones over the file transport. A held run must come from a project, so a test that
+// holds an Ansible run needs a repository the server can actually fetch.
+function localRepo(files) {
+  const dir = mkdtempSync(join(tmpdir(), "st-e2e-repo-"));
+  for (const [name, body] of Object.entries(files)) writeFileSync(join(dir, name), body);
+  const git = (...args) => execFileSync("git", ["-C", dir, ...args], { stdio: "pipe" });
+  git("init", "--quiet", "--initial-branch=main");
+  git("add", ".");
+  git("-c", "user.name=e2e", "-c", "user.email=e2e@example.com", "commit", "--quiet", "-m", "first");
+  return dir;
 }
 
 test("launching a bash run creates it and opens its detail", async ({ page }) => {
@@ -128,10 +146,24 @@ test("a held run against a stored inventory opens with its header and its decisi
   await expect(page.locator("#inventories").getByText(name, { exact: false }).first())
     .toBeVisible({ timeout: 15_000 });
 
+  // The approval binds the commit the run will execute, so the run is drawn from a project, made the
+  // way an operator makes one. The serve instance is open, so its caller may name a local folder.
+  const projectName = unique("held-src");
+  await page.goto("/ui/projects");
+  await page.locator("#project-open").click();
+  await expect(page.locator("#project-modal")).toBeVisible();
+  await page.locator("#project-name").fill(projectName);
+  await page.locator("#project-repo").fill(localRepo({ "site.yml": "---\n- hosts: all\n  tasks: []\n" }));
+  await page.locator('#project-form button[type="submit"]').click();
+  await expect(page.locator("#projects").getByText(projectName, { exact: false }).first())
+    .toBeVisible({ timeout: 15_000 });
+
   await page.goto("/ui/runs");
   await page.locator("#launch-open").click();
   await expect(page.locator("#launch-modal")).toBeVisible();
   await page.locator("#launch-tool").selectOption("ansible");
+  await expect(page.locator("#launch-project option", { hasText: projectName })).toHaveCount(1);
+  await page.locator("#launch-project").selectOption({ label: projectName });
   await page.locator("#launch-playbook").fill("site.yml");
   await expect(page.locator("#launch-inventory-id option", { hasText: name })).toHaveCount(1);
   await page.locator("#launch-inventory-id").selectOption({ label: name });
