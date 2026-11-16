@@ -18,7 +18,7 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/styles.css?v=41">
+	<link rel="stylesheet" href="/styles.css?v=42">
 	<!-- st:entity -->
 	<script type="application/ld+json">
 {
@@ -130,29 +130,29 @@
 						<tr><th>Capability</th><th class="us">SwitchTender</th><th>Ascender</th></tr>
 					</thead>
 					<tbody>
-						<tr><td>Approval bound to the content that runs: inventory, image, commit, plan</td><td class="us"><i class="y"></i> <span class="muted">a digest recomputed before execution</span></td><td><span class="muted">Workflow node records a decision, not a digest; jobs record the revision used after the fact</span></td></tr>
-						<tr><td>Hard ceiling on AI agents: cannot approve its own run or touch identity or secrets</td><td class="us"><i class="y"></i> <span class="muted">agents are principals capped below admin</span></td><td><span class="muted">No AI feature documented</span></td></tr>
-						<tr><td>Evidence a third party verifies offline, without trusting the server</td><td class="us"><i class="y"></i> <span class="muted">signed hash chain, Apache-2.0 verifier</span></td><td><i class="n"></i></td></tr>
-						<tr><td>Deploy</td><td class="us">One binary, SQLite or Postgres, both free</td><td><span class="muted">Kubernetes or k3s + Postgres + Receptor</span></td></tr>
-						<tr><td>Model</td><td class="us">Source-available, self-host free</td><td><span class="muted">Core, Ledger, and Galaxy Proxy are Apache 2.0; Reaqt and Registry ship only as subscription images; Ascender Pro lists at $100 or $150 per node per year</span></td></tr>
-						<tr><td>Commercial support and SLA</td><td class="us"><span class="muted">Email support from Pro, SLA at Enterprise</span></td><td><span class="muted">Standard is business hours, Premium is 24/7 with a 30-minute Severity 1 response; no self-support tier</span></td></tr>
-						<tr><td>Tools</td><td class="us">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td><span class="muted">Ansible only</span></td></tr>
-						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Job templates, surveys, schedules</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
-						<tr><td>Drag-and-drop workflow editor</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
-						<tr><td>RBAC, teams, per-object grants</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
-						<tr><td>LDAP, SAML, OIDC sign-in</td><td class="us"><i class="y"></i> <span class="muted">Pro, $500/yr</span></td><td><i class="y"></i></td></tr>
-						<tr><td>Execution environments</td><td class="us">All seven tools, Docker or Podman</td><td><span class="muted">Ansible only, run as pods on Kubernetes</span></td></tr>
-						<tr><td>Instance groups</td><td class="us"><i class="y"></i> <span class="muted">worker queues, Team</span></td><td><i class="y"></i></td></tr>
-						<tr><td>High availability</td><td class="us">Active-active on Postgres <span class="muted">on every tier</span></td><td><span class="muted">Via Kubernetes</span></td></tr>
-						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><span class="muted">Job slicing, each slice runs a portion of the inventory</span></td></tr>
-						<tr><td>Flaky-host detection and duration trends</td><td class="us"><i class="y"></i></td><td><span class="muted">Per-host job summaries, neither of these</span></td></tr>
-						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><span class="muted">Activity stream forwarded to Logstash, Splunk, Loggly, Sumologic, or Elastic Stack; Ledger change diffs exported as CSV or PDF; no hashing or signing documented in either</span></td></tr>
-						<tr><td>Drift detection and reconcile, Ansible and Terraform</td><td class="us"><i class="y"></i> <span class="muted">detection free, one-click reconcile Team</span></td><td><span class="muted">Drift detection in Ascender Pro through Ledger, described as watching baselines between runs; no reconcile documented</span></td></tr>
-						<tr><td>Notification channels</td><td class="us">Eleven, each with per-template targets</td><td><span class="muted">Ten: AWS SNS, Email, Grafana, IRC, Mattermost, PagerDuty, Rocket.Chat, Slack, Twilio, Webhook, attached to organizations, projects, templates, workflows, inventory sources, and system jobs</span></td></tr>
-						<tr><td>Advisory AI triage and fleet answers</td><td class="us"><i class="y"></i></td><td><span class="muted">No AI, LLM, or agent feature documented</span></td></tr>
-						<tr><td>Drop-in Go plugins: tools, secrets, AI, notifiers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Import from other tools</td><td class="us">One command</td><td><span class="muted">Its own export through ascender-kit; in-place migration from AWX through the installer</span></td></tr>
+						<tr><td data-label="Capability">Approval bound to the content that runs: inventory, image, commit, plan</td><td class="us" data-label="SwitchTender"><i class="y"></i> <span class="muted">a digest recomputed before execution</span></td><td data-label="Ascender"><span class="muted">Workflow node records a decision, not a digest; jobs record the revision used after the fact</span></td></tr>
+						<tr><td data-label="Capability">Hard ceiling on AI agents: cannot approve its own run or touch identity or secrets</td><td class="us" data-label="SwitchTender"><i class="y"></i> <span class="muted">agents are principals capped below admin</span></td><td data-label="Ascender"><span class="muted">No AI feature documented</span></td></tr>
+						<tr><td data-label="Capability">Evidence a third party verifies offline, without trusting the server</td><td class="us" data-label="SwitchTender"><i class="y"></i> <span class="muted">signed hash chain, Apache-2.0 verifier</span></td><td data-label="Ascender"><i class="n"></i></td></tr>
+						<tr><td data-label="Capability">Deploy</td><td class="us" data-label="SwitchTender">One binary, SQLite or Postgres, both free</td><td data-label="Ascender"><span class="muted">Kubernetes or k3s + Postgres + Receptor</span></td></tr>
+						<tr><td data-label="Capability">Model</td><td class="us" data-label="SwitchTender">Source-available, self-host free</td><td data-label="Ascender"><span class="muted">Core, Ledger, and Galaxy Proxy are Apache 2.0; Reaqt and Registry ship only as subscription images; Ascender Pro lists at $100 or $150 per node per year</span></td></tr>
+						<tr><td data-label="Capability">Commercial support and SLA</td><td class="us" data-label="SwitchTender"><span class="muted">Email support from Pro, SLA at Enterprise</span></td><td data-label="Ascender"><span class="muted">Standard is business hours, Premium is 24/7 with a 30-minute Severity 1 response; no self-support tier</span></td></tr>
+						<tr><td data-label="Capability">Tools</td><td class="us" data-label="SwitchTender">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td data-label="Ascender"><span class="muted">Ansible only</span></td></tr>
+						<tr><td data-label="Capability">Live host-by-task matrix</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="Ascender"><i class="n"></i></td></tr>
+						<tr><td data-label="Capability">Job templates, surveys, schedules</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="Ascender"><i class="y"></i></td></tr>
+						<tr><td data-label="Capability">Drag-and-drop workflow editor</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="Ascender"><i class="y"></i></td></tr>
+						<tr><td data-label="Capability">RBAC, teams, per-object grants</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="Ascender"><i class="y"></i></td></tr>
+						<tr><td data-label="Capability">LDAP, SAML, OIDC sign-in</td><td class="us" data-label="SwitchTender"><i class="y"></i> <span class="muted">Pro, $500/yr</span></td><td data-label="Ascender"><i class="y"></i></td></tr>
+						<tr><td data-label="Capability">Execution environments</td><td class="us" data-label="SwitchTender">All seven tools, Docker or Podman</td><td data-label="Ascender"><span class="muted">Ansible only, run as pods on Kubernetes</span></td></tr>
+						<tr><td data-label="Capability">Instance groups</td><td class="us" data-label="SwitchTender"><i class="y"></i> <span class="muted">worker queues, Team</span></td><td data-label="Ascender"><i class="y"></i></td></tr>
+						<tr><td data-label="Capability">High availability</td><td class="us" data-label="SwitchTender">Active-active on Postgres <span class="muted">on every tier</span></td><td data-label="Ascender"><span class="muted">Via Kubernetes</span></td></tr>
+						<tr><td data-label="Capability">Duration-balanced job splitting</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="Ascender"><span class="muted">Job slicing, each slice runs a portion of the inventory</span></td></tr>
+						<tr><td data-label="Capability">Flaky-host detection and duration trends</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="Ascender"><span class="muted">Per-host job summaries, neither of these</span></td></tr>
+						<tr><td data-label="Capability">Tamper-evident, signed audit</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="Ascender"><span class="muted">Activity stream forwarded to Logstash, Splunk, Loggly, Sumologic, or Elastic Stack; Ledger change diffs exported as CSV or PDF; no hashing or signing documented in either</span></td></tr>
+						<tr><td data-label="Capability">Drift detection and reconcile, Ansible and Terraform</td><td class="us" data-label="SwitchTender"><i class="y"></i> <span class="muted">detection free, one-click reconcile Team</span></td><td data-label="Ascender"><span class="muted">Drift detection in Ascender Pro through Ledger, described as watching baselines between runs; no reconcile documented</span></td></tr>
+						<tr><td data-label="Capability">Notification channels</td><td class="us" data-label="SwitchTender">Eleven, each with per-template targets</td><td data-label="Ascender"><span class="muted">Ten: AWS SNS, Email, Grafana, IRC, Mattermost, PagerDuty, Rocket.Chat, Slack, Twilio, Webhook, attached to organizations, projects, templates, workflows, inventory sources, and system jobs</span></td></tr>
+						<tr><td data-label="Capability">Advisory AI triage and fleet answers</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="Ascender"><span class="muted">No AI, LLM, or agent feature documented</span></td></tr>
+						<tr><td data-label="Capability">Drop-in Go plugins: tools, secrets, AI, notifiers</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="Ascender"><i class="n"></i></td></tr>
+						<tr><td data-label="Capability">Import from other tools</td><td class="us" data-label="SwitchTender">One command</td><td data-label="Ascender"><span class="muted">Its own export through ascender-kit; in-place migration from AWX through the installer</span></td></tr>
 					</tbody>
 				</table>
 			</div>

@@ -344,7 +344,7 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .page-head-text h1 { margin: 0 0 3px; }
 .page-head-text p { margin: 0; }
 .page-head .button { flex: none; }
-.head-actions { display: flex; align-items: center; gap: 10px; flex: none; flex-wrap: wrap; }
+.head-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex: 0 1 auto; min-width: 0; max-width: 100%; flex-wrap: wrap; }
 
 /* Summary metrics shown as one unified strip divided into segments. */
 .summary { display: flex; background-color: var(--surface); background-image: linear-gradient(180deg, var(--card-top), transparent 46%); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow); overflow: hidden; margin: 0 0 20px; }
@@ -367,8 +367,20 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .ov-list { display: flex; flex-direction: column; }
 .ov-head { display: flex; align-items: center; gap: 10px; padding: 2px 2px 8px; border-bottom: 1px solid var(--border-muted); }
 .ov-h { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
-.ov-h-status { flex: none; width: 96px; }
-.ov-h-name { flex: 1; }
+/* The overview's lists are one grid each. The header and every row take the panel's columns as a
+   subgrid, so a column starts at the same place in every row and under its header, whatever a
+   status pill reads or whether a row has a tool or a duration to show. Each row fills every slot,
+   empty or not, in the column order below. */
+.ov-grid { display: grid; column-gap: 12px; }
+.ov-grid > .ov-list { display: contents; }
+.ov-grid .ov-head, .ov-grid .ov-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; gap: 5px 12px; align-items: center; }
+.ov-grid .ov-empty { grid-column: 1 / -1; }
+.ov-grid-runs { grid-template-columns: max-content minmax(0, 1fr) max-content max-content max-content 14px; }
+.ov-grid-fleet { grid-template-columns: minmax(0, 1fr) max-content max-content max-content 14px; }
+.ov-c-tool { display: flex; }
+.ov-c-tool .tool-badge { margin-right: 0; }
+.ov-c-dur, .ov-c-time, .ov-c-fail { text-align: right; font-variant-numeric: tabular-nums; }
+.ov-c-spark { display: flex; }
 .ov-row-go { flex: none; display: inline-flex; color: var(--muted); opacity: 0.55; }
 .ov-row-go svg { width: 14px; height: 14px; }
 .ov-row:hover .ov-row-go { color: var(--accent); opacity: 1; }
@@ -403,10 +415,9 @@ input.tile-filter { width: 240px; max-width: 46vw; padding: 7px 11px 7px 31px; f
 .jump-desc { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
 
 /* Tables */
-/* A wrapping .list-scroll owns the horizontal overflow so a table wider than its column budget scrolls
-   inside its own box instead of clipping the last columns off the page. The table itself keeps
-   display:table and width:100%, so it fills the wrapper when the columns fit and grows past it (which
-   the wrapper then scrolls) when they do not. */
+/* A wrapping .list-scroll is the box a list table must fit. A table that outgrows it turns into stacked
+   cards (see "Stacked cards" below), so the wrapper's own scroll is only the fallback for a page whose
+   script has not run. The table keeps display:table and width:100% while its columns fit. */
 .list-scroll { overflow-x: auto; overflow-y: visible; border-radius: var(--radius-lg);
 	/* A table wider than its wrapper used to clip its last columns with nothing saying so, and the
 	   two columns operators scan first, Started and Duration, looked absent. The local-attached
@@ -1008,7 +1019,6 @@ body[data-page="login"] .topbar { background: transparent; backdrop-filter: none
 @media (prefers-reduced-motion: reduce) { .cmdk-card { animation: none; } }
 
 /* Overview columns: recent runs beside the fleet question box, stacked on narrow viewports. */
-.ov-h-go { width: 14px; }
 .ask-note { margin: 8px 0 0; font-size: 12px; }
 .ask-teaser { margin: 0; font-size: 12.5px; line-height: 1.6; }
 .ask-block { margin: 14px -20px 0; padding: 14px 20px 0; border-top: 1px solid var(--border-muted); }
@@ -1033,7 +1043,9 @@ body[data-page="login"] .topbar { background: transparent; backdrop-filter: none
 .docs-content li { margin: 3px 0; }
 .docs-content code { font-family: var(--mono); font-size: 0.88em; background: var(--surface-3); padding: 0.12em 0.4em; border-radius: 5px; }
 .docs-content pre { background: var(--surface-2); border: 1px solid var(--border-muted); padding: 13px 16px; border-radius: var(--radius); overflow-x: auto; line-height: 1.55; }
-.docs-content pre code { background: none; padding: 0; font-size: 12.5px; }
+.docs-content pre code { background: none; padding: 0; font-size: 12.5px; overflow-wrap: normal; }
+/* A long path or flag in running text breaks rather than pushing the page wider than a phone. */
+.docs-content :not(pre) > code { overflow-wrap: anywhere; }
 .docs-content table { border-collapse: separate; border-spacing: 0; width: 100%; margin: 1em 0; display: block; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
 .docs-content th, .docs-content td { padding: 8px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border-muted); }
 .docs-content tr:last-child td { border-bottom: none; }
@@ -1044,7 +1056,7 @@ body[data-page="login"] .topbar { background: transparent; backdrop-filter: none
 .docs-content blockquote { margin: 1em 0; padding: 0.3em 1em; border-left: 3px solid var(--accent); color: var(--muted); }
 .docs-content img { max-width: 100%; border-radius: var(--radius); }
 .docs-content hr { border: none; border-top: 1px solid var(--border-muted); margin: 1.6em 0; }
-@media (max-width: 980px) { .docs-layout { grid-template-columns: 1fr; } .docs-nav { position: static; max-height: none; } }
+@media (max-width: 980px) { .docs-layout { grid-template-columns: minmax(0, 1fr); } .docs-nav { position: static; max-height: none; } }
 
 /* Theme switcher: a quiet icon row at the bottom of the sidebar and the drawer. */
 /* The account block sits directly above the theme switcher in both the drawer and the docked
@@ -1569,14 +1581,14 @@ td.col-labels .label-wrap { flex-wrap: nowrap; }
 	.docs-toc { display: none; }
 }
 @media (max-width: 980px) {
-	.docs-layout { grid-template-columns: 1fr; }
+	.docs-layout { grid-template-columns: minmax(0, 1fr); }
 	.app-foot-inner { padding: 0 16px; }
 }
 
 
-/* Phone-width behavior for the pieces the adversarial review caught: list tables already scroll
-   inside their .list-scroll wrapper at every width, so here the timeline keeps a visible track and
-   the topbar sheds its link row into the drawer that already carries every destination. */
+/* Phone-width behavior for the pieces the adversarial review caught: list tables stack into cards on
+   their own, so here the timeline keeps a visible track and the topbar sheds its link row into the
+   drawer that already carries every destination. */
 @media (max-width: 700px) {
 	.tl-row { grid-template-columns: 96px 1fr 56px; gap: 8px; }
 	.topbar { gap: 8px; padding: 11px 12px; }
@@ -1593,12 +1605,6 @@ td.col-labels .label-wrap { flex-wrap: nowrap; }
 	.modal-close, .drill-close { padding: 10px 12px; font-size: 22px; }
 }
 
-/* A phone-width run row cannot hold a status chip, a tool badge, a name, a duration, and a time
-   on one line; the name lost the squeeze and ellipsized to a letter or two. The name shares the
-   top line with the status chip and everything else drops to a second line, time pushed to the
-   right edge. The zero-height break sits between the two order groups; the chevron goes, since a
-   full-width tappable row already says it opens. Scoped to the recent-runs list: the fleet rows
-   hold one line fine. */
 /* Phones. About half the traffic an announcement brings arrives on one, and below 520px the app had
    a single rule, for the overview's recent rows. Nothing here changes a desktop layout: each rule
    only relaxes a fixed width that a narrow screen cannot afford.
@@ -1619,14 +1625,57 @@ td.col-labels .label-wrap { flex-wrap: nowrap; }
 	.table-foot { flex-wrap: wrap; row-gap: 8px; }
 }
 
+/* On a phone a run is two lines with fixed slots: the status, the name, and the start time on the
+   first, under their headers, and the tool and the duration on the second, under the status and the
+   name. The second line keeps its height when both are empty, so every row has the same shape. A
+   long name wraps to up to three lines rather than being cut off at one. */
 @media (max-width: 520px) {
-	#recent .ov-row { flex-wrap: wrap; row-gap: 5px; }
-	#recent .ov-row::after { content: ""; flex-basis: 100%; height: 0; order: 1; }
-	#recent .ov-row .tool-badge, #recent .ov-row .ov-row-meta { order: 2; }
-	#recent .ov-row .tool-badge { flex: none; }
-	#recent .ov-row .ov-row-meta.reltime { margin-left: auto; }
-	#recent .ov-row .ov-row-go { display: none; }
+	.ov-grid-runs { grid-template-columns: max-content minmax(0, 1fr) max-content; }
+	/* First-baseline alignment keeps the pill, the name's first line, and the time on one line when
+	   the name wraps. */
+	.ov-grid-runs .ov-row { grid-template-rows: auto minmax(18px, auto); align-items: first baseline; }
+	.ov-grid-runs .ov-c-status { grid-area: 1 / 1; }
+	.ov-grid-runs .ov-c-name { grid-area: 1 / 2; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+	.ov-grid-runs .ov-c-time { grid-area: 1 / 3; }
+	.ov-grid-runs .ov-c-tool { grid-area: 2 / 1; }
+	.ov-grid-runs .ov-c-dur { grid-area: 2 / 2; text-align: left; }
+	.ov-grid-runs .ov-head .ov-c-tool, .ov-grid-runs .ov-head .ov-c-dur, .ov-grid .ov-c-go { display: none; }
+	.ov-grid-fleet { grid-template-columns: minmax(0, 1fr) max-content max-content max-content; }
 }
+
+/* Stacked cards. A list table on a phone, or one whose columns outgrow their wrapper at any width,
+   shows each row as a card instead of scrolling sideways (33-table-cards.js sets data-cards and
+   labels every cell from its header). Every card in a table has the same width and the same grid of
+   fixed 140px-minimum columns, so a field sits at the same place in every card: two columns on a
+   phone, more on a wider screen. The title spans the top line and may wrap to two lines. A status
+   pill shares that line at the right edge, and the title keeps clear of it, so every name starts at
+   the card's left edge whatever the pill says. Each other cell is a field with its column's label
+   above it, held to one line and a fixed height so an empty field keeps the card's shape. The row's
+   controls span the bottom. The header shrinks to a strip of sort chips. */
+.list-scroll:has(> table[data-cards]) { overflow: visible; background: none; }
+main.content table.runs[data-cards] { display: block; background: none; border: none; border-radius: 0; box-shadow: none; overflow: visible; }
+main.content table.runs[data-cards] thead { display: block; margin: 0 0 10px; }
+main.content table.runs[data-cards] thead tr { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+main.content table.runs[data-cards] thead th { display: none; }
+main.content table.runs[data-cards] thead th.sortable { display: block; flex: none; padding: 4px 11px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); }
+main.content table.runs[data-cards] thead th.sortable[data-dir] { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); color: var(--text); }
+main.content table.runs[data-cards] tbody { display: grid; gap: 10px; }
+main.content table.runs[data-cards] tbody tr { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px 14px; padding: 12px 14px; background-color: var(--surface); background-image: linear-gradient(180deg, var(--card-top), transparent 46%); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+main.content table.runs[data-cards] tbody td { display: block; min-width: 0; max-width: none; min-height: 36px; padding: 0; border: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+main.content table.runs[data-cards] tbody td::before { content: attr(data-label); display: block; margin-bottom: 3px; overflow: hidden; text-overflow: ellipsis; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; font-size: 10.5px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+main.content table.runs[data-cards] tbody td[data-slot="title"] { grid-row: 1; grid-column: 1 / -1; min-height: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; font-size: 14px; font-weight: 600; }
+main.content table.runs[data-cards] tbody tr:has(> td[data-slot="status"]) > td[data-slot="title"] { padding-right: 112px; }
+main.content table.runs[data-cards] tbody td[data-slot="status"] { grid-row: 1; grid-column: 1 / -1; justify-self: end; align-self: start; position: relative; min-height: 0; }
+main.content table.runs[data-cards] tbody td[data-slot="actions"] { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; min-height: 0; white-space: normal; }
+main.content table.runs[data-cards] tbody td[data-slot="actions"] button + button { margin-left: 0; }
+main.content table.runs[data-cards] tbody td[data-slot="wide"] { grid-column: 1 / -1; min-height: 0; white-space: normal; }
+main.content table.runs[data-cards] tbody td[data-slot="title"]::before,
+main.content table.runs[data-cards] tbody td[data-slot="status"]::before,
+main.content table.runs[data-cards] tbody td[data-slot="actions"]::before,
+main.content table.runs[data-cards] tbody td[data-slot="wide"]::before { content: none; }
+main.content table.runs[data-cards] tbody td[data-slot="hide"],
+main.content table.runs[data-cards] thead th.sortable.col-num { display: none; }
+main.content table.runs[data-cards] tbody td > :first-child { margin-left: 0; }
 
 /* Estate controls: two dates and a button. Laid out inline because the second date is optional and
    the pair reads as one question, "as of this, compared with that", rather than as two settings. */

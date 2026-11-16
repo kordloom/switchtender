@@ -192,27 +192,30 @@ function renderRecentRuns(runs) {
 		const row = document.createElement("a");
 		row.className = "ov-row";
 		row.href = "/ui/runs/" + r.id;
-		row.appendChild(badge(r.status));
-		// Ansible is the default and carries no badge, so the builder returns null for it.
-		const tool = toolBadgeEl(r);
-		if (tool) row.appendChild(tool);
+		// Every row fills the same six slots in the same order, empty or not, so each one lands in
+		// its column of the panel's grid whatever the status reads or the tool is.
+		const status = document.createElement("span");
+		status.className = "ov-c-status";
+		status.appendChild(badge(r.status));
+		row.appendChild(status);
 		const name = document.createElement("span");
-		name.className = "ov-row-name";
+		name.className = "ov-row-name ov-c-name";
 		name.textContent = toolLabel(r);
 		name.title = r.playbook || r.command || r.id;
 		row.appendChild(name);
-		// The row used to be one word left, one word right, and dead space between. The tool badge
-		// and the duration the row already knows fill it without a second fetch.
-		const dur = fmtDuration(r.started_at, r.ended_at);
-		if (dur) {
-			const d = document.createElement("span");
-			d.className = "ov-row-meta";
-			d.textContent = dur;
-			row.appendChild(d);
-		}
+		// Ansible is the default and carries no badge, so the builder returns null for it.
+		const tool = document.createElement("span");
+		tool.className = "ov-c-tool";
+		const toolBadge = toolBadgeEl(r);
+		if (toolBadge) tool.appendChild(toolBadge);
+		row.appendChild(tool);
+		const dur = document.createElement("span");
+		dur.className = "ov-row-meta ov-c-dur";
+		dur.textContent = fmtDuration(r.started_at, r.ended_at) || "";
+		row.appendChild(dur);
 		const started = r.started_at || r.created_at;
 		const meta = document.createElement("span");
-		meta.className = "ov-row-meta";
+		meta.className = "ov-row-meta ov-c-time";
 		if (started) {
 			meta.textContent = relTime(started);
 			meta.title = fmtTime(started);
@@ -221,7 +224,7 @@ function renderRecentRuns(runs) {
 		}
 		row.appendChild(meta);
 		const go = document.createElement("span");
-		go.className = "ov-row-go";
+		go.className = "ov-row-go ov-c-go";
 		go.innerHTML = svgIcon('<polyline points="9 18 15 12 9 6"/>');
 		row.appendChild(go);
 		el.appendChild(row);
@@ -826,26 +829,31 @@ function renderFleetSnapshot(hosts) {
 		row.className = "ov-row";
 		row.href = "/ui/hosts/" + encodeURIComponent(h.host);
 		const name = document.createElement("span");
-		name.className = "ov-row-name mono";
+		name.className = "ov-row-name mono ov-c-name";
 		name.textContent = hostLabel(h.host);
 		name.title = h.host;
 		row.appendChild(name);
-		if (h.recent && h.recent.length) {
-			row.appendChild(sparkline(h.recent, h.recent_runs));
-		}
+		// The spark slot is filled even for a host with no history, so every column stays in place.
+		const spark = document.createElement("span");
+		spark.className = "ov-c-spark";
+		if (h.recent && h.recent.length) spark.appendChild(sparkline(h.recent, h.recent_runs));
+		row.appendChild(spark);
 		const meta = document.createElement("span");
-		meta.className = "ov-row-meta" + (h.failures ? " fail-count" : "");
+		meta.className = "ov-row-meta ov-c-fail" + (h.failures ? " fail-count" : "");
 		meta.textContent = h.failures + " / " + h.total + " failed";
 		row.appendChild(meta);
+		const state = document.createElement("span");
+		state.className = "ov-c-state";
 		const chip = document.createElement("span");
 		chip.className = h.flaky ? "chip flaky" : "chip none";
 		chip.textContent = h.flaky ? "flaky" : "steady";
 		chip.dataset.tip = h.flaky
 			? "Recent outcomes alternate between pass and fail. Worth a look."
 			: "Recent outcomes are stable";
-		row.appendChild(chip);
+		state.appendChild(chip);
+		row.appendChild(state);
 		const go = document.createElement("span");
-		go.className = "ov-row-go";
+		go.className = "ov-row-go ov-c-go";
 		go.innerHTML = svgIcon('<polyline points="9 18 15 12 9 6"/>');
 		row.appendChild(go);
 		el.appendChild(row);
