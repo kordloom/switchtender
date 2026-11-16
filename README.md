@@ -30,14 +30,14 @@
     alt="License"></a>
 </p>
 
-**Approve exactly what runs. Prove it to anyone.** An approval binds the run the approver saw: its
-inventory snapshot, its image digest, its commit, and for a Terraform or OpenTofu apply, the saved
-plan. People, pipelines, and AI agents go through the same identity checks, policy, approval, and
-evidence, an AI agent's run waits for a person by default, and an agent can never approve.
-SwitchTender runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, takes over from AWX
-with an import you preview before it writes, paints every run live as a host-by-task matrix instead of a text scroll,
-and hands back a signed receipt anyone can verify offline.
-No Kubernetes operator, no Postgres, no Redis, no message bus. One process, one SQLite file.
+**Approve exactly what runs. Prove it to anyone.** SwitchTender is a self-hosted server that runs
+Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, with pipelines, drift detection, and
+a live host-by-task matrix. An approval binds the inventory, image, commit, and plan the approver
+saw, and a run that no longer matches is refused. AI agents wait for a person by default and can
+never approve. Every finished run leaves a signed receipt anyone can verify offline.
+
+Free to self-host with no host or seat caps. One binary, one SQLite file, no Kubernetes.
+One-command import from AWX, AAP, Semaphore, Rundeck, and Jenkins. Source-available under BSL 1.1.
 
 ## Contents
 
