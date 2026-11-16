@@ -69,12 +69,15 @@ type BundleReport struct {
 	// PinProblems names, with its signer, each verified token that matches no pinned authority.
 	// Any entry fails the anchors.
 	PinProblems []string
-	// AnchorsCounted is how many carried anchors the anchors line counts: each anchor that carries
-	// no timestamp token, whose position rests on where it was published, and each verified token
-	// whose signer is pinned. A token whose signer is unpinned is named in TimestampSigners and not
+	// AnchorsCounted is how many carried anchors the anchors line counts: each verified token whose
+	// signer is pinned. A token whose signer is unpinned is named in TimestampSigners and not
 	// counted, since it verifies under a certificate it carries and anyone can make one. With no
 	// pin given it never changes the verdict.
 	AnchorsCounted int
+	// AnchorsNotFetched is how many carried anchors carry no timestamp token. Each one's position
+	// rests on where it was published, which this check does not fetch, so none is counted. It
+	// never changes the verdict.
+	AnchorsNotFetched int
 	// ClaimCount and AnchorCount report the size of what was checked.
 	ClaimCount  int
 	AnchorCount int
@@ -210,6 +213,9 @@ type verifiedDecision struct {
 type TimestampSigner struct {
 	// Seq is the coordinate the token's anchor names.
 	Seq int64
+	// Time is the generation time the token states, zero when it could not be read. The token's
+	// maker wrote it, so it is what the token says and not when anything happened.
+	Time time.Time
 	// Subject is the signer certificate's subject name.
 	Subject string
 	// Fingerprint is the SHA-256 of the signer certificate's DER encoding, as "sha256:" and
@@ -223,6 +229,23 @@ type TimestampSigner struct {
 	// PinnedBy says which certificate matched an authority the reader pinned: PinnedBySigner,
 	// PinnedByIssuer, or empty when neither did. A token no pin matched is not counted as an anchor.
 	PinnedBy string
+}
+
+// State says what the token counts for, given how many timestamp authorities the reader pinned:
+// pinned by its signer or its issuer and counted, signed by no authority the reader pinned, or
+// unpinned because none was pinned. Every reader that names a token takes its words from here, so
+// the verifier and the dossier cannot describe one token two ways.
+func (s TimestampSigner) State(pins int) string {
+	switch {
+	case s.PinnedBy == PinnedBySigner:
+		return "signer pinned, counted"
+	case s.PinnedBy == PinnedByIssuer:
+		return "issuer pinned, counted"
+	case pins > 0:
+		return "matches no timestamp authority you pinned, FAILED"
+	default:
+		return "UNPINNED, not counted"
+	}
 }
 
 // Which certificate of a timestamp token matched a pinned authority.
@@ -1747,7 +1770,7 @@ func verifyBundleProofs(b *Bundle, claimAt []time.Time, rep *BundleReport, pins 
 	}
 	for _, a := range b.Anchors {
 		if a.Type != AnchorRFC3161 || a.Proof == "" {
-			rep.AnchorsCounted++
+			rep.AnchorsNotFetched++
 			continue
 		}
 		att, err := ReadTimestampProof(a.Link, a.Proof)
@@ -1766,7 +1789,7 @@ func verifyBundleProofs(b *Bundle, claimAt []time.Time, rep *BundleReport, pins 
 			continue
 		}
 		rep.TimestampsVerified++
-		signer := timestampSigner(a.Seq, att, pins)
+		signer := NewTimestampSigner(a.Seq, att, pins)
 		switch {
 		case signer.PinnedBy != "":
 			rep.AnchorsCounted++
@@ -1779,11 +1802,13 @@ func verifyBundleProofs(b *Bundle, claimAt []time.Time, rep *BundleReport, pins 
 	}
 }
 
-// timestampSigner names the certificate that signed a verified token, the carried certificate
-// that directly signed it if there is one, and which of the two matches a pin.
-func timestampSigner(seq int64, att *TimestampAttestation, pins map[string]bool) TimestampSigner {
+// NewTimestampSigner names the certificate that signed a verified token, the time the token
+// states, the carried certificate that directly signed the signer's if there is one, and which of
+// the two matches a pin. A nil or empty pins matches neither.
+func NewTimestampSigner(seq int64, att *TimestampAttestation, pins map[string]bool) TimestampSigner {
 	s := TimestampSigner{
-		Seq: seq, Subject: att.Signer.Subject.String(), Fingerprint: certFingerprint(att.Signer),
+		Seq: seq, Time: att.GenTime, Subject: att.Signer.Subject.String(),
+		Fingerprint: certFingerprint(att.Signer),
 	}
 	if issuer := directIssuer(att.Signer, att.Carried, pins); issuer != nil {
 		s.IssuerSubject, s.IssuerFingerprint = issuer.Subject.String(), certFingerprint(issuer)

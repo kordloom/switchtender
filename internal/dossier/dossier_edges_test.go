@@ -675,13 +675,42 @@ func TestDossierBannerFollowsTheEvidenceBelowIt(t *testing.T) {
 			WantStatus: "broken", WantText: "does not fix the link recorded beside it",
 			WantAbsent: "1 anchor fixes history",
 		},
-		{ // Test 6: Everything holding is the verified case, and it counts only the anchors that do.
-			Name: "verified",
+		{ // Test 6: Everything holding is the anchored case. It says the chain still matches the
+			// anchor and counts nothing, since nothing here was checked outside this install. A
+			// timestamp authority anchor with no token stored takes neither count sentence.
+			Name: "anchored",
 			Build: func(in *Input) {
 				in.Covering = []*audit.Anchor{anchor}
 				in.Entries = []*audit.Entry{entry}
 			},
-			WantStatus: "verified", WantText: "1 anchor fixes history containing this run",
+			WantStatus: "anchored",
+			WantText: "The chain verifies and still matches the 1 anchor that covers this run. " +
+				"How to check them outside this install is under Anchors covering this run.",
+			WantAbsent: "fixes history",
+		},
+		{ // Test 7: A lone anchor by reference is anchored, and the banner says its position rests
+			// on where it was published.
+			Name: "anchored by reference",
+			Build: func(in *Input) {
+				published := *anchor
+				published.Type, published.Ref = audit.AnchorHTTPS, "https://example.com/head"
+				in.Covering = []*audit.Anchor{&published}
+				in.Entries = []*audit.Entry{entry}
+			},
+			WantStatus: "anchored",
+			WantText:   "1 is by reference and rests on where it was published.",
+			WantAbsent: "carries a timestamp token",
+		},
+		{ // Test 8: A refused token leads the unanchored cases. Over a chain that names the run
+			// nowhere, its anchors are still read, and one that says what it is not is a finding.
+			Name: "refused timestamp token and the run is unnamed",
+			Build: func(in *Input) {
+				refused := *anchor
+				refused.Proof = "cHJvb2Y="
+				in.Covering = []*audit.Anchor{&refused}
+			},
+			WantStatus: "broken", WantText: "does not fix the link recorded beside it",
+			WantAbsent: "holds no entry naming this run",
 		},
 	}
 	for testNum, test := range tests {

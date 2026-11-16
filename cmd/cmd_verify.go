@@ -314,7 +314,8 @@ func readWitnessStatement(cmd *cobra.Command) (*witness.Statement, error) {
 // subject and fingerprint, with the carried certificate that issued it, and a token counts only
 // when one of the two matches a pinned authority. With no pin a token reads UNPINNED, is not
 // counted, and the verdict does not change. The status word is UNPINNED only when the anchors
-// otherwise hold, so it never hides a FAILED.
+// otherwise hold, so it never hides a FAILED. An anchor with no token is checked only by fetching
+// where it was published, which this command does not do, so it is named and not counted either.
 func printAnchors(out io.Writer, rep *audit.BundleReport) {
 	if rep.AnchorCount == 0 {
 		fmt.Fprintln(out, "anchors      none (nothing outside this install fixes its position)")
@@ -341,13 +342,15 @@ func printAnchors(out io.Writer, rep *audit.BundleReport) {
 	case unpinned > 0:
 		detail += fmt.Sprintf(": %d %s by no timestamp authority you pinned", unpinned,
 			util.Plural(unpinned, "token is signed", "tokens are signed"))
-	case rep.TimestampsVerified == 0 && len(rep.TimestampProblems) == 0:
-		detail = fmt.Sprintf("%d, none carrying a timestamp token, so their positions rest on "+
-			"where they were published", rep.AnchorCount)
 	}
 	fmt.Fprintf(out, "anchors      %s (%s)\n", status, detail)
+	if n := rep.AnchorsNotFetched; n > 0 {
+		fmt.Fprintf(out, "  %d with no timestamp token, not fetched here and not counted: %s\n", n,
+			util.Plural(n, "its position rests on where it was published",
+				"their positions rest on where they were published"))
+	}
 	for _, s := range rep.TimestampSigners {
-		fmt.Fprintf(out, "  token at seq %d, %s\n", s.Seq, tokenState(s, rep.AuthorityPins))
+		fmt.Fprintf(out, "  token at seq %d, %s\n", s.Seq, s.State(rep.AuthorityPins))
 		fmt.Fprintf(out, "    signer       %s\n", valueOr(printable(s.Subject), "no subject named"))
 		fmt.Fprintf(out, "    fingerprint  %s\n", s.Fingerprint)
 		if s.IssuerFingerprint != "" {
@@ -377,21 +380,6 @@ func maskedSpec(rep *audit.BundleReport) string {
 	return fmt.Sprintf("%s: %d %s masked, so the spec digest covers the masked text, not what "+
 		"the mask hid", where, rep.SpecMasked,
 		util.Plural(rep.SpecMasked, "secret value", "secret values"))
-}
-
-// tokenState says what one timestamp token counts for: pinned by its signer or its issuer and
-// counted, signed by no authority the reader pinned, or unpinned because none was pinned.
-func tokenState(s audit.TimestampSigner, pins int) string {
-	switch {
-	case s.PinnedBy == audit.PinnedBySigner:
-		return "signer pinned, counted"
-	case s.PinnedBy == audit.PinnedByIssuer:
-		return "issuer pinned, counted"
-	case pins > 0:
-		return "matches no timestamp authority you pinned, FAILED"
-	default:
-		return "UNPINNED, not counted"
-	}
 }
 
 // printWitness writes the witness line: OK with what the counted witness countersigned, FAILED with

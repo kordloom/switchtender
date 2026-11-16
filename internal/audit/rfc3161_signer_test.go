@@ -74,8 +74,8 @@ func TestSelfIssuedAuthorityCountsOnlyWhenPinned(t *testing.T) {
 	own := "sha256:" + hex.EncodeToString(sum[:])
 	signer := func(pinnedBy string) []TimestampSigner {
 		return []TimestampSigner{{
-			Seq: 3, Subject: "CN=switchtender test timestamp authority", Fingerprint: own,
-			PinnedBy: pinnedBy,
+			Seq: 3, Time: genTime(), Subject: "CN=switchtender test timestamp authority",
+			Fingerprint: own, PinnedBy: pinnedBy,
 		}}
 	}
 	other := "sha256:" + strings.Repeat("ab", 32)
@@ -86,12 +86,14 @@ func TestSelfIssuedAuthorityCountsOnlyWhenPinned(t *testing.T) {
 		Published       bool
 		WantOK          bool
 		WantCounted     int
+		WantNotFetched  int
 		WantPinProblems int
 	}{{ // Test 0: No pin, the token alone is named, unpinned, and not counted.
 		Name: "no pin", WantSigners: signer(""), WantOK: true, WantCounted: 0,
-	}, { // Test 1: No pin, beside an anchor that carries no token only that anchor is counted.
+	}, { // Test 1: No pin, beside an anchor that carries no token, nothing is counted and the
+		// published anchor is named as not fetched.
 		Name: "no pin beside a published anchor", Published: true, WantSigners: signer(""),
-		WantOK: true, WantCounted: 1,
+		WantOK: true, WantCounted: 0, WantNotFetched: 1,
 	}, { // Test 2: Its own fingerprint pinned, the token counts.
 		Name: "own fingerprint pinned", Pins: []string{own}, WantSigners: signer(PinnedBySigner),
 		WantOK: true, WantCounted: 1,
@@ -101,9 +103,11 @@ func TestSelfIssuedAuthorityCountsOnlyWhenPinned(t *testing.T) {
 	}, { // Test 4: A different pin fails the anchors and names the signer.
 		Name: "different pin", Pins: []string{other}, WantSigners: signer(""),
 		WantOK: false, WantCounted: 0, WantPinProblems: 1,
-	}, { // Test 5: A different pin beside a published anchor still fails.
+	}, { // Test 5: A different pin beside a published anchor still fails, and the published
+		// anchor is named as not fetched rather than counted.
 		Name: "different pin beside a published anchor", Pins: []string{other}, Published: true,
-		WantSigners: signer(""), WantOK: false, WantCounted: 1, WantPinProblems: 1,
+		WantSigners: signer(""), WantOK: false, WantCounted: 0, WantNotFetched: 1,
+		WantPinProblems: 1,
 	}, { // Test 6: Either of two pins is enough, as with any repeated pin.
 		Name: "one of two pins", Pins: []string{other, own}, WantSigners: signer(PinnedBySigner),
 		WantOK: true, WantCounted: 1,
@@ -127,6 +131,10 @@ func TestSelfIssuedAuthorityCountsOnlyWhenPinned(t *testing.T) {
 			if rep.AnchorsCounted != test.WantCounted {
 				t.Errorf("%s: AnchorsCounted = %d, want %d", test.Name, rep.AnchorsCounted,
 					test.WantCounted)
+			}
+			if rep.AnchorsNotFetched != test.WantNotFetched {
+				t.Errorf("%s: AnchorsNotFetched = %d, want %d", test.Name, rep.AnchorsNotFetched,
+					test.WantNotFetched)
 			}
 			if rep.AuthorityPins != len(test.Pins) {
 				t.Errorf("%s: AuthorityPins = %d, want %d", test.Name, rep.AuthorityPins,
@@ -390,4 +398,32 @@ func anchoredBundle(t *testing.T, published bool, token func(digest []byte) []by
 		t.Fatalf("SignBundleDoc: %v", err)
 	}
 	return signed, id.KeyID()
+}
+
+// TestTimestampSignerState pins the words every reader names a token with. Verify and the run
+// dossier both print them, so a change here is a change in what both say about one token.
+func TestTimestampSignerState(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		WantState string
+		PinnedBy  string
+		Pins      int
+	}{{ // Test 0: No pin given, the token is unpinned and not counted.
+		WantState: "UNPINNED, not counted",
+	}, { // Test 1: Its signer pinned, the token counts.
+		PinnedBy: PinnedBySigner, Pins: 1, WantState: "signer pinned, counted",
+	}, { // Test 2: Its issuer pinned, the token counts.
+		PinnedBy: PinnedByIssuer, Pins: 1, WantState: "issuer pinned, counted",
+	}, { // Test 3: Pins given and none matched, the token fails.
+		Pins: 2, WantState: "matches no timestamp authority you pinned, FAILED",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			got := TimestampSigner{PinnedBy: test.PinnedBy}.State(test.Pins)
+			if diff := cmp.Diff(test.WantState, got); diff != "" {
+				t.Errorf("State() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
 }
