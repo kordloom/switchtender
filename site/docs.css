@@ -70,12 +70,14 @@ code, pre { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, 
 .prose code {
 	font-size: 13.5px; color: var(--accent); background: rgba(52, 211, 153, 0.1);
 	padding: 2px 6px; border-radius: 5px;
+	/* A long path or flag in running text breaks rather than pushing the page wider than a phone. */
+	overflow-wrap: anywhere;
 }
 .prose pre {
 	background: #0c1017; border: 1px solid var(--border-2); border-radius: var(--radius);
 	padding: 18px 20px; overflow-x: auto; margin: 18px 0; line-height: 1.7;
 }
-.prose pre code { color: #dbe4ee; background: none; padding: 0; font-size: 13.5px; }
+.prose pre code { color: #dbe4ee; background: none; padding: 0; font-size: 13.5px; overflow-wrap: normal; }
 
 .prose blockquote {
 	border-left: 3px solid var(--accent); padding: 4px 0 4px 18px; margin: 18px 0; color: var(--muted);

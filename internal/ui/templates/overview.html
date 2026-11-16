@@ -51,12 +51,17 @@
 					<h2>Recent runs</h2>
 					<a class="panel-link" href="/ui/runs">View all runs</a>
 				</div>
-				<div class="ov-head" id="ov-head" hidden aria-hidden="true">
-					<span class="ov-h ov-h-status">Status</span>
-					<span class="ov-h ov-h-name">Run</span>
-					<span class="ov-h">Started</span>
+				<div class="ov-grid ov-grid-runs">
+					<div class="ov-head" id="ov-head" hidden aria-hidden="true">
+						<span class="ov-h ov-c-status">Status</span>
+						<span class="ov-h ov-c-name">Run</span>
+						<span class="ov-h ov-c-tool">Tool</span>
+						<span class="ov-h ov-c-dur">Took</span>
+						<span class="ov-h ov-c-time">Started</span>
+						<span class="ov-h ov-c-go"></span>
+					</div>
+					<div id="recent" class="ov-list"></div>
 				</div>
-				<div id="recent" class="ov-list"></div>
 		</section>
 
 		<section class="panel">
@@ -64,13 +69,16 @@
 						<h2>Fleet snapshot</h2>
 						<a class="panel-link" href="/ui/fleet">Fleet health</a>
 					</div>
-					<div class="ov-head" id="ov-fleet-head" hidden aria-hidden="true">
-						<span class="ov-h ov-h-name">Host</span>
-						<span class="ov-h">Failures</span>
-						<span class="ov-h">State</span>
-						<span class="ov-h ov-h-go"></span>
+					<div class="ov-grid ov-grid-fleet">
+						<div class="ov-head" id="ov-fleet-head" hidden aria-hidden="true">
+							<span class="ov-h ov-c-name">Host</span>
+							<span class="ov-h ov-c-spark">Recent</span>
+							<span class="ov-h ov-c-fail">Failures</span>
+							<span class="ov-h ov-c-state">State</span>
+							<span class="ov-h ov-c-go"></span>
+						</div>
+						<div id="ov-fleet" class="ov-list"></div>
 					</div>
-					<div id="ov-fleet" class="ov-list"></div>
 					<div class="ask-block ask-panel" id="ask-panel">
 						<h3 class="ask-title">Ask about your fleet</h3>
 						<div class="ask-row">

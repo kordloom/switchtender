@@ -344,7 +344,7 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .page-head-text h1 { margin: 0 0 3px; }
 .page-head-text p { margin: 0; }
 .page-head .button { flex: none; }
-.head-actions { display: flex; align-items: center; gap: 10px; flex: none; flex-wrap: wrap; }
+.head-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex: 0 1 auto; min-width: 0; max-width: 100%; flex-wrap: wrap; }
 
 /* Summary metrics shown as one unified strip divided into segments. */
 .summary { display: flex; background-color: var(--surface); background-image: linear-gradient(180deg, var(--card-top), transparent 46%); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow); overflow: hidden; margin: 0 0 20px; }
@@ -367,8 +367,20 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .ov-list { display: flex; flex-direction: column; }
 .ov-head { display: flex; align-items: center; gap: 10px; padding: 2px 2px 8px; border-bottom: 1px solid var(--border-muted); }
 .ov-h { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
-.ov-h-status { flex: none; width: 96px; }
-.ov-h-name { flex: 1; }
+/* The overview's lists are one grid each. The header and every row take the panel's columns as a
+   subgrid, so a column starts at the same place in every row and under its header, whatever a
+   status pill reads or whether a row has a tool or a duration to show. Each row fills every slot,
+   empty or not, in the column order below. */
+.ov-grid { display: grid; column-gap: 12px; }
+.ov-grid > .ov-list { display: contents; }
+.ov-grid .ov-head, .ov-grid .ov-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; gap: 5px 12px; align-items: center; }
+.ov-grid .ov-empty { grid-column: 1 / -1; }
+.ov-grid-runs { grid-template-columns: max-content minmax(0, 1fr) max-content max-content max-content 14px; }
+.ov-grid-fleet { grid-template-columns: minmax(0, 1fr) max-content max-content max-content 14px; }
+.ov-c-tool { display: flex; }
+.ov-c-tool .tool-badge { margin-right: 0; }
+.ov-c-dur, .ov-c-time, .ov-c-fail { text-align: right; font-variant-numeric: tabular-nums; }
+.ov-c-spark { display: flex; }
 .ov-row-go { flex: none; display: inline-flex; color: var(--muted); opacity: 0.55; }
 .ov-row-go svg { width: 14px; height: 14px; }
 .ov-row:hover .ov-row-go { color: var(--accent); opacity: 1; }
@@ -1008,7 +1020,6 @@ body[data-page="login"] .topbar { background: transparent; backdrop-filter: none
 @media (prefers-reduced-motion: reduce) { .cmdk-card { animation: none; } }
 
 /* Overview columns: recent runs beside the fleet question box, stacked on narrow viewports. */
-.ov-h-go { width: 14px; }
 .ask-note { margin: 8px 0 0; font-size: 12px; }
 .ask-teaser { margin: 0; font-size: 12.5px; line-height: 1.6; }
 .ask-block { margin: 14px -20px 0; padding: 14px 20px 0; border-top: 1px solid var(--border-muted); }
@@ -1033,7 +1044,9 @@ body[data-page="login"] .topbar { background: transparent; backdrop-filter: none
 .docs-content li { margin: 3px 0; }
 .docs-content code { font-family: var(--mono); font-size: 0.88em; background: var(--surface-3); padding: 0.12em 0.4em; border-radius: 5px; }
 .docs-content pre { background: var(--surface-2); border: 1px solid var(--border-muted); padding: 13px 16px; border-radius: var(--radius); overflow-x: auto; line-height: 1.55; }
-.docs-content pre code { background: none; padding: 0; font-size: 12.5px; }
+.docs-content pre code { background: none; padding: 0; font-size: 12.5px; overflow-wrap: normal; }
+/* A long path or flag in running text breaks rather than pushing the page wider than a phone. */
+.docs-content :not(pre) > code { overflow-wrap: anywhere; }
 .docs-content table { border-collapse: separate; border-spacing: 0; width: 100%; margin: 1em 0; display: block; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
 .docs-content th, .docs-content td { padding: 8px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border-muted); }
 .docs-content tr:last-child td { border-bottom: none; }
@@ -1044,7 +1057,7 @@ body[data-page="login"] .topbar { background: transparent; backdrop-filter: none
 .docs-content blockquote { margin: 1em 0; padding: 0.3em 1em; border-left: 3px solid var(--accent); color: var(--muted); }
 .docs-content img { max-width: 100%; border-radius: var(--radius); }
 .docs-content hr { border: none; border-top: 1px solid var(--border-muted); margin: 1.6em 0; }
-@media (max-width: 980px) { .docs-layout { grid-template-columns: 1fr; } .docs-nav { position: static; max-height: none; } }
+@media (max-width: 980px) { .docs-layout { grid-template-columns: minmax(0, 1fr); } .docs-nav { position: static; max-height: none; } }
 
 /* Theme switcher: a quiet icon row at the bottom of the sidebar and the drawer. */
 /* The account block sits directly above the theme switcher in both the drawer and the docked
@@ -1569,7 +1582,7 @@ td.col-labels .label-wrap { flex-wrap: nowrap; }
 	.docs-toc { display: none; }
 }
 @media (max-width: 980px) {
-	.docs-layout { grid-template-columns: 1fr; }
+	.docs-layout { grid-template-columns: minmax(0, 1fr); }
 	.app-foot-inner { padding: 0 16px; }
 }
 
@@ -1619,13 +1632,22 @@ td.col-labels .label-wrap { flex-wrap: nowrap; }
 	.table-foot { flex-wrap: wrap; row-gap: 8px; }
 }
 
+/* On a phone a run is two lines with fixed slots: the status, the name, and the start time on the
+   first, under their headers, and the tool and the duration on the second, under the status and the
+   name. The second line keeps its height when both are empty, so every row has the same shape. A
+   long name wraps to up to three lines rather than being cut off at one. */
 @media (max-width: 520px) {
-	#recent .ov-row { flex-wrap: wrap; row-gap: 5px; }
-	#recent .ov-row::after { content: ""; flex-basis: 100%; height: 0; order: 1; }
-	#recent .ov-row .tool-badge, #recent .ov-row .ov-row-meta { order: 2; }
-	#recent .ov-row .tool-badge { flex: none; }
-	#recent .ov-row .ov-row-meta.reltime { margin-left: auto; }
-	#recent .ov-row .ov-row-go { display: none; }
+	.ov-grid-runs { grid-template-columns: max-content minmax(0, 1fr) max-content; }
+	/* First-baseline alignment keeps the pill, the name's first line, and the time on one line when
+	   the name wraps. */
+	.ov-grid-runs .ov-row { grid-template-rows: auto minmax(18px, auto); align-items: first baseline; }
+	.ov-grid-runs .ov-c-status { grid-area: 1 / 1; }
+	.ov-grid-runs .ov-c-name { grid-area: 1 / 2; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+	.ov-grid-runs .ov-c-time { grid-area: 1 / 3; }
+	.ov-grid-runs .ov-c-tool { grid-area: 2 / 1; }
+	.ov-grid-runs .ov-c-dur { grid-area: 2 / 2; text-align: left; }
+	.ov-grid-runs .ov-head .ov-c-tool, .ov-grid-runs .ov-head .ov-c-dur, .ov-grid .ov-c-go { display: none; }
+	.ov-grid-fleet { grid-template-columns: minmax(0, 1fr) max-content max-content max-content; }
 }
 
 /* Estate controls: two dates and a button. Laid out inline because the second date is optional and

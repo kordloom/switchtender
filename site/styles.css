@@ -29,6 +29,8 @@ body {
 
 a { color: inherit; text-decoration: none; }
 code, pre { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+/* A long path or flag in running text breaks rather than pushing the page wider than a phone. */
+p code, li code { overflow-wrap: anywhere; }
 
 .wrap { width: 100%; max-width: var(--wrap); margin: 0 auto; padding: 0 24px; }
 
