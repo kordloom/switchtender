@@ -315,7 +315,7 @@ the project last synced from its branch. Once the scan above passes, the review 
 and compares what they install:</p>
 <ul>
 <li>Every <code>required_providers</code> entry, with its source and version constraint.</li>
-<li>The provider each <code>resource</code>, <code>data</code>, and <code>ephemeral</code> type implies, such as <code>aws</code> from
+<li>The provider each <code>resource</code>, <code>data</code>, <code>ephemeral</code>, and <code>action</code> type implies, such as <code>aws</code> from
 <code>aws_instance</code>, and each one a <code>provider</code> argument names.</li>
 <li>Each <code>provider</code> block, with its alias.</li>
 <li>The <code>.terraform.lock.hcl</code> file beside the configuration, when there is one.</li>
@@ -325,7 +325,10 @@ and compares what they install:</p>
 downloaded for this comparison, so a call is compared as written: a head that keeps the call the
 template already makes compares equal, and a head that adds a call or changes its source or version
 does not. A module whose source or version is known only when the run plans, or a file that cannot
-be parsed, leaves the set unknown, and an unknown set counts as changed.</p>
+be parsed, leaves the set unknown, and an unknown set counts as changed. So does a <code>terraform.d</code>
+folder beside the configuration: with no <code>provider_installation</code> block in the CLI configuration,
+<code>init</code> installs a provider found in <code>terraform.d/plugins</code> in place of the registry's, and those
+binaries are not read.</p>
 <p>A head whose set differs starts no run. The refusal is recorded on the chain, and the pull request
 gets one reply, once per pull request, saying the head changes the providers the template runs and
 that a linked person who may plan it can start the plan by commenting <code>/switchtender plan</code>. A plan

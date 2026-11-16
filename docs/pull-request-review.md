@@ -256,7 +256,7 @@ the project last synced from its branch. Once the scan above passes, the review 
 and compares what they install:
 
 - Every `required_providers` entry, with its source and version constraint.
-- The provider each `resource`, `data`, and `ephemeral` type implies, such as `aws` from
+- The provider each `resource`, `data`, `ephemeral`, and `action` type implies, such as `aws` from
   `aws_instance`, and each one a `provider` argument names.
 - Each `provider` block, with its alias.
 - The `.terraform.lock.hcl` file beside the configuration, when there is one.
@@ -266,7 +266,10 @@ Local modules are read the same way, all the way down. Registry and remote modul
 downloaded for this comparison, so a call is compared as written: a head that keeps the call the
 template already makes compares equal, and a head that adds a call or changes its source or version
 does not. A module whose source or version is known only when the run plans, or a file that cannot
-be parsed, leaves the set unknown, and an unknown set counts as changed.
+be parsed, leaves the set unknown, and an unknown set counts as changed. So does a `terraform.d`
+folder beside the configuration: with no `provider_installation` block in the CLI configuration,
+`init` installs a provider found in `terraform.d/plugins` in place of the registry's, and those
+binaries are not read.
 
 A head whose set differs starts no run. The refusal is recorded on the chain, and the pull request
 gets one reply, once per pull request, saying the head changes the providers the template runs and
