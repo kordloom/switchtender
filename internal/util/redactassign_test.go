@@ -553,6 +553,20 @@ func TestRedactAssignmentsReadsTheWholeShellWord(t *testing.T) {
 	}, { // Test 13: A quote that never closes still takes the rest of the word.
 		Name: "unclosed quote", In: `password="abc def`,
 		WantText: `password=X def`, WantValues: []string{`"abc`},
+	}, { // Test 14: A word that opens and ends with a quote as three runs, not one pair, so the
+		// empty run is the value and the runs before it keep their quotes.
+		Name: "runs not a pair", In: `!0:"'"pAss:"" "`,
+		WantText: `!0:"'"pAss:X "`, WantValues: []string{""},
+	}, { // Test 15: A quote that closes the word's first run, then an empty run joined onto it,
+		// which is the value.
+		Name: "run closer then a run", In: `!0:"pAss:""" 0"`,
+		WantText: `!0:"pAss:"X 0"`, WantValues: []string{""},
+	}, { // Test 16: A quoted run across a newline inside a word, which the newline does not end.
+		Name: "run across a newline", In: "0=\"\npAss:\"0 0",
+		WantText: "0=\"\npAss:\"X 0", WantValues: []string{"0"},
+	}, { // Test 17: A name inside a word right after a quote, which does not open a YAML entry.
+		Name: "name after a run", In: `!0:"0:"'"pAss:" "`,
+		WantText: `!0:"0:"'"pAss:" "`, WantValues: nil,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -734,6 +748,17 @@ func TestRedactAssignmentsStrayQuoteInEarlierValue(t *testing.T) {
 	}, { // Test 11: A quote the line's count left open, which the value's own quotes show was an
 		// apostrophe, keeps the wide reading so redacting again reads the mask the same way.
 		In: `it's password: 'x y' --all`, WantResult: `it's password: X`, WantValue: "x y",
+	}, { // Test 12: The fuzz crash, an apostrophe that never closes inside a word, then a quoted
+		// run whose assignment ends at the run's closing quote, so nothing is assigned.
+		In: `!0:'"pAss:" "`, WantResult: `!0:'"pAss:" "`,
+	}, { // Test 13: The fuzz crash, a YAML value that is a quoted scalar with text joined on, whose
+		// closing quote the nested value starts at, keeps that quote after the mask.
+		In: `0:"pAss:""0&"pAss :"0`, WantResult: `0:"pAss:X"&"pAss :"X`, WantValue: "0",
+	}, { // Test 14: The same with a single-quoted scalar, whose doubled quote the value starts at.
+		In: `0:'pAss:''x'y&'k'`, WantResult: `0:'pAss:X'&'k'`, WantValue: "x'y",
+	}, { // Test 15: A scalar with text joined on that ends in a quote is peeled of the pair, and the
+		// quote inside is not written back after the mask.
+		In: `0:'pAss:'0'`, WantResult: `0:'pAss:X'`, WantValue: "'0",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -767,7 +792,9 @@ func TestRedactAssignmentsStrayQuoteInEarlierValue(t *testing.T) {
 func FuzzRedactAssignmentsIsIdempotent(f *testing.F) {
 	for _, seed := range []string{`password=''x`, `pass:'' b@`, `token="a"b`, `{"password":"x","u":"y"}`,
 		"key: |\n  a\nnext: 1", `sh -c "password=a\"b c"`, `password: "abc" # note`,
-		`pAss:0"&pAss:"`, `pAss:0"&pAss="`} {
+		`pAss:0"&pAss:"`, `pAss:0"&pAss="`,
+		`!0:'"pAss:" "`, `!0:"'"pAss:"" "`, `!0:"pAss:""" 0"`, "0=\"\npAss:\"0 0",
+		`!0:"0:"'"pAss:" "`, `0:"pAss:""0&"pAss :"0`, `0:'pAss:''x'y&'k'`, `0:'pAss:'0'`} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, in string) {

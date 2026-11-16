@@ -83,7 +83,7 @@ type Assignment struct {
 // still found. The scan never rewinds, so it stays linear in the length of the text.
 func RedactAssignments(text, mask string) (string, []Assignment) {
 	var found []Assignment
-	text = redactDepth(text, mask, &found, maxNestedAssignmentDepth, false)
+	text = redactDepth(text, mask, &found, maxNestedAssignmentDepth, false, false, nil, nil)
 	// A credential can also ride inside a URL, as scheme://user:password@host, where no name=value
 	// pattern sees it: pg_dump postgres://backup:pass@db and git clone https://x:token@host both
 	// carry a secret no assignment names. Only the audit digest scrubbed this shape, so a receipt
@@ -160,7 +160,23 @@ func (a Assignment) Readings() []string {
 // the wide way, the text is a string handed whole to another program, such as a header to curl or a
 // YAML scalar to ansible-playbook -e, which reads its value to the end of that string. wide carries
 // that last case into a nested scan.
-func redactDepth(text, mask string, found *[]Assignment, depth int, wide bool) string {
+//
+// word is whether text is the value of an enclosing assignment read as one shell word, and literals
+// holds the positions of the quotes that word took as ordinary bytes, in increasing order, which the
+// quote count skips. The count then pairs quotes as the word did, so a quote it leaves open around a
+// value is the run holding it and is never read as the value's own. A shell word reads a quote
+// that never closes as an ordinary byte, so in !0:'"pAss:" " the value of 0 is '"pAss:", a stray
+// apostrophe and a quoted run. Counting the apostrophe as open hid the run from the nested scan,
+// which masked the quote closing it, and a second pass then paired the opening quote with a later
+// one and swallowed the text after the mask.
+//
+// keeps holds the positions of quotes that an enclosing reader paired to decide where its value
+// ends, the closing quote of a quoted scalar with text joined onto it. A mask covering one writes it
+// back after the mask, so a second pass pairs the same quotes. In "pAss:""0&"x" the scalar "pAss:"
+// ends the value at the &, and the nested value ""0 read from its closing quote is the password.
+// Masking that quote with the value left "pAss:X&"x", and a second pass read the scalar to the
+// quote after the & and masked past it.
+func redactDepth(text, mask string, found *[]Assignment, depth int, wide, word bool, literals, keeps []int) string {
 	var out strings.Builder
 	// next holds each form's leftmost match at or after pos, with offsets into text, searched again
 	// only once pos passes its start, and nil for a form with no match left. A match ahead of pos is
@@ -179,6 +195,8 @@ func redactDepth(text, mask string, found *[]Assignment, depth int, wide bool) s
 	// name sits on never scans back over the text, which on a long line of assignments read one word
 	// at a time would make the scan quadratic.
 	pos, lineStart := 0, 0
+	// nextLiteral is the index of the first entry of literals the count has not yet passed.
+	nextLiteral := 0
 	for pos < len(text) {
 		best := -1
 		for i, form := range assignmentForms {
@@ -207,11 +225,14 @@ func redactDepth(text, mask string, found *[]Assignment, depth int, wide bool) s
 			valueLine = loc[2] + i + 1
 		}
 		line := text[valueLine:valueStart]
-		between := text[pos:valueStart]
-		if i := strings.LastIndexByte(between, '\n'); i >= 0 {
-			quote, between = 0, between[i+1:]
+		// A newline ends any quote in free text, but inside a shell word it is a byte of the quoted run
+		// holding it, so the count runs on across it there.
+		countFrom := pos
+		if i := strings.LastIndexByte(text[pos:valueStart], '\n'); i >= 0 && !word {
+			quote, countFrom = 0, pos+i+1
 		}
-		quote = advanceQuote(quote, between)
+		quote, nextLiteral = advanceQuoteSkipping(quote, text, countFrom, valueStart, literals,
+			nextLiteral)
 		closer := quote
 		// A value that opens with the quote the line left open is either the end of that quoted
 		// string, so nothing was assigned, or a quote of its own the line's count got wrong, as an
@@ -222,9 +243,13 @@ func redactDepth(text, mask string, found *[]Assignment, depth int, wide bool) s
 		// echo "a password="hunter2 the word a password=hunter2, and reading nothing assigned there
 		// left the password in the clear. The quote is kept as written and the joined text is read
 		// as a value outside any quote.
+		//
+		// Inside a shell word the count is the word's own pairing and cannot be wrong, so the quote
+		// closes the run holding the value. Reading it as the value's own in "pAss:""" masked the
+		// quote closing the word's first run, and a second pass then read the word to a later quote.
 		if closer != 0 && text[valueStart] == closer {
 			switch {
-			case quotedEnd(text, valueStart, 0, closer == '"') > 0:
+			case !word && quotedEnd(text, valueStart, 0, closer == '"') > 0:
 				closer = 0
 			case valueStart+1 < len(text) && !wordEnds[text[valueStart+1]]:
 				valueStart++
@@ -236,7 +261,15 @@ func redactDepth(text, mask string, found *[]Assignment, depth int, wide bool) s
 		// showed the count wrong. Redacting the masked text again sees the same count with no quote on
 		// the value to correct it, reads wide, and a narrower first reading came out different the
 		// second time.
+		//
+		// Inside a shell word only a quoted run of the word is a string handed whole to a program, and
+		// no name in it opens a YAML entry, so a value outside a run is one piece of the word. Reading
+		// the value in "0:"'"pAss:" as an entry took the rest of the word by YAML rules, and the scan
+		// below it lost the word's quotes.
 		wideHere := wide || quote != 0 || opensEntry(lead)
+		if word {
+			wideHere = quote != 0
+		}
 		read, decode := form.read, form.decode
 		if form.inline != nil && !wideHere {
 			read, decode = form.inline.read, form.inline.decode
@@ -254,6 +287,11 @@ func redactDepth(text, mask string, found *[]Assignment, depth int, wide bool) s
 				out.WriteString(value[:1] + mask + value[len(value)-1:])
 			} else {
 				out.WriteString(mask)
+				for _, k := range keeps {
+					if k >= valueStart && k < valueEnd {
+						out.WriteByte(text[k])
+					}
+				}
 			}
 			*found = append(*found, Assignment{Name: name, Value: decode(value, closer), Raw: value})
 		case depth > 0 && (strings.IndexByte(value, '=') >= 0 || strings.IndexByte(value, ':') >= 0):
@@ -269,9 +307,45 @@ func redactDepth(text, mask string, found *[]Assignment, depth int, wide bool) s
 			// values are what scrubs a run's own output, so the scrubber searched the log for a
 			// string with a trailing quote, never matched, and left the real secret in the log, the
 			// events, and the live stream while the receipt showed it redacted.
+			//
+			// A value read as one shell word carries into the nested scan the quotes the word read as
+			// ordinary bytes, so both readings agree on which quotes group text. Its quote pair is
+			// peeled only when the word is that one quoted run: "'"pAss:"" opens and ends with a
+			// quote, but as three runs, and peeling them as a pair left the scan reading the quotes
+			// inside wrong, masking one that closed a run.
+			isWord := (form.inline == nil || !wideHere) && !keepQuotes
 			open, inner, close := splitQuoted(value)
+			if isWord && open != "" &&
+				quotedEnd(value, 0, closer, value[0] == '"' || closer == '"') != len(value) {
+				open, inner, close = "", value, ""
+			}
+			var innerLiterals []int
+			if isWord && open == "" {
+				innerLiterals = literalQuotes(inner, closer)
+			}
+			// A value read the wide YAML way as a quoted scalar with text joined on ends where the text
+			// after the scalar ends, so the scalar's closing quote is kept, with any the enclosing scan
+			// keeps inside the value. A value peeled of a quote pair is scanned between those quotes,
+			// where a mask cannot move the scalar's end, and keeping the quote there doubled it into
+			// an escaped one in 'pAss:'0'.
+			innerStart, innerEnd := valueStart+len(open), valueEnd-len(close)
+			var innerKeeps []int
+			for _, k := range keeps {
+				if k >= innerStart && k < innerEnd {
+					innerKeeps = append(innerKeeps, k-innerStart)
+				}
+			}
+			if form.inline != nil && wideHere && !keepQuotes && open == "" &&
+				(value[0] == '"' || value[0] == '\'') {
+				if end := yamlQuotedEnd(value, closer); end > 0 && end < len(value) {
+					if k := valueStart + end - 1; k >= innerStart && k < innerEnd {
+						innerKeeps = append(innerKeeps, k-innerStart)
+					}
+				}
+			}
 			out.WriteString(open)
-			out.WriteString(redactDepth(inner, mask, found, depth-1, wideHere || open != ""))
+			out.WriteString(redactDepth(inner, mask, found, depth-1, wideHere || open != "",
+				isWord && open == "", innerLiterals, innerKeeps))
 			out.WriteString(close)
 		default:
 			out.WriteString(value)
@@ -309,6 +383,55 @@ func opensEntry(lead string) bool {
 		}
 	}
 	return true
+}
+
+// literalQuotes returns the positions of the quotes in word that shellWord, reading word inside
+// closer, takes as ordinary bytes because they never close, in increasing order. It walks word the
+// way shellWord does, so it costs what reading the word did.
+func literalQuotes(word string, closer byte) []int {
+	if strings.IndexByte(word, '\'') < 0 && strings.IndexByte(word, '"') < 0 {
+		return nil
+	}
+	var out []int
+	for i := 0; i < len(word); {
+		switch c := word[i]; {
+		case c == '\\':
+			i += shellEscape(word[i:], closer, nil)
+		case c == '$' && closer == 0 && i+1 < len(word) && word[i+1] == '\'':
+			if end := quotedEnd(word, i+1, closer, true); end >= 0 {
+				i = end
+			} else {
+				i++
+			}
+		case c == '\'' || c == '"':
+			end := quotedEnd(word, i, closer, c == '"' || closer == '"')
+			if end < 0 {
+				out = append(out, i)
+				i++
+			} else {
+				i = end
+			}
+		default:
+			i++
+		}
+	}
+	return out
+}
+
+// advanceQuoteSkipping is advanceQuote over text[from:to], entered inside q, with each quote at a
+// position in literals read as an ordinary byte. next is the index of the first entry of literals
+// not yet passed, and the index returned is the first at or after to, so a scan that only moves
+// forward reads each entry once.
+func advanceQuoteSkipping(q byte, text string, from, to int, literals []int, next int) (byte, int) {
+	for next < len(literals) && literals[next] < from {
+		next++
+	}
+	for next < len(literals) && literals[next] < to {
+		q = advanceQuote(q, text[from:literals[next]])
+		from = literals[next] + 1
+		next++
+	}
+	return advanceQuote(q, text[from:to]), next
 }
 
 // matchFrom returns the leftmost match of pattern in text at or after from, with its offsets into
