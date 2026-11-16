@@ -40,6 +40,9 @@ const (
 	// waitLimit bounds every wait on a server, a run, or a file, so a broken guarantee fails the
 	// scenario rather than hanging it.
 	waitLimit = 90 * time.Second
+	// portAttempts is how many times a server is started again after another process took its
+	// port first.
+	portAttempts = 3
 	// hostConfigKey is the provisioning callback key the fixture's template carries, as AWX exports
 	// it in the clear. It is a secret: it must not reach any record.
 	hostConfigKey = "hck-scenario-0f3c9a7e51d24b6c8e0f"
@@ -474,6 +477,25 @@ type server struct {
 // ready to serve.
 func (in *install) startServer(name string, extra ...string) *server {
 	in.t.Helper()
+	for attempt := 1; ; attempt++ {
+		if s := in.launchServer(name, extra...); s != nil {
+			return s
+		}
+		if attempt == portAttempts {
+			in.t.Fatalf("server %s lost its port to another process %d times", name, portAttempts)
+		}
+	}
+}
+
+// launchServer starts one server process on a free port and waits until it is ready, and returns
+// nil when another process took the port first, so the caller starts it again on a new one.
+//
+// A free port is found by listening and closing, and tests run in parallel, so another test's
+// server can take the same port before this one binds it. Its readiness probe then answered,
+// this server exited on the bind, and the test talked to another install, which refused its
+// tokens with a 401. So a server counts as ready only once it accepts this install's admin token.
+func (in *install) launchServer(name string, extra ...string) *server {
+	in.t.Helper()
 	port := freePort(in.t)
 	args := []string{"serve", "--db", in.db, "--addr", "127.0.0.1:" + port,
 		"--forward-state", filepath.Join(in.root, "forward-"+name+".json")}
@@ -512,21 +534,44 @@ func (in *install) startServer(name string, extra ...string) *server {
 		select {
 		case <-s.done:
 			log, _ := os.ReadFile(logPath)
+			if strings.Contains(string(log), "address already in use") {
+				return nil
+			}
 			in.t.Fatalf("server %s exited before it was ready: %v\n%s", name, s.exitErr, log)
 		default:
 		}
-		res, err := http.Get(s.url + "/readyz")
-		if err == nil {
-			_ = res.Body.Close()
-			if res.StatusCode == http.StatusOK {
-				return s
-			}
+		if in.ownServerReady(s) {
+			return s
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	log, _ := os.ReadFile(logPath)
 	in.t.Fatalf("server %s was not ready within %s:\n%s", name, waitLimit, log)
 	return nil
+}
+
+// ownServerReady reports whether the server at s.url is ready and is this install's: it answers
+// readiness, and it accepts this install's admin token, which no other install holds.
+func (in *install) ownServerReady(s *server) bool {
+	res, err := http.Get(s.url + "/readyz")
+	if err != nil {
+		return false
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return false
+	}
+	req, err := http.NewRequest(http.MethodGet, s.url+"/v1/auth/me", nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Authorization", "Bearer "+in.tokens["admin"])
+	res, err = httpClient.Do(req)
+	if err != nil {
+		return false
+	}
+	_ = res.Body.Close()
+	return res.StatusCode == http.StatusOK
 }
 
 // stop ends the server gracefully and waits for it, killing it if it does not stop.
