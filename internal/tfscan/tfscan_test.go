@@ -595,6 +595,19 @@ func TestProvidersReadsTheProviderSet(t *testing.T) {
 	}, { // Test 15: A local module that is not in the tree leaves the set unknown.
 		Files: map[string]string{"main.tf": "module \"m\" {\n  source = \"./gone\"\n}\n"},
 		Want:  ErrProvidersUnknown,
+	}, { // Test 16: An action block's type and provider meta-argument are read.
+		Files: map[string]string{"main.tf": "action \"local_command\" \"x\" {\n" +
+			"  provider = awscc\n}\n"},
+		WantEntries: []string{"local name awscc", "local name local"},
+	}, { // Test 17: A provider mirror beside the root module leaves the set unknown.
+		Files: map[string]string{"main.tf": awsInstance, "terraform.d/plugins/registry." +
+			"terraform.io/hashicorp/aws/5.0.0/linux_amd64/terraform-provider-aws_v5.0.0": "bin"},
+		Want: ErrProvidersUnknown,
+	}, { // Test 18: A provider mirror outside the working directory is not the run's.
+		Files: map[string]string{"infra/main.tf": awsInstance,
+			"terraform.d/plugins/registry.terraform.io/hashicorp/aws/5.0.0/x/p": "bin"},
+		Dir:         "infra",
+		WantEntries: []string{"local name aws"},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -656,6 +669,17 @@ func TestProvidersTellsAChangedHead(t *testing.T) {
 		Head: treeOf(strings.Replace(main, "ami-1", "ami-2", 1), net, lock),
 	}, { // Test 7: The head keeps the same registry module call.
 		Head: treeOf(main, net, lock),
+	}, { // Test 8: The head adds an action of a new provider type.
+		Head:        treeOf(main+"action \"local_command\" \"x\" {}\n", net, lock),
+		WantChanged: true,
+	}, { // Test 9: The head adds a provider binary to the local mirror.
+		Head: func() map[string]string {
+			tree := treeOf(main, net, lock)
+			tree["terraform.d/plugins/registry.terraform.io/hashicorp/aws/5.0.0/linux_amd64/"+
+				"terraform-provider-aws_v5.0.0"] = "bin"
+			return tree
+		}(),
+		WantChanged: true,
 	}}
 	want, err := Providers(mapFS(treeOf(main, net, lock)), ".")
 	if err != nil {

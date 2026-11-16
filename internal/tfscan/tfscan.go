@@ -1012,8 +1012,15 @@ func clip(s string) string {
 // a set that changed.
 var ErrProvidersUnknown = errors.New("provider set unknown")
 
-// lockFile is the dependency lock file an init writes beside the root module.
-const lockFile = ".terraform.lock.hcl"
+// The files beside the root module that decide where an init installs providers from.
+const (
+	// lockFile is the dependency lock file an init writes beside the root module.
+	lockFile = ".terraform.lock.hcl"
+	// pluginMirror is the directory Terraform and OpenTofu search as a local provider mirror, in
+	// the working directory, whenever the CLI configuration has no provider_installation block. A
+	// provider found there is installed from it and not from the registry.
+	pluginMirror = "terraform.d"
+)
 
 // The schemas the provider read selects blocks through. Each is partial, like the scan's own.
 var (
@@ -1025,6 +1032,7 @@ var (
 		{Type: "resource", LabelNames: []string{"type", "name"}},
 		{Type: "data", LabelNames: []string{"type", "name"}},
 		{Type: "ephemeral", LabelNames: []string{"type", "name"}},
+		{Type: "action", LabelNames: []string{"type", "name"}},
 		{Type: "module", LabelNames: []string{"name"}},
 		{Type: "check", LabelNames: []string{"name"}},
 	}}
@@ -1032,20 +1040,23 @@ var (
 	terraformSchema = &hcl.BodySchema{Blocks: []hcl.BlockHeaderSchema{{Type: "required_providers"}}}
 	// aliasSchema selects a provider block's alias.
 	aliasSchema = &hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "alias"}}}
-	// providerArgSchema selects the provider meta-argument of a resource, data, or ephemeral block.
+	// providerArgSchema selects the provider meta-argument of a resource, data, ephemeral, or action
+	// block.
 	providerArgSchema = &hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "provider"}}}
 )
 
 // Providers reads the configuration in directory dir of fsys, and every local module it calls, and
 // returns its provider set as sorted, distinct entries: each required_providers entry with its
-// source and version constraint, the local name every resource, data, and ephemeral type implies
-// and every provider meta-argument names, each provider block with its alias, and a digest of the
+// source and version constraint, the local name every resource, data, ephemeral, and action type
+// implies and every provider meta-argument names, each provider block with its alias, and a digest of the
 // dependency lock file beside the root module when there is one, and each registry or remote module
 // call by its source and version constraint. Nothing outside fsys is read.
 //
 // A registry or remote module is not fetched, so its call stands for whatever it requires. A module
 // whose source or version is only known when the run plans, or a file the read could not parse,
-// leaves the set unknown, and an error wrapping ErrProvidersUnknown names the first such thing.
+// leaves the set unknown, and an error wrapping ErrProvidersUnknown names the first such thing. So
+// does a terraform.d entry beside the root module, since a provider binary there is installed in
+// place of the one the set names.
 func Providers(fsys fs.FS, dir string) ([]string, error) {
 	s := &scan{
 		fsys: fsys, tool: run.ToolTerraform, place: "the configuration's tree",
@@ -1060,6 +1071,7 @@ func Providers(fsys fs.FS, dir string) ([]string, error) {
 		s.skip("the working directory "+quote(dir), "not in "+s.place)
 	default:
 		s.root = root
+		s.mirror(root)
 		s.lockDigest(root, set)
 		s.providerModule(call{dir: root}, set)
 	}
@@ -1072,6 +1084,22 @@ func Providers(fsys fs.FS, dir string) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// mirror lists the local provider mirror in dir as unread when there is one. Its binaries are not
+// read, so a tree carrying one cannot show that its providers match another's.
+func (s *scan) mirror(dir string) {
+	name := path.Join(dir, pluginMirror)
+	_, err := fs.Stat(s.fsys, name)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return
+	case err != nil:
+		s.skip("the provider mirror "+quote(name), s.why(err))
+	default:
+		s.skip("the provider mirror "+quote(name), "an init installs any provider found there in "+
+			"place of the registry's, and its binaries are not read")
+	}
 }
 
 // lockDigest adds a digest of the dependency lock file in dir to set, when there is one.
@@ -1172,7 +1200,7 @@ func (s *scan) providerFile(name string, set map[string]bool) []moduleBlock {
 			s.requiredProviders(name, b, set)
 		case "provider":
 			s.providerBlock(name, b, set)
-		case "resource", "data", "ephemeral":
+		case "resource", "data", "ephemeral", "action":
 			s.typedBlock(name, b, set)
 		case "module":
 			modules = append(modules, moduleOf(b, overrideFile(name)))
@@ -1283,7 +1311,7 @@ func (s *scan) providerBlock(name string, b *hcl.Block, set map[string]bool) {
 	set[entry] = true
 }
 
-// typedBlock adds the local provider name a resource, data, or ephemeral block uses to set: the
+// typedBlock adds the local provider name a resource, data, ephemeral, or action block uses to set: the
 // one its provider meta-argument names, and the one its type implies, the prefix before the type's
 // first underscore, such as aws for aws_instance.
 func (s *scan) typedBlock(name string, b *hcl.Block, set map[string]bool) {
