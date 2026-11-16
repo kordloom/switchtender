@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -393,5 +394,104 @@ func TestSplitRollupKeepsAFinishedShardsOwnResult(t *testing.T) {
 				"outcome would state that a change which landed on every host did not happen",
 				i, status)
 		}
+	}
+}
+
+// TestSubmitRefusesAHiddenCharacter pins that a run whose command, playbook, labels, or intent
+// holds a direction override, a zero-width character, or a control character is refused before it
+// is stored, with the field, the character, and its position named. An approver reads that text
+// to decide, so a character that reorders or hides it would show one run and execute another.
+func TestSubmitRefusesAHiddenCharacter(t *testing.T) {
+	t.Parallel()
+	bash := run.WithTool(run.ToolBash)
+	tests := []struct {
+		// Playbook is the first Submit argument.
+		Playbook string
+		// Opts configure the run.
+		Opts []run.SubmitOption
+		// WantInError is the text the refusal must hold.
+		WantInError string
+	}{{ // Test 0: A direction override in a command.
+		Opts:        []run.SubmitOption{bash, run.WithCommand("rm -rf /tmp/\u202eexe.txt")},
+		WantInError: "the command holds U+202E RIGHT-TO-LEFT OVERRIDE at character 13",
+	}, { // Test 1: A zero-width space in a label value.
+		Opts: []run.SubmitOption{bash, run.WithCommand("echo hi"),
+			run.WithLabels(map[string]string{"env": "prod\u200b"})},
+		WantInError: `the label "env" holds U+200B ZERO WIDTH SPACE at character 5`,
+	}, { // Test 2: A zero-width joiner in a label key, which the refusal quotes visibly.
+		Opts: []run.SubmitOption{bash, run.WithCommand("echo hi"),
+			run.WithLabels(map[string]string{"e\u200dnv": "prod"})},
+		WantInError: `the label key "e\u200dnv" holds U+200D ZERO WIDTH JOINER at character 2`,
+	}, { // Test 3: An isolate in a playbook.
+		Playbook:    "site\u2066.yml",
+		WantInError: "the playbook holds U+2066 LEFT-TO-RIGHT ISOLATE at character 5",
+	}, { // Test 4: A terminal escape in an intent.
+		Opts: []run.SubmitOption{bash, run.WithCommand("echo hi"),
+			run.WithIntent("restart web\x1b[2K")},
+		WantInError: "the intent holds U+001B ESCAPE at character 12",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			store := run.NewMemStore()
+			d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor())
+			defer d.Close()
+
+			got, err := d.Submit(context.Background(), test.Playbook, "inv", test.Opts...)
+			if !errors.Is(err, ErrHiddenCharacter) {
+				t.Fatalf("Submit() error = %v, want %v", err, ErrHiddenCharacter)
+			}
+			if !strings.Contains(err.Error(), test.WantInError) {
+				t.Errorf("Submit() error = %q, want it to hold %q", err, test.WantInError)
+			}
+			if got != nil {
+				t.Errorf("a refused submission returned run %s", got.ID)
+			}
+			if runs, _ := store.List(context.Background()); len(runs) != 0 {
+				t.Errorf("%d runs stored from a refused submission", len(runs))
+			}
+		})
+	}
+}
+
+// TestSubmitAcceptsPlainText pins that a tab, a line feed, and letters in any script pass the
+// hidden character check, so a multi-line script or a label in another language still runs.
+func TestSubmitAcceptsPlainText(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor())
+	defer d.Close()
+	got, err := d.Submit(context.Background(), "", "inv", run.WithTool(run.ToolBash),
+		run.WithCommand("echo one\n\techo deux 日本"),
+		run.WithLabels(map[string]string{"team": "plateforme é"}))
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	dispatchtest.WaitTerminal(t, store, got.ID)
+}
+
+// TestSubmitSplitAndPipelineRefuseAHiddenCharacter pins that the split and pipeline paths reach
+// the same check, a pipeline for each step's command and playbook as well as its own text.
+func TestSubmitSplitAndPipelineRefuseAHiddenCharacter(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	d := New(store, &dispatchtest.FakeRunnerLister{HostNames: []string{"web01", "web02"}}, nil,
+		WithNoJanitor())
+	defer d.Close()
+	ctx := context.Background()
+
+	_, err := d.SubmitSplit(ctx, "site.yml", "inv", 2,
+		run.WithLabels(map[string]string{"ticket": "\u202eOPS-1"}))
+	if !errors.Is(err, ErrHiddenCharacter) {
+		t.Errorf("SubmitSplit() error = %v, want %v", err, ErrHiddenCharacter)
+	}
+	steps := []run.PipelineStep{{Name: "build", Tool: run.ToolBash, Command: "make\u200b all"}}
+	_, err = d.SubmitPipeline(ctx, "release", "", steps)
+	if !errors.Is(err, ErrHiddenCharacter) ||
+		!strings.Contains(err.Error(), `the step "build" command holds U+200B`) {
+		t.Errorf("SubmitPipeline() error = %v, want %v naming the step", err, ErrHiddenCharacter)
+	}
+	if runs, _ := store.List(ctx); len(runs) != 0 {
+		t.Errorf("%d runs stored from refused submissions", len(runs))
 	}
 }

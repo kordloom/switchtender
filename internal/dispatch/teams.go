@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"encoding/json"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -62,10 +63,24 @@ func (d *Dispatcher) notifyTeams(r *run.Run) {
 	}
 }
 
+// teamsEscaper puts a backslash before each character an Adaptive Card reads as markdown, which is
+// how a title or a fact value would carry a link with its own text or emphasis.
+var teamsEscaper = strings.NewReplacer(
+	`\`, `\\`, "*", `\*`, "_", `\_`, "~", `\~`, "`", "\\`", "[", `\[`, "]", `\]`, "(", `\(`,
+	")", `\)`,
+)
+
+// teamsEscape returns s with Adaptive Card markdown escaped, so a value from outside, such as a
+// playbook an agent named, displays as written in a card's title or a fact.
+func teamsEscape(s string) string {
+	return teamsEscaper.Replace(s)
+}
+
 // teamsCardPayload renders a run as a Teams Adaptive Card: a title colored by outcome and a fact set
 // with the status, the elapsed time, and any failure detail. It carries no extra vars, so channel
-// secrets are not exposed.
+// secrets are not exposed. Every value from outside goes through teamsEscape first.
 func teamsCardPayload(r *run.Run) teamsMessage {
+	r = escapedNotice(r, teamsEscape)
 	if isSkip(r) {
 		return teamsCardOf("SwitchTender schedule "+skipSchedule(r)+" "+skipHeadline(r), "Warning",
 			skipTeamsFacts(r))
@@ -101,7 +116,8 @@ func teamsCardPayload(r *run.Run) teamsMessage {
 			facts = append(facts, map[string]string{"title": "Held by", "value": r.HeldByPolicy})
 		}
 		if why := r.NotChangeFreeSummary(); why != "" {
-			facts = append(facts, map[string]string{"title": "Not a preview", "value": why})
+			facts = append(facts, map[string]string{"title": "Not a preview",
+				"value": teamsEscape(why)})
 		}
 		if r.HoldNote != "" {
 			facts = append(facts, map[string]string{"title": "Why it waits", "value": r.HoldNote})

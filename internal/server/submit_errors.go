@@ -58,7 +58,7 @@ var submitClasses = []struct {
 		dispatch.ErrNoCommand, dispatch.ErrUnknownTool, dispatch.ErrToolCredential,
 		dispatch.ErrNoSteps, dispatch.ErrTooManySteps, dispatch.ErrStepInput, dispatch.ErrUnnamedStep,
 		dispatch.ErrDuplicateStep, dispatch.ErrUnknownDependency, dispatch.ErrDependencyCycle,
-		run.ErrApprovalStep, run.ErrDenyPath, run.ErrLimitFile,
+		dispatch.ErrHiddenCharacter, run.ErrApprovalStep, run.ErrDenyPath, run.ErrLimitFile,
 	}},
 	{class: submitSecret, errs: []error{credential.ErrNoSecret, credential.ErrUnreadable}},
 	{class: submitPolicy, errs: []error{

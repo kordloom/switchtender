@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,14 +15,18 @@ import (
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
-// validateRun checks that there is room to record a new run, then its credential and project
-// references, before it is accepted. The run's own credentials are held to the tool-compatibility
+// validateRun checks that the text an approver reads is plain, that there is room to record a new
+// run, then its credential and project references, before it is accepted. The run's own credentials are held to the tool-compatibility
 // gate; credentials inherited from the target inventory are checked for existence and
 // decryptability but not tool fit, since materializeCredentials resolves the inherited set too and
 // an undecryptable one there would otherwise fail only at execution.
 func (d *Dispatcher) validateRun(ctx context.Context, r *run.Run) error {
+	if err := requirePlainText(r); err != nil {
+		return err
+	}
 	if err := d.admit(); err != nil {
 		return err
 	}
@@ -39,6 +46,52 @@ func (d *Dispatcher) validateRun(ctx context.Context, r *run.Run) error {
 		return err
 	}
 	return d.validateProject(ctx, r.ProjectID)
+}
+
+// textField is one piece of a run's text that an approver reads.
+type textField struct {
+	// name is how a refusal names the field, such as "command" or "label \"env\"".
+	name string
+	// text is the field's value.
+	text string
+}
+
+// requirePlainText refuses a run whose command, playbook, labels, or intent, or a pipeline step's
+// command or playbook, holds a character util.HiddenRuneName names. Those characters reorder or
+// hide the text around them, so the run an approver is shown would not be the run that executes.
+// The refusal names the field, the character, and its position, so the sender can find it.
+func requirePlainText(r *run.Run) error {
+	fields := []textField{{"command", r.Command}, {"playbook", r.Playbook}, {"intent", r.Intent}}
+	for _, key := range slices.Sorted(maps.Keys(r.Labels)) {
+		fields = append(fields, textField{"label key " + strconv.Quote(key), key},
+			textField{"label " + strconv.Quote(key), r.Labels[key]})
+	}
+	for _, step := range r.Steps {
+		prefix := "step " + strconv.Quote(step.Name) + " "
+		fields = append(fields, textField{prefix + "command", step.Command},
+			textField{prefix + "playbook", step.Playbook})
+	}
+	for _, f := range fields {
+		if err := PlainText(f.name, f.text); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// PlainText returns ErrHiddenCharacter naming field, the first character in text that
+// util.HiddenRuneName names, and its position counted in characters from one, or nil when text
+// holds none. A run's text is held to it at submit, and a template or inventory name when saved.
+func PlainText(field, text string) error {
+	pos := 0
+	for _, r := range text {
+		pos++
+		if name := util.HiddenRuneName(r); name != "" {
+			return fmt.Errorf("%w: the %s holds %U %s at character %d", ErrHiddenCharacter, field, r,
+				name, pos)
+		}
+	}
+	return nil
 }
 
 // validateGitRef refuses a run naming a git ref it cannot honor. A ref is only meaningful inside a

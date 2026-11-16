@@ -1,11 +1,16 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"go.uber.org/zap"
+
+	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/user"
 )
 
@@ -85,6 +90,59 @@ func TestConstructedDefinitionsAreAdminOnly(t *testing.T) {
 			}
 			if listed := f.runner.Lists() > 0; listed != test.WantListed {
 				t.Errorf("listings run = %d, want any: %t", f.runner.Lists(), test.WantListed)
+			}
+		})
+	}
+}
+
+// TestInventorySaveRefusesAHiddenCharacterInTheName pins that creating or renaming an inventory
+// refuses a name holding a direction override or a zero-width character, so the name an approver
+// reads in a held run is the name that was saved.
+func TestInventorySaveRefusesAHiddenCharacterInTheName(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Method is POST for a create and PUT for an update.
+		Method string
+		// Body is the request body.
+		Body string
+		// WantCode is the status the save answers with.
+		WantCode int
+		// WantInBody is text the answer must hold.
+		WantInBody string
+	}{{ // Test 0: A create whose name holds a direction override.
+		Method: http.MethodPost, Body: `{"name":"prod\u202ebew","content":"web1"}`,
+		WantCode: http.StatusBadRequest, WantInBody: "U+202E RIGHT-TO-LEFT OVERRIDE at character 5",
+	}, { // Test 1: A rename to a name holding a zero-width space.
+		Method: http.MethodPut, Body: `{"name":"pro\u200bd","content":"web1"}`,
+		WantCode: http.StatusBadRequest, WantInBody: "U+200B ZERO WIDTH SPACE at character 4",
+	}, { // Test 2: A plain name is saved.
+		Method: http.MethodPost, Body: `{"name":"prod","content":"web1"}`,
+		WantCode: http.StatusCreated,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			store := inventory.NewMemStore()
+			if err := store.Save(context.Background(), &inventory.Inventory{
+				ID: "inv_1", Name: "prod", Content: "web1",
+			}); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+			h := createInventoryHandler(store, &authorizer{}, nil, zap.NewNop())
+			path := "/v1/inventories"
+			if test.Method == http.MethodPut {
+				h = updateInventoryHandler(store, &authorizer{}, nil, zap.NewNop())
+				path += "/inv_1"
+			}
+			req := httptest.NewRequest(test.Method, path, strings.NewReader(test.Body))
+			req.SetPathValue("id", "inv_1")
+			req = req.WithContext(context.WithValue(req.Context(), actorKey{},
+				Actor{UserID: "u", Role: user.RoleAdmin}))
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != test.WantCode || !strings.Contains(rec.Body.String(), test.WantInBody) {
+				t.Errorf("%s %s = %d %s, want %d holding %q", test.Method, path, rec.Code,
+					rec.Body.String(), test.WantCode, test.WantInBody)
 			}
 		})
 	}

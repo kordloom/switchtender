@@ -3,6 +3,7 @@ package dispatch
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -19,6 +20,32 @@ func WithDiscord(urls []string) Option {
 type discordPayload struct {
 	// Content is the message posted to the channel, rendered with Discord markdown.
 	Content string `json:"content"`
+	// AllowedMentions tells Discord to ping nobody, whatever the content names.
+	AllowedMentions discordNoMentions `json:"allowed_mentions"`
+}
+
+// discordNoMentions is a Discord allowed_mentions object with an empty parse list, which stops a
+// message from pinging @everyone, @here, a role, or a user. Its zero value is the whole setting,
+// so every payload built anywhere carries it without having to remember to.
+type discordNoMentions struct{}
+
+// MarshalJSON encodes the allowed_mentions object with an empty parse list.
+func (discordNoMentions) MarshalJSON() ([]byte, error) {
+	return []byte(`{"parse":[]}`), nil
+}
+
+// discordEscaper puts a backslash before each character Discord reads as markdown or as the start
+// of a mention or a masked link. Escaping the brackets is enough to stop a masked link, so
+// parentheses, which a policy name often holds, are left as written.
+var discordEscaper = strings.NewReplacer(
+	`\`, `\\`, "*", `\*`, "_", `\_`, "~", `\~`, "`", "\\`", "|", `\|`, ">", `\>`, "<", `\<`,
+	"[", `\[`, "]", `\]`, "@", `\@`,
+)
+
+// discordEscape returns s with Discord's markdown escaped, so a value from outside, such as a
+// playbook an agent named, cannot become a masked link, a spoiler, or a mention.
+func discordEscape(s string) string {
+	return discordEscaper.Replace(s)
 }
 
 // notifyDiscord posts a finished or held top-level run to every configured Discord webhook.
@@ -41,8 +68,10 @@ func (d *Dispatcher) notifyDiscord(r *run.Run) {
 }
 
 // discordMessage renders a run as a one-line Discord message with a status emoji, the run label, and
-// the elapsed time. It carries no extra vars, so channel secrets are not exposed.
+// the elapsed time. It carries no extra vars, so channel secrets are not exposed. Every value from
+// outside goes through discordEscape first.
 func discordMessage(r *run.Run) string {
+	r = escapedNotice(r, discordEscape)
 	if isSkip(r) {
 		return "SwitchTender schedule **" + skipSchedule(r) + "** " + skipHeadline(r) + " " +
 			skipDetail(r)

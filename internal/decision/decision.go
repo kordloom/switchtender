@@ -19,10 +19,11 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/kordloom/loomseal/jcs"
+
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // Kinds of record. A decision is an approval or a denial made by a person, and a correction is a
@@ -213,8 +214,9 @@ func (r *Record) Clone() *Record {
 }
 
 // Canonical reduces a reason to the form that is masked, stored, committed, and disclosed: line
-// breaks normalized to a line feed, control characters other than a line feed and a tab removed,
-// the bidirectional override and isolate characters removed, and surrounding whitespace trimmed. A
+// breaks normalized to a line feed, every character util.HiddenRuneName names removed, which is
+// the control characters other than a line feed and a tab and the direction and zero-width
+// characters, and surrounding whitespace trimmed. A
 // disclosed reason is already canonical, so a verifier commits to it exactly as disclosed and never
 // needs this function.
 //
@@ -226,21 +228,12 @@ func Canonical(text string) string {
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
 	text = strings.Map(func(r rune) rune {
-		switch {
-		case r == '\n' || r == '\t':
-			return r
-		case unicode.IsControl(r), bidiControl(r):
+		if util.HiddenRuneName(r) != "" {
 			return -1
 		}
 		return r
 	}, text)
 	return strings.TrimSpace(text)
-}
-
-// bidiControl reports whether r is a bidirectional embedding, override, or isolate character, which
-// reorders how the text around it is displayed without being visible itself.
-func bidiControl(r rune) bool {
-	return (r >= '‪' && r <= '‮') || (r >= '⁦' && r <= '⁩')
 }
 
 // TooLong reports whether a canonical reason is over the cap, counted in characters.

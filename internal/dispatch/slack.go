@@ -3,6 +3,8 @@ package dispatch
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -57,8 +59,10 @@ func (d *Dispatcher) deliverSlackFormat(urls []string, label string, r *run.Run)
 }
 
 // slackMessage renders a run as a one-line Slack message with a status icon, the run label, and
-// the elapsed time. It carries no extra vars, so channel secrets are not exposed.
+// the elapsed time. It carries no extra vars, so channel secrets are not exposed. Every value from
+// outside goes through slackEscape first.
 func slackMessage(r *run.Run) string {
+	r = escapedNotice(r, slackEscape)
 	if isSkip(r) {
 		return ":fast_forward: SwitchTender schedule *" + skipSchedule(r) + "* " + skipHeadline(r) +
 			" " + skipDetail(r)
@@ -87,6 +91,55 @@ func slackMessage(r *run.Run) string {
 		msg += "\n> " + truncateError(r.Error)
 	}
 	return msg
+}
+
+// slackEscaper replaces the three characters Slack reads as markup in message text.
+var slackEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+
+// slackEscape returns s with the characters Slack reads as markup escaped, so a value from outside,
+// such as a playbook an agent named, cannot become a link with its own text or a channel mention.
+func slackEscape(s string) string {
+	return slackEscaper.Replace(s)
+}
+
+// escapedNotice returns a copy of r whose values from outside are passed through escape: the
+// playbook, the hold note, the policy name, the actor, the error, the warning, the label values,
+// the source id, the attention note's text, and the awaiting step's text. A channel renders the
+// copy, so its own markup stays live and nothing a submitter typed is read as markup. r is left
+// untouched.
+func escapedNotice(r *run.Run, escape func(string) string) *run.Run {
+	cp := *r
+	cp.Playbook = escape(r.Playbook)
+	cp.HoldNote = escape(r.HoldNote)
+	cp.HeldByPolicy = escape(r.HeldByPolicy)
+	cp.Actor = escape(r.Actor)
+	cp.Error = escape(r.Error)
+	cp.Warning = escape(r.Warning)
+	cp.SourceID = escape(r.SourceID)
+	if r.Labels != nil {
+		cp.Labels = maps.Clone(r.Labels)
+		for k, v := range cp.Labels {
+			cp.Labels[k] = escape(v)
+		}
+	}
+	if r.Attention != nil {
+		a := *r.Attention
+		a.Summary, a.Reason = escape(a.Summary), escape(a.Reason)
+		a.WhoCanAct, a.Next = escape(a.WhoCanAct), escape(a.Next)
+		cp.Attention = &a
+	}
+	if r.AwaitingStep != nil {
+		s := r.AwaitingStep.Clone()
+		s.Name, s.Description = escape(s.Name), escape(s.Description)
+		for i := range s.OnApprove {
+			s.OnApprove[i] = escape(s.OnApprove[i])
+		}
+		for i := range s.OnDeny {
+			s.OnDeny[i] = escape(s.OnDeny[i])
+		}
+		cp.AwaitingStep = s
+	}
+	return &cp
 }
 
 // runLabel returns a human label for a run in a notification: its playbook, else its tool and id, so a

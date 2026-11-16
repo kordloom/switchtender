@@ -87,3 +87,45 @@ func TestDispatcherNotifiesDiscord(t *testing.T) {
 		t.Fatal("discord webhook never received the notification")
 	}
 }
+
+// TestDiscordMessageEscapesOutsideText proves a playbook, hold note, policy name, actor, error, or
+// step from outside reaches Discord with its markdown escaped.
+func TestDiscordMessageEscapesOutsideText(t *testing.T) {
+	t.Parallel()
+	for testNum, in := range hostileRuns() {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			got := discordMessage(in)
+			for _, want := range []string{`a\<https://x.example/\|b\>\*\@everyone`} {
+				if !strings.Contains(got, want) {
+					t.Errorf("discordMessage() = %q, want it to hold %q", got, want)
+				}
+			}
+			if strings.Contains(got, " @everyone") || strings.Contains(got, "a<https") {
+				t.Errorf("discordMessage() = %q, want no bare mention or link", got)
+			}
+		})
+	}
+}
+
+// TestDiscordPayloadAllowsNoMentions proves every Discord body sets allowed_mentions with an empty
+// parse list, so Discord pings nobody whatever the content names.
+func TestDiscordPayloadAllowsNoMentions(t *testing.T) {
+	t.Parallel()
+	body, err := json.Marshal(discordPayload{Content: discordMessage(hostileRuns()[0])})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	var got struct {
+		AllowedMentions *struct {
+			Parse []string `json:"parse"`
+		} `json:"allowed_mentions"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if got.AllowedMentions == nil || got.AllowedMentions.Parse == nil ||
+		len(got.AllowedMentions.Parse) != 0 {
+		t.Errorf("payload = %s, want allowed_mentions with an empty parse list", body)
+	}
+}

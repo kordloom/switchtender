@@ -94,3 +94,43 @@ func TestDispatcherNotifiesSlack(t *testing.T) {
 		t.Fatal("slack webhook never received the notification")
 	}
 }
+
+// hostileText is a value an agent could put in a playbook, a hold note, a policy name, an actor, or
+// an error: a Slack link with its own text, emphasis, and a channel-wide mention.
+const hostileText = "a<https://x.example/|b>*@everyone"
+
+// hostileRuns returns a held run and a failed run carrying hostileText in every outside field a
+// notice shows, so each channel's escaper is held to all of them.
+func hostileRuns() []*run.Run {
+	return []*run.Run{{
+		ID: "r-held", Playbook: hostileText, Status: run.StatusPendingApproval,
+		HoldNote: hostileText, HeldByPolicy: hostileText, Actor: hostileText,
+	}, {
+		ID: "r-failed", Playbook: hostileText, Status: run.StatusFailed, Error: hostileText,
+	}, {
+		ID: "r-step", Playbook: hostileText, Status: run.StatusPendingApproval, Actor: hostileText,
+		AwaitingStep: &run.AwaitingStep{Name: hostileText, Description: hostileText,
+			OnApprove: []string{hostileText}},
+	}}
+}
+
+// TestSlackMessageEscapesOutsideText proves a playbook, hold note, policy name, actor, error, or
+// step from outside cannot plant a Slack link or a mention, and that the run itself is untouched.
+func TestSlackMessageEscapesOutsideText(t *testing.T) {
+	t.Parallel()
+	for testNum, in := range hostileRuns() {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			got := slackMessage(in)
+			if !strings.Contains(got, "&lt;") || strings.Contains(got, "<https") {
+				t.Errorf("slackMessage() = %q, want &lt; and no <https", got)
+			}
+			if strings.ContainsAny(strings.ReplaceAll(got, "\n> ", ""), "<>") {
+				t.Errorf("slackMessage() = %q, want no bare angle bracket", got)
+			}
+			if in.Playbook != hostileText {
+				t.Errorf("slackMessage() changed the run's playbook to %q", in.Playbook)
+			}
+		})
+	}
+}
