@@ -111,6 +111,10 @@
 					plural(report.unanchored_claims, "claim", "claims") + " after it";
 				if (report.unanchored_window) line += " spanning " + report.unanchored_window;
 			}
+			// The verifier reaches this position by matching anchor coordinates, and a timestamp
+			// token is checked against the certificate it carries. This page pins no timestamp
+			// authority, so the row says what it rests on rather than reading as a fixed position.
+			line += ", by coordinates only, with no timestamp authority pinned here";
 			rows.push(["anchored", line]);
 		}
 		(report.problems || []).forEach(function (p) { rows.push(["problem", p]); });

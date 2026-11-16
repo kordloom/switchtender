@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -457,5 +458,134 @@ func TestVerifyCountsATimestampTokenOnlyWhenItsAuthorityIsPinned(t *testing.T) {
 				t.Errorf("%s: the CLI output differs from the in-process run:\n%s", test.Name, stdout)
 			}
 		})
+	}
+}
+
+// renderDossier writes the dossier of runID from db through `audit run` and returns its HTML.
+func renderDossier(t *testing.T, db, runID string) string {
+	t.Helper()
+	out := filepath.Join(t.TempDir(), "dossier.html")
+	setString(t, &dossierDB, db)
+	setString(t, &dossierOut, out)
+	if err := runAuditRunDossier(testCommand(), []string{runID}); err != nil {
+		t.Fatalf("runAuditRunDossier(%s) error = %v", runID, err)
+	}
+	doc, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("ReadFile(dossier) error = %v", err)
+	}
+	return string(doc)
+}
+
+// verifyOutput runs verify on a bundle in process and through the CLI, and returns the in-process
+// output, the CLI exit code, and the in-process error.
+func verifyOutput(t *testing.T, bundle string) (out string, code int, err error) {
+	t.Helper()
+	setString(t, &verifyPubkey, "")
+	old := verifyTSACerts
+	t.Cleanup(func() { verifyTSACerts = old })
+	verifyTSACerts = nil
+	var buf bytes.Buffer
+	c := testCommand()
+	c.SetOut(&buf)
+	err = runVerify(c, []string{bundle})
+	_, _, code = runCLI(t, "verify", bundle)
+	return buf.String(), code, err
+}
+
+// TestDossierAndVerifyNameOneTimestampToken pins that the run dossier and verify describe one
+// timestamp token in the same words. A token is checked against the certificate it carries, and
+// anyone can make one, so the dossier names its signer, counts nothing, and says nothing fixes the
+// run's history. It prints the bundle command that lets verify count the token once an authority is
+// pinned, and that command has to work: the bundle it writes carries the same token, and verify
+// prints the same fingerprint and the same state words. An anchor by reference is named as not
+// fetched, in the dossier and in verify, which leaves it out of the count with the verdict and the
+// exit code unchanged.
+func TestDossierAndVerifyNameOneTimestampToken(t *testing.T) {
+	// Not parallel: the audit commands and verify read package-level flag variables.
+	tsa := newTestTSA(t)
+	whole, _ := writeAnchoredBundle(t, tsa)
+	db := filepath.Join(filepath.Dir(whole), "state.db")
+	sum := sha256.Sum256(tsa.Cert.Raw)
+	own := "sha256:" + hex.EncodeToString(sum[:])
+
+	html := renderDossier(t, db, "run_stamped")
+	for _, want := range []string{`<div class="banner anchored">`, own, "UNPINNED, not counted",
+		"names its signer CN=made-on-the-spot timestamp authority,O=Nobody You Trust",
+		"1 carries a timestamp token that is unpinned and not counted."} {
+		if !strings.Contains(html, want) {
+			t.Errorf("the dossier is missing %q:\n%s", want, html)
+		}
+	}
+	if strings.Contains(strings.ToLower(html), "fix") {
+		t.Errorf("the dossier says an anchor fixes something:\n%s", html)
+	}
+
+	// The bundle command the dossier prints writes a bundle verify reads the same token from.
+	m := regexp.MustCompile(`id="bundle-command">switchtender audit bundle --from-seq (\d+) ` +
+		`--to-seq (\d+)<`).FindStringSubmatch(html)
+	if m == nil {
+		t.Fatalf("the dossier prints no bundle command:\n%s", html)
+	}
+	from, _ := strconv.ParseInt(m[1], 10, 64)
+	to, _ := strconv.ParseInt(m[2], 10, 64)
+	oldFrom, oldTo := bundleFromSeq, bundleToSeq
+	t.Cleanup(func() { bundleFromSeq, bundleToSeq = oldFrom, oldTo })
+	bundleFromSeq, bundleToSeq = from, to
+	setInt(t, &bundleLimit, 0)
+	setString(t, &bundleDB, db)
+	windowed := filepath.Join(t.TempDir(), "window.loomseal.json")
+	setString(t, &bundleOut, windowed)
+	if err := runAuditBundle(testCommand(), nil); err != nil {
+		t.Fatalf("the printed bundle command failed: --from-seq %d --to-seq %d: %v", from, to, err)
+	}
+	bundleFromSeq, bundleToSeq = 0, 0
+	got, code, err := verifyOutput(t, windowed)
+	if err != nil || code != CodeOK {
+		t.Fatalf("verify on the printed bundle: error = %v, exit %d, want none and %d:\n%s", err,
+			code, CodeOK, got)
+	}
+	state := regexp.MustCompile(`(?m)^  token at seq \d+, UNPINNED, not counted$`)
+	if !state.MatchString(got) || !strings.Contains(got, "    fingerprint  "+own+"\n") {
+		t.Errorf("verify does not name the token the dossier names (%s, UNPINNED, not counted):\n%s",
+			own, got)
+	}
+
+	// An anchor by reference alone: the dossier says it was not fetched, and verify leaves it out
+	// of the count with the verdict and the exit code a good bundle gets.
+	dir := t.TempDir()
+	refDB := filepath.Join(dir, "state.db")
+	seedReceiptableRun(t, refDB, "run_published")
+	setString(t, &anchorDB, refDB)
+	setString(t, &anchorType, audit.AnchorHTTPS)
+	setString(t, &anchorRef, "https://example.com/switchtender/head")
+	setBool(t, &anchorTree, false)
+	if err := runAuditAnchor(testCommand(), nil); err != nil {
+		t.Fatalf("runAuditAnchor(https) error = %v", err)
+	}
+	html = renderDossier(t, refDB, "run_published")
+	for _, want := range []string{`<div class="banner anchored">`, "not fetched here",
+		"1 is by reference and rests on where it was published."} {
+		if !strings.Contains(html, want) {
+			t.Errorf("the by-reference dossier is missing %q:\n%s", want, html)
+		}
+	}
+	published := filepath.Join(dir, "audit.loomseal.json")
+	setString(t, &bundleDB, refDB)
+	setString(t, &bundleOut, published)
+	if err := runAuditBundle(testCommand(), nil); err != nil {
+		t.Fatalf("runAuditBundle(by reference) error = %v", err)
+	}
+	got, code, err = verifyOutput(t, published)
+	if err != nil || code != CodeOK {
+		t.Fatalf("verify on a by-reference anchor: error = %v, exit %d, want none and %d:\n%s",
+			err, code, CodeOK, got)
+	}
+	for _, want := range []string{"anchors      OK (0 of 1 counted)\n",
+		"  1 with no timestamp token, not fetched here and not counted: its position rests on " +
+			"where it was published\n", "\nINTACT, BUT UNIDENTIFIED:"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("verify on a by-reference anchor is missing %q:\n%s", want, got)
+		}
 	}
 }

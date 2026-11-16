@@ -28,9 +28,10 @@ var auditRunCmd = &cobra.Command{
 
 The dossier answers an auditor's sample request in one document: what was run, who asked for it,
 who approved or rejected it, what happened on each host, the chain entries that recorded each
-decision, and the anchors that fix that history outside this install. Every chain entry carries a
-seq:link receipt redeemable with "switchtender audit receipt", so the document's claims are
-checkable without trusting the server that produced it.`,
+decision, and the anchors recorded over that history. Every chain entry carries a seq:link receipt
+redeemable with "switchtender audit receipt". The dossier is made by the install it describes, so
+check it against a signed receipt or bundle with "switchtender verify", pinning the producer key
+with --pubkey and the timestamp authority with --tsa-cert.`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE:         runAuditRunDossier,

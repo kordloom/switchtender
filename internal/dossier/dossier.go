@@ -54,7 +54,7 @@ type Input struct {
 	// Head is the chain head at collection, the receipt the document carries.
 	Head *audit.Entry `json:"head,omitempty"`
 	// Covering are the anchors that still hold against the chain and sit at or after the position
-	// the run was recorded by, each one an independent fixation of history containing the run.
+	// the run was recorded by.
 	Covering []*audit.Anchor `json:"covering_anchors,omitempty"`
 	// AnchorProblems describes each anchor the chain no longer satisfies. A chain can hash-verify
 	// perfectly and still have been rewritten wholesale or lost its tail; this is what catches it.
@@ -632,18 +632,58 @@ type entryRow struct {
 type anchorRow struct {
 	// Type is the anchor kind.
 	Type string
-	// Seq is the chain position it fixes.
+	// Seq is the coordinate it names.
 	Seq int64
 	// At is when it was taken, formatted.
 	At string
 	// Ref locates it.
 	Ref string
-	// Offline is true when the anchor embeds a timestamp token that was read here and found to fix
-	// this anchor's link.
-	Offline bool
-	// ProofProblem says why an embedded token does not fix the link, empty when there is none or when
-	// it verified.
-	ProofProblem string
+	// Link is the value recorded at Seq, which a reader compares with what Ref publishes.
+	Link string
+	// Proof is the proof cell: what a token states and who it names, why it was refused, or that
+	// nothing here fetched the anchor.
+	Proof string
+	// Fingerprint is the fingerprint of the certificate that signed a matching token, empty for any
+	// other row.
+	Fingerprint string
+	// IssuerSubject is the subject of the carried certificate that directly signed the signer's.
+	IssuerSubject string
+	// IssuerFingerprint is that issuer certificate's fingerprint, empty when the token carries none.
+	IssuerFingerprint string
+	// Tree is true for a tree anchor, which records a Merkle root that a linear bundle does not
+	// carry.
+	Tree bool
+}
+
+// tokenCell is the proof cell of a token that matches its link. The time and the signer's name
+// are what the token's maker wrote, so the cell says the token states them, and leaves the time out
+// when the token states none. The state words are the ones verify prints for the same token.
+func tokenCell(s audit.TimestampSigner) string {
+	subject := s.Subject
+	if subject == "" {
+		subject = "a certificate naming no subject"
+	}
+	if s.Time.IsZero() {
+		return fmt.Sprintf("timestamp token matches this link and names its signer %s: %s", subject,
+			s.State(0))
+	}
+	return fmt.Sprintf("timestamp token matches this link, it states %s and names its signer %s: %s",
+		s.Time.UTC().Format(time.RFC3339), subject, s.State(0))
+}
+
+// runFirstSeq is the lowest chain position of an entry that names the run, its launch included,
+// and zero when none does.
+func runFirstSeq(in *Input) int64 {
+	var first int64
+	if in.Launch != nil {
+		first = in.Launch.Seq
+	}
+	for _, e := range in.Entries {
+		if first == 0 || e.Seq < first {
+			first = e.Seq
+		}
+	}
+	return first
 }
 
 // hostRow is one host outcome as rendered.
@@ -714,7 +754,7 @@ type resolutionView struct {
 
 // view is the data rendered into the dossier.
 type view struct {
-	// Status is the machine verdict class: verified, unanchored, or broken.
+	// Status is the machine verdict class: anchored, unanchored, or broken.
 	Status string
 	// StatusText is the banner sentence.
 	StatusText string
@@ -741,6 +781,16 @@ type view struct {
 	Tokens []tokenRow
 	// Anchors are the covering anchors.
 	Anchors []anchorRow
+	// AnchorTokens is how many covering anchors carry a token that matches its link.
+	AnchorTokens int
+	// AnchorsByReference is how many covering anchors carry no token and are not timestamp
+	// authority anchors, so their positions rest on where they were published.
+	AnchorsByReference int
+	// BundleFrom and BundleTo are the entry range of the bundle that carries the earliest covering
+	// linear anchor with a matching token, both zero when no such bundle can be assembled.
+	BundleFrom, BundleTo int64
+	// BundleCommand is the command that writes that bundle, empty when BundleTo is zero.
+	BundleCommand string
 	// AnchorProblems describes each anchor the chain no longer satisfies.
 	AnchorProblems []string
 	// ReceiptMissing is true when the chain no longer holds the run's creation entry.
@@ -819,31 +869,61 @@ func Render(in *Input) ([]byte, error) {
 		})
 	}
 	refusedProofs := 0
+	var tokenTo, earliest int64
 	for _, a := range in.Covering {
-		// An embedded token is read here rather than described. The row used to say an anchor
-		// "verifies offline" on the strength of a proof string being present, which is a claim about
-		// the authority's statement made without looking at it.
+		// An embedded token is read here rather than described. A token is checked against the
+		// certificate it carries, and anyone can make one, so the row names what the token states
+		// and who it names, and counts nothing.
 		row := anchorRow{
-			Type: a.Type, Seq: a.Seq, At: a.At.UTC().Format(time.RFC3339),
-			Ref: a.Ref, Offline: a.Proof != "",
+			Type: a.Type, Seq: a.Seq, At: a.At.UTC().Format(time.RFC3339), Ref: a.Ref, Link: a.Link,
+			Tree: a.Shape == audit.AnchorShapeTree,
 		}
-		if a.Proof != "" {
-			if err := audit.VerifyTimestampProof(a.Link, a.Proof); err != nil {
-				row.Offline = false
-				row.ProofProblem = err.Error()
+		if earliest == 0 || a.Seq < earliest {
+			earliest = a.Seq
+		}
+		switch {
+		case a.Proof != "":
+			att, err := audit.ReadTimestampProof(a.Link, a.Proof)
+			if err != nil {
+				row.Proof = "timestamp token REFUSED: " + err.Error()
 				refusedProofs++
+				break
 			}
+			signer := audit.NewTimestampSigner(a.Seq, att, nil)
+			row.Proof = tokenCell(signer)
+			row.Fingerprint = signer.Fingerprint
+			row.IssuerSubject, row.IssuerFingerprint = signer.IssuerSubject, signer.IssuerFingerprint
+			v.AnchorTokens++
+			if !row.Tree && (tokenTo == 0 || a.Seq < tokenTo) {
+				tokenTo = a.Seq
+			}
+		case a.Type == audit.AnchorRFC3161:
+			row.Proof = "timestamp authority anchor with no token stored, so nothing here checks it"
+		default:
+			row.Proof = "by reference, not fetched here, so its position rests on where it was " +
+				"published"
+			v.AnchorsByReference++
 		}
 		v.Anchors = append(v.Anchors, row)
 	}
-	// An anchor whose token was refused does not fix anything outside this install, so it is not
-	// counted among the ones that do. The refusal was recorded on the row and then dropped on the
-	// floor: the banner still read "verified" and still counted the refused anchor in its total,
-	// while the table below it said the token does not match the link recorded beside it. A refused
-	// token is the one signal somebody who rewrote the anchors table cannot forge, so it is exactly
-	// the thing the headline must not talk over.
-	holding := len(v.Anchors) - refusedProofs
+	// The bundle that lets verify count a token runs from the run's first entry, or the earliest
+	// covering anchor when no entry names the run, through the earliest covering linear anchor whose
+	// token matched. A bundle carries only the anchors at or below its last entry, so ending before
+	// that token would leave it out, and a tree anchor never rides a linear bundle. A span past what
+	// one bundle assembles would print a command that is refused, so none is printed.
+	from := runFirstSeq(in)
+	if from == 0 {
+		from = earliest
+	}
+	if tokenTo > 0 && from > 0 && from <= tokenTo && tokenTo-from+1 <= audit.MaxAssembledClaims {
+		v.BundleFrom, v.BundleTo = from, tokenTo
+		v.BundleCommand = fmt.Sprintf("switchtender audit bundle --from-seq %d --to-seq %d", from,
+			tokenTo)
+	}
 	v.AnchorProblems = in.AnchorProblems
+	// A refused token is the one signal somebody who rewrote the anchors table cannot forge, so it
+	// leads every case short of a chain that is itself broken, the unanchored ones included: a run
+	// no entry names still has its anchors read, and one of them says what it is not.
 	switch {
 	case !in.ChainOK:
 		v.Status = "broken"
@@ -862,21 +942,6 @@ func Render(in *Input) ([]byte, error) {
 		v.StatusText = fmt.Sprintf("The chain no longer satisfies %d of its own anchors, so "+
 			"history was rewritten or lost. Nothing below is trustworthy until that is explained.",
 			len(in.AnchorProblems))
-	case len(v.Anchors) == 0:
-		v.Status = "unanchored"
-		v.StatusText = "The chain verifies, but no anchor covers this run yet, so the record " +
-			"rests on this install alone. The next anchor fixes it: switchtender audit anchor " +
-			"records the head at a public timestamp authority in one command."
-	case in.Launch == nil && len(in.Entries) == 0:
-		// The anchors hold, but over a chain that names this run nowhere. Saying they "fix history
-		// containing this run" would assert a record that does not exist: what they actually fix is
-		// the surrounding history as it stood when the run ran. An evidence document that overstates
-		// what an anchor proves is the same defect as one that understates a tamper.
-		v.Status = "unanchored"
-		v.StatusText = fmt.Sprintf("The chain verifies and %d %s it outside this install, but it "+
-			"holds no entry naming this run, so %s the history around it rather than a record "+
-			"of it.", holding, util.Plural(holding, "anchor fixes", "anchors fix"),
-			util.Plural(holding, "it fixes", "they fix"))
 	case refusedProofs > 0:
 		v.Status = "broken"
 		v.StatusText = fmt.Sprintf("%d %s a timestamp token that does not fix the link recorded "+
@@ -884,10 +949,20 @@ func Render(in *Input) ([]byte, error) {
 			"on an outside authority until that is explained.", refusedProofs,
 			util.Plural(refusedProofs, "anchor covering this run carries",
 				"anchors covering this run carry"))
+	case len(v.Anchors) == 0:
+		v.Status = "unanchored"
+		v.StatusText = "The chain verifies, but no anchor covers this run yet, so the record " +
+			"rests on this install alone. To anchor it, switchtender audit anchor records the " +
+			"head at a public timestamp authority in one command."
+	case in.Launch == nil && len(in.Entries) == 0:
+		// The anchors hold, but over a chain that names this run nowhere, so they cover the
+		// surrounding history as it stood when the run ran and not a record of the run.
+		v.Status = "unanchored"
+		v.StatusText = "The chain verifies and still matches its anchors, but it holds no entry " +
+			"naming this run, so they cover the history around it and not a record of it."
 	default:
-		v.Status = "verified"
-		v.StatusText = fmt.Sprintf("The chain verifies and %d %s history containing this run "+
-			"outside this install.", holding, util.Plural(holding, "anchor fixes", "anchors fix"))
+		v.Status = "anchored"
+		v.StatusText = anchoredText(len(v.Anchors), v.AnchorTokens, v.AnchorsByReference)
 	}
 	// A drifted seal is a finding about who decided, which no anchor answers, so it outranks any
 	// verdict short of a chain that is itself broken.
@@ -911,6 +986,25 @@ func Render(in *Input) ([]byte, error) {
 		return nil, fmt.Errorf("render dossier: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+// anchoredText is the banner when anchors cover the run and none is refused. It says how many the
+// chain still matches and how many of those carry a token or are by reference, and counts none of
+// them, since nothing here was checked outside this install.
+func anchoredText(covering, tokens, byReference int) string {
+	text := fmt.Sprintf("The chain verifies and still matches the %d %s this run.", covering,
+		util.Plural(covering, "anchor that covers", "anchors that cover"))
+	if tokens > 0 {
+		text += fmt.Sprintf(" %d %s unpinned and not counted.", tokens,
+			util.Plural(tokens, "carries a timestamp token that is",
+				"carry timestamp tokens that are"))
+	}
+	if byReference > 0 {
+		text += fmt.Sprintf(" %d %s.", byReference, util.Plural(byReference,
+			"is by reference and rests on where it was published",
+			"are by reference and rest on where they were published"))
+	}
+	return text + " How to check them outside this install is under Anchors covering this run."
 }
 
 // OnBehalfOf returns the account an entry's actor used, for showing beside the actor. It is empty

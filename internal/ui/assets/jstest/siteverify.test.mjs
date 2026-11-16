@@ -225,6 +225,23 @@ test("every count on the page takes the noun in the number it needs", async () =
 	}
 });
 
+test("the anchored row says no timestamp authority is pinned", async () => {
+	// The verifier counts an anchor as reaching a position when its coordinates match, whoever
+	// signed its token, and a token verifies under a certificate anyone can make. Reading "through
+	// seq 7" alone told a visitor an outside authority fixed that position, which nothing here checked.
+	const page = await mount({
+		...SOUND,
+		anchors_matched: 1,
+		anchor_proofs_carried: 1,
+		anchor_proofs_verified: 1,
+		anchored_through_seq: 7,
+	});
+	const text = page.drop("sha256:good").textContent;
+
+	assert.match(text, /through seq 7, by coordinates only, with no timestamp authority pinned here/,
+		"the anchored row reads as a fixed position: " + text);
+});
+
 test("a pin that was given but never reached is not reported as no pin", async () => {
 	// The verifier stops at a failed signature before it compares the pin. The page rendered that
 	// as "pin NONE", which told a visitor who had pinned a fingerprint that they had not, and left
