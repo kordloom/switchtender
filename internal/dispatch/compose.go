@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -327,6 +328,18 @@ func (d *Dispatcher) AnsibleCommands() (ansibleruntime.Commands, bool) {
 func (d *Dispatcher) installHint() string {
 	c, _ := d.AnsibleCommands()
 	return inventory.AnsibleInstallHintFor(c.Root)
+}
+
+// nameAnsibleInstall adds the line that installs Ansible to the failure of a host Ansible run
+// whose command was not found, so the run's error names the fix beside the operating system's
+// words. Every other failure, and a run inside an image, is returned as it came.
+func (d *Dispatcher) nameAnsibleInstall(spec roundhouse.Spec, err error) error {
+	if spec.Image != "" || run.NormalizeTool(spec.Tool) != run.ToolAnsible ||
+		!errors.Is(err, exec.ErrNotFound) {
+		return err
+	}
+	return fmt.Errorf("%w: Ansible is not installed where this executor looks. Install it "+
+		"with: %s", err, d.installHint())
 }
 
 // bindAnsible binds the host's Ansible, located once, to ctx, so every Ansible command started for

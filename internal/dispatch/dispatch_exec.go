@@ -574,6 +574,7 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	staged.add(facts.remove)
 
 	res, runErr := d.runner.Run(ctx, spec, sink)
+	runErr = d.nameAnsibleInstall(spec, runErr)
 	credCleanup()
 	// The digest of the image the runtime pulled and ran, which the outcome commits, so the record
 	// names the bytes that executed even when the run was bound to a tag.
