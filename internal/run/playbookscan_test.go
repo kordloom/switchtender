@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 // treeOf builds an in-memory tree from path and content pairs.
@@ -495,5 +497,125 @@ func TestTheGradeSaysWhichCommitItRead(t *testing.T) {
 		ReversibilityEvidence{Playbook: signals})
 	if said := strings.Join(got.Reasons, "\n"); !strings.Contains(said, signals.Source) {
 		t.Errorf("reasons do not carry the source %q:\n%s", signals.Source, said)
+	}
+}
+
+// TestTheScanDeniesEveryLookupItCannotClear covers the scan as a default deny. Each of the first
+// five forms ran a command on the controller under ansible-playbook --check, and a scan that
+// matched the pipe lookup by name classified every one of them change free. A dry run is change free only
+// when every lookup names, as a quoted literal, a plugin the scan knows runs nothing, every with_
+// loop does too, and the lookup names appear nowhere else.
+//
+//nolint:funlen // Test function.
+func TestTheScanDeniesEveryLookupItCannotClear(t *testing.T) {
+	t.Parallel()
+	task := func(body string) string {
+		return checkPlay + "    - name: Probe\n" + body
+	}
+	tests := []struct {
+		Playbook       string
+		WantChangeFree bool
+	}{{ // Test 0: The lines lookup runs its argument as a command.
+		Playbook: task("      ansible.builtin.debug:\n" +
+			"        msg: \"{{ lookup('lines', 'id') }}\"\n"),
+	}, { // Test 1: The lookup function called through parentheses.
+		Playbook: task("      ansible.builtin.debug:\n" +
+			"        msg: \"{{ (lookup)('pipe', 'id') }}\"\n"),
+	}, { // Test 2: The plugin named through a variable.
+		Playbook: "- hosts: all\n  vars:\n    plugin_name: pipe\n  tasks:\n" +
+			"    - ansible.builtin.debug:\n        msg: \"{{ lookup(plugin_name, 'id') }}\"\n",
+	}, { // Test 3: The plugin's name built from pieces.
+		Playbook: task("      ansible.builtin.debug:\n" +
+			"        msg: \"{{ lookup('pi' ~ 'pe', 'id') }}\"\n"),
+	}, { // Test 4: The loop form of the lines lookup.
+		Playbook: task("      ansible.builtin.debug:\n        msg: \"{{ item }}\"\n" +
+			"      with_lines: id\n"),
+	}, { // Test 5: A plain playbook looping with with_items stays change free.
+		Playbook: task("      ansible.builtin.debug:\n        msg: \"{{ item }}\"\n" +
+			"      with_items:\n        - one\n        - two\n"),
+		WantChangeFree: true,
+	}, { // Test 6: Every lookup naming a cleared plugin as a literal stays change free.
+		Playbook: task("      ansible.builtin.debug:\n" +
+			"        msg: \"{{ lookup('vars', 'x') }} {{ query(\\\"ansible.builtin.items\\\", a) }} " +
+			"{{ q('sequence', 'start=1 end=3') }}\"\n"),
+		WantChangeFree: true,
+	}, { // Test 7: A command's -q flag is a word, not the q function.
+		Playbook:       task("      ansible.builtin.command: grep -q web /etc/hosts\n"),
+		WantChangeFree: true,
+	}, { // Test 8: The q function handed on through parentheses.
+		Playbook: task("      ansible.builtin.debug:\n" +
+			"        msg: \"{{ (q)('pipe', 'id') }}\"\n"),
+	}, { // Test 9: A literal joined to the next one by Jinja names a plugin only known at run time.
+		Playbook: task("      ansible.builtin.debug:\n" +
+			"        msg: \"{{ query('vars' 'x', 'id') }}\"\n"),
+	}, { // Test 10: The word lookup anywhere else, a task's name included, costs the classification.
+		Playbook: checkPlay + "    - name: lookup the host\n      ansible.builtin.ping:\n",
+	}, { // Test 11: A lookup in the play's hosts is templated on the controller.
+		Playbook: "- hosts: \"{{ lookup('file', 'hosts.txt') }}\"\n  tasks:\n" +
+			"    - ansible.builtin.ping:\n",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			scan := scanned(t, map[string]string{"site.yml": test.Playbook}, "site.yml").DryRunScan()
+			if diff := cmp.Diff(test.WantChangeFree, scan.ChangeFree()); diff != "" {
+				t.Errorf("ChangeFree() mismatch (-want +got):\n%s\nfindings=%q", diff, scan.Findings)
+			}
+		})
+	}
+}
+
+// TestTheScanDeniesWhatTheTreeLoads covers what Ansible loads from the tree without any playbook
+// naming it. A plugin directory, a module directory, an ansible.cfg, or a requirements file that
+// installs collections can bring code onto the controller that no task names, so wherever one sits
+// the dry run is not change free.
+func TestTheScanDeniesWhatTheTreeLoads(t *testing.T) {
+	t.Parallel()
+	const play = checkPlay + "    - ansible.builtin.ping:\n"
+	tests := []struct {
+		Files          map[string]string
+		WantChangeFree bool
+		WantText       string
+	}{{ // Test 0: A filter plugin directory beside the playbook.
+		Files:    map[string]string{"filter_plugins/evil.py": "x = 1\n"},
+		WantText: "filter_plugins: a filter_plugins directory",
+	}, { // Test 1: A lookup plugin directory inside a role.
+		Files:    map[string]string{"roles/web/lookup_plugins/evil.py": "x = 1\n"},
+		WantText: "roles/web/lookup_plugins",
+	}, { // Test 2: A module directory.
+		Files:    map[string]string{"library/mod.py": "x = 1\n"},
+		WantText: "library",
+	}, { // Test 3: A module_utils directory.
+		Files:    map[string]string{"module_utils/util.py": "x = 1\n"},
+		WantText: "module_utils",
+	}, { // Test 4: An ansible.cfg in a subdirectory.
+		Files:    map[string]string{"deploy/ansible.cfg": "[defaults]\n"},
+		WantText: "deploy/ansible.cfg",
+	}, { // Test 5: A collections requirements file.
+		Files:    map[string]string{"collections/requirements.yml": "collections:\n  - a.b\n"},
+		WantText: "collections/requirements.yml",
+	}, { // Test 6: A root requirements file asking for collections.
+		Files:    map[string]string{"requirements.yml": "collections:\n  - a.b\n"},
+		WantText: "requirements.yml: a requirements file that installs collections",
+	}, { // Test 7: A requirements file asking for roles alone, and plain files, change nothing.
+		Files: map[string]string{"requirements.yml": "- src: geerlingguy.nginx\n",
+			"docs/plugins.md": "notes\n", "files/library.txt": "a file, not a directory\n"},
+		WantChangeFree: true,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			files := map[string]string{"site.yml": play}
+			for name, body := range test.Files {
+				files[name] = body
+			}
+			scan := scanned(t, files, "site.yml").DryRunScan()
+			if diff := cmp.Diff(test.WantChangeFree, scan.ChangeFree()); diff != "" {
+				t.Errorf("ChangeFree() mismatch (-want +got):\n%s\nfindings=%q", diff, scan.Findings)
+			}
+			if !strings.Contains(strings.Join(scan.Findings, "\n"), test.WantText) {
+				t.Errorf("Findings = %q, want one naming %q", scan.Findings, test.WantText)
+			}
+		})
 	}
 }

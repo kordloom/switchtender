@@ -51,11 +51,11 @@ func TestRedTeamPipeLookupIsNotChangeFree(t *testing.T) {
       with_pipe: "cat /etc/shadow"
 `,
 		WantChangeFree: false,
-	}, { // Test 4: A playbook with no controller-side execution stays change free, the control.
+	}, { // Test 4: A playbook whose only lookup is one the scan clears stays change free.
 		Playbook: `- hosts: all
   tasks:
     - ansible.builtin.debug:
-        msg: "{{ lookup('env', 'HOME') }}"
+        msg: "{{ lookup('vars', 'inventory_hostname') }}"
 `,
 		WantChangeFree: true,
 	}}

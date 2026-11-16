@@ -33,6 +33,11 @@ import (
 // vocabulary, and it is never an agent.
 const actorTypeComment = "forge_comment"
 
+// actorTypePullRequest is a person whose pull request event, opening the pull request or pushing to
+// it, started its plan as the SwitchTender account their forge account is linked to. It is how the
+// plan's requester authenticated, in the chain's vocabulary, and it is never an agent.
+const actorTypePullRequest = "forge_pull_request"
+
 // lastPlans bounds how many of a pull request's plans an apply looks through for the last one
 // reported.
 const lastPlans = 50
@@ -530,28 +535,40 @@ func (c *commentCall) pullRequest(ctx context.Context) (*review.PullRequest, *co
 // linkedUser returns the SwitchTender account the comment's author is linked to, or the refusal an
 // unlinked author gets: one reply saying how to link.
 func (c *commentCall) linkedUser(ctx context.Context) (*user.User, *commentAnswer) {
-	unlinked := refused("unlinked", "Your "+c.forgeName()+" account is not linked to a SwitchTender "+
-		"account, so this command did nothing. "+c.linkHint())
 	u, err := c.linked(ctx, c.ev.AuthorID)
 	if err != nil {
 		a := failed("link", http.StatusInternalServerError, err)
 		return nil, &a
 	}
 	if u == nil {
-		return nil, &unlinked
+		a := c.unlinked()
+		return nil, &a
 	}
 	return u, nil
+}
+
+// unlinked is the refusal a command from an unlinked forge account gets: one reply saying how to
+// link.
+func (c *commentCall) unlinked() commentAnswer {
+	return refused("unlinked", "Your "+c.forgeName()+" account is not linked to a SwitchTender "+
+		"account, so this command did nothing. "+c.linkHint())
 }
 
 // linked returns the SwitchTender account the forge account forgeUserID is linked to, or nil when
 // it is linked to none that exists.
 func (c *commentCall) linked(ctx context.Context, forgeUserID int64) (*user.User, error) {
-	cc := c.d.comments
+	return c.d.comments.linked(ctx, c.tg, c.ev.Provider, forgeUserID)
+}
+
+// linked returns the SwitchTender account the account forgeUserID on the forge of review trigger tg
+// is linked to, or nil when it is linked to none that exists or nothing can be linked.
+func (cc *commentCommands) linked(ctx context.Context, tg *trigger.Trigger, provider string,
+	forgeUserID int64) (*user.User, error) {
 	if cc == nil || cc.links == nil || cc.users == nil || forgeUserID <= 0 {
 		return nil, nil
 	}
-	l, err := cc.links.Lookup(ctx, c.ev.Provider,
-		forgelink.CanonicalAPIURL(c.ev.Provider, c.tg.Review.BaseURL()), forgeUserID)
+	l, err := cc.links.Lookup(ctx, provider,
+		forgelink.CanonicalAPIURL(provider, tg.Review.BaseURL()), forgeUserID)
 	if errors.Is(err, forgelink.ErrNotFound) {
 		return nil, nil
 	}
@@ -563,6 +580,60 @@ func (c *commentCall) linked(ctx context.Context, forgeUserID int64) (*user.User
 		return nil, nil
 	}
 	return u, err
+}
+
+// Why an account may not start a pull request's plan, as mayPlan reports it. The first three are
+// refusals the person caused, and the last two are failures on this server's side.
+const (
+	// planUnlinked is a forge account linked to no SwitchTender account.
+	planUnlinked = "unlinked"
+	// planRole is a linked account whose role cannot launch work.
+	planRole = "role"
+	// planGrant is a linked account that may not use the template and everything it runs with.
+	planGrant = "grant"
+	// planLink is a link that could not be read.
+	planLink = "link"
+	// planAuthorize is a grant check that failed rather than refused.
+	planAuthorize = "authorize"
+)
+
+// planDenial is why an account may not start a pull request's plan.
+type planDenial struct {
+	// why is one of the plan reasons above.
+	why string
+	// err is the failure behind planLink or planAuthorize, nil for a refusal.
+	err error
+}
+
+// mayPlan holds the forge account forgeUserID to what starting a plan of template t through review
+// trigger tg needs, the one check a /switchtender plan comment and a pull request's own event both
+// pass: linked to a SwitchTender account, that account's role can launch work, and it may use the
+// template and everything the template runs with, the grants a launch of it in the queue needs. It
+// returns the account with ctx carrying it as an actor of actorType, which is who the plan runs as,
+// or why it may not plan.
+func (cc *commentCommands) mayPlan(ctx context.Context, tg *trigger.Trigger, t *template.Template,
+	provider string, forgeUserID int64, actorType string) (context.Context, *user.User, *planDenial) {
+	u, err := cc.linked(ctx, tg, provider, forgeUserID)
+	if err != nil {
+		return ctx, nil, &planDenial{why: planLink, err: err}
+	}
+	if u == nil {
+		return ctx, nil, &planDenial{why: planUnlinked}
+	}
+	ctx = context.WithValue(ctx, actorKey{}, Actor{UserID: u.ID, Role: u.Role, Name: u.Username,
+		Type: actorType})
+	if !roleAllows(u.Role, user.RoleOperator) {
+		return ctx, u, &planDenial{why: planRole}
+	}
+	objects := append([]string{tg.TemplateID}, templateLaunchObjects(t, t.InventoryID,
+		t.CredentialIDs)...)
+	if err := cc.authz.authorizeAll(ctx, grant.AccessUse, objects...); err != nil {
+		if authzRefused(err) {
+			return ctx, u, &planDenial{why: planGrant}
+		}
+		return ctx, u, &planDenial{why: planAuthorize, err: err}
+	}
+	return ctx, u, nil
 }
 
 // confirm reads the comment back from the forge by id and holds it to the webhook: the forge must
@@ -607,21 +678,10 @@ func (c *commentCall) linkHint() string {
 // is held to every grant a launch of the template in the queue needs, and the comment is confirmed
 // with the forge before anything runs.
 func (c *commentCall) plan(w http.ResponseWriter, r *http.Request, t *template.Template) {
-	ctx, u, answer := c.actor(r.Context())
-	if answer != nil {
-		c.respond(w, r, *answer)
-		return
-	}
-	if !roleAllows(u.Role, user.RoleOperator) {
-		c.respond(w, r, c.refuseLocal(ctx, refused("role", "Your SwitchTender account cannot "+
-			"launch work, so this command did nothing.")))
-		return
-	}
-	objects := append([]string{c.tg.TemplateID}, templateLaunchObjects(t, t.InventoryID,
-		t.CredentialIDs)...)
-	if err := c.d.comments.authz.authorizeAll(ctx, grant.AccessUse, objects...); err != nil {
-		c.respond(w, r, c.refuseLocal(ctx, grantRefusal(err, "Your SwitchTender account may not "+
-			"use this template and everything it runs with, so this command did nothing.")))
+	ctx, u, denied := c.d.comments.mayPlan(r.Context(), c.tg, t, c.ev.Provider, c.ev.AuthorID,
+		actorTypeComment)
+	if denied != nil {
+		c.respond(w, r, c.refuseLocal(ctx, c.planRefusal(denied)))
 		return
 	}
 	if reason := reviewUnsupported(t); reason != "" {
@@ -650,6 +710,21 @@ func (c *commentCall) plan(w http.ResponseWriter, r *http.Request, t *template.T
 	launchReviewPlan(w, r.WithContext(ctx), c.tg, c.d, ev, t, c.body,
 		run.WithActor(u.Username), run.WithActorAccount(u.ID), run.WithAccount(u.Username),
 		run.WithActorType(actorTypeComment))
+}
+
+// planRefusal is the answer a plan command gets when its author may not plan.
+func (c *commentCall) planRefusal(denied *planDenial) commentAnswer {
+	switch denied.why {
+	case planUnlinked:
+		return c.unlinked()
+	case planRole:
+		return refused("role", "Your SwitchTender account cannot launch work, so this command "+
+			"did nothing.")
+	case planGrant:
+		return refused("grant", "Your SwitchTender account may not use this template and "+
+			"everything it runs with, so this command did nothing.")
+	}
+	return failed(denied.why, http.StatusInternalServerError, denied.err)
 }
 
 // grantRefusal answers a grant check that failed: a refusal for a denied grant, a failure for
@@ -733,7 +808,7 @@ func (c *commentCall) apply(ctx context.Context) commentAnswer {
 		a.runID = proposal.ID
 		return a
 	}
-	return c.decide(ctx, u, plan, proposal)
+	return c.decide(ctx, u, pr.AuthorID, plan, proposal)
 }
 
 // reportedPlans returns the plans this trigger reported to the pull request, newest first.
@@ -927,8 +1002,9 @@ func (c *commentCall) proposedFrom(existing, plan *run.Run) bool {
 }
 
 // decide approves proposal as u from this comment, recording the comment and the plan it approved
-// on the decision.
-func (c *commentCall) decide(ctx context.Context, u *user.User, plan, proposal *run.Run) commentAnswer {
+// on the decision. authorID is the forge's numeric id of the account that opened the pull request.
+func (c *commentCall) decide(ctx context.Context, u *user.User, authorID int64, plan,
+	proposal *run.Run) commentAnswer {
 	planID := review.PlanID(plan.ID)
 	if proposal.Status != run.StatusPendingApproval {
 		a := refused("already_applied", fmt.Sprintf("Plan %s was already decided: its apply, run "+
@@ -940,6 +1016,21 @@ func (c *commentCall) decide(ctx context.Context, u *user.User, plan, proposal *
 	if l := c.link("/ui/runs/" + proposal.ID); l != "" {
 		held = fmt.Sprintf("The apply of plan %s is run %s, held for approval at %s.", planID,
 			proposal.ID, l)
+	}
+	// An apply approved from a comment takes two forge accounts, whatever the rules say. One
+	// person's forge token can open a pull request and comment on it, so an apply approved by its
+	// own author's comment was decided by one account alone. A pull request whose author the forge
+	// did not name cannot show two accounts, so it is refused the same way.
+	if authorID == 0 || c.confirmed.AuthorID == authorID {
+		why := "The pull request's author cannot approve its apply from a comment"
+		if authorID == 0 {
+			why = "The forge did not say who opened this pull request, so no comment can approve " +
+				"its apply"
+		}
+		a := refused("separation_of_duties", held+" "+why+". Another linked person comments "+
+			"`/switchtender apply "+planID+"`, or an approver approves it in SwitchTender.")
+		a.runID = proposal.ID
+		return a
 	}
 	if !roleAllows(u.Role, user.RoleAdmin) {
 		a := refused("role", held+" Your SwitchTender account cannot approve, so an approver "+

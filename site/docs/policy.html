@@ -576,7 +576,7 @@ an empty value when the run has none, so a module never meets a missing field.</
 </tr>
 <tr>
 <td><code>run.dry_run_findings</code></td>
-<td>For a dry run, why the gate's scan did not find it change free. For Ansible, each play, block, task, role, or include that sets <code>check_mode</code> to anything but true, and each play or task that runs a <code>pipe</code> lookup, naming the file. For Terraform and OpenTofu, each <code>external</code> or <code>aws_lambda_invocation</code> data source, and each <code>http</code> data source with a write method or a request body, by its address, naming the file and line. For both, whatever the scan could not read. Empty for a dry run read in full that found none of these, for a dry run of a tool nothing scans, and for any other run.</td>
+<td>For a dry run, why the gate's scan did not find it change free. For Ansible, each play, block, task, role, or include that sets <code>check_mode</code> to anything but true, and each play, task, or role dependency that uses a lookup the scan cannot clear, naming the file, and each plugin or module directory, <code>ansible.cfg</code>, or collections requirements file in the project, by its path. For Terraform and OpenTofu, each <code>external</code> or <code>aws_lambda_invocation</code> data source, and each <code>http</code> data source with a write method or a request body, by its address, naming the file and line. For both, whatever the scan could not read. Empty for a dry run read in full that found none of these, for a dry run of a tool nothing scans, and for any other run.</td>
 </tr>
 <tr>
 <td><code>run.change_free</code></td>
@@ -803,17 +803,25 @@ carrying one is refused at restore.</p>
 <h3 id="dry-runs-that-are-not-change-free">Dry runs that are not change free</h3>
 <p>A dry run is a promise about the tool, not about what it is given. An Ansible dry run is
 <code>ansible-playbook --check</code>, and a playbook can set <code>check_mode: false</code> on a play, block, task, role,
-or include to run that work for real anyway, and a <code>pipe</code> lookup runs its command on the controller
-whenever a template renders, under <code>--check</code> too. A Terraform or OpenTofu dry run is <code>plan</code>, and a
+or include to run that work for real anyway, and a lookup plugin such as <code>pipe</code> or <code>lines</code> runs its
+command on the controller whenever a template renders, under <code>--check</code> too. A Terraform or OpenTofu dry run is <code>plan</code>, and a
 plan reads every data source with the run's credentials: an <code>external</code> data source runs the program
 it names, an <code>aws_lambda_invocation</code> data source invokes its function, and an <code>http</code> data source
 sends its request. The gate reads the playbook, or the configuration and every module it calls,
 before it judges a dry run, and records what it found in <code>run.dry_run_findings</code>:</p>
 <ul>
 <li>Each task that forces real work with <code>check_mode</code>, by its file.</li>
-<li>Each <code>pipe</code> lookup in a play's <code>vars</code> or <code>environment</code> or anywhere in a task, written as <code>lookup</code>,
-<code>query</code>, or <code>q</code>, with or without the <code>ansible.builtin.</code> prefix, or as a <code>with_pipe</code> loop, by its
-play or task and file.</li>
+<li>Each use of a lookup the scan cannot clear, by its play, task, or role dependency and file. The
+Ansible scan clears rather than catches: a dry run is change free only when every <code>lookup</code>,
+<code>query</code>, and <code>q</code> call names, as a quoted literal, one of <code>vars</code>, <code>items</code>, <code>list</code>, <code>dict</code>,
+<code>indexed_items</code>, <code>subelements</code>, <code>together</code>, <code>nested</code>, or <code>sequence</code>, with or without the
+<code>ansible.builtin.</code> prefix, every <code>with_</code> loop names one of those too, and the words <code>lookup</code> and
+<code>query</code> appear nowhere else in what the scan reads, a task's name included. Any other plugin, a
+plugin named by a variable or built from pieces, and the function passed around or called
+through parentheses all count.</li>
+<li>Each <code>library</code>, <code>module_utils</code>, or <code>*_plugins</code> directory, <code>ansible.cfg</code>, and requirements file
+that installs collections in the project, by its path, since Ansible loads code and settings from
+each without a task naming it.</li>
 <li>Each <code>external</code> or <code>aws_lambda_invocation</code> data source, and each <code>http</code> data source whose method
 is anything but GET or HEAD or that carries a <code>request_body</code>, by its address, file, and line. A
 method the scan cannot read as a plain value counts as a write.</li>
@@ -822,9 +830,10 @@ method the scan cannot read as a plain value counts as a write.</li>
 a role that is not in the project, a registry module the gate could not download, a module source
 only known at run time, or a file that does not parse. A dry run of a tool a plugin or the SDK added
 is never change free, since the plugin runs its dry run as it was coded and nothing scans it.</p>
-<p>The scan finds the known ways a check or a plan acts. It does not prove a preview harmless: other
-lookups and plugins run code on the controller under <code>--check</code>, a module that claims to support
-check mode can act anyway, and a plan runs provider code, all with the run's credentials. A rule
+<p>The scan does not prove a preview harmless. The Ansible scan reads the playbook, what it imports and
+includes, and its roles' tasks, handlers, and dependencies, and not variable files or templates,
+which can call lookups too. A module that claims to support check mode can act anyway, and a plan
+runs provider code, all with the run's credentials. A rule
 that exempts dry runs trusts the playbooks and configurations it lets through, so keep it to code
 your team reviews. An agent's dry run is held by the <a href="#agent-runs-are-held-by-default">built-in
 hold</a> whatever the scan finds, unless an exemption covers it, and

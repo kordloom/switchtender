@@ -109,45 +109,30 @@ func newCommentServer(t *testing.T, provider string, extra ...Option) *commentSe
 // approvals, runner, and options it sets.
 func newCommentServerFrom(t *testing.T, setup reviewSetup, extra ...Option) *commentServer {
 	t.Helper()
-	ctx := context.Background()
 	if setup.Provider == "" {
 		setup.Provider = trigger.ProviderGitHub
 	}
-	provider := setup.Provider
-	users := user.NewMemStore()
-	links := forgelink.NewMemStore()
 	log := &applyLog{}
 	setup.Approvals, setup.Runner = true, savedPlanRunner(log)
-	setup.Options = append([]Option{WithUsers(users), WithForgeLinks(links)}, extra...)
+	setup.Options = append(setup.Options, extra...)
 	rs := newReviewServer(t, setup)
-	cs := &commentServer{reviewServer: rs, users: users, links: links, applies: log,
+	cs := &commentServer{reviewServer: rs, users: rs.users, links: rs.links, applies: log,
 		accounts: map[int64]string{}}
-	apiURL := forgelink.CanonicalAPIURL(provider, rs.forge.APIURL())
-	for i, a := range []struct {
-		Name   string
-		Role   user.Role
-		Forge  int64
-		LinkID string
+	for _, a := range []struct {
+		Name  string
+		Role  user.Role
+		Forge int64
 	}{
 		{Name: "approver-one", Role: user.RoleAdmin, Forge: forgeApproverOne},
 		{Name: "approver-two", Role: user.RoleAdmin, Forge: forgeApproverTwo},
 		{Name: "operator-one", Role: user.RoleOperator, Forge: forgeOperator},
 	} {
-		u, err := user.New(a.Name, "a-long-enough-password", a.Role)
-		if err != nil {
-			t.Fatalf("user.New() error = %v", err)
-		}
-		if err := users.Save(ctx, u); err != nil {
-			t.Fatalf("Save() error = %v", err)
-		}
-		if err := links.Create(ctx, &forgelink.Link{ID: fmt.Sprintf("fl_test%d", i), UserID: u.ID,
-			Provider: provider, APIURL: apiURL, ForgeUserID: a.Forge,
-			CreatedAt: time.Now()}); err != nil {
-			t.Fatalf("Create() error = %v", err)
-		}
-		cs.accounts[a.Forge] = u.ID
+		cs.accounts[a.Forge] = rs.link(t, a.Name, a.Role, a.Forge).ID
 	}
 	rs.forge.SetHead(7, rs.headSHA)
+	// The pull request was opened by a forge account linked to nobody, so a comment's apply is
+	// requested by its commenter and approved by another account unless a test says otherwise.
+	rs.forge.SetAuthor(7, forgeStranger)
 	return cs
 }
 
@@ -840,6 +825,56 @@ func TestCommentCommandParsing(t *testing.T) {
 			got := (&review.CommentEvent{Body: test.Body}).Command()
 			if diff := cmp.Diff(test.WantCommand, got); diff != "" {
 				t.Errorf("Command() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// TestReviewCommentApplyNeedsTwoForgeAccounts proves an apply approved from a comment takes two
+// forge accounts whatever the rules say: with no rule asking for a distinct approver, the pull
+// request's author approving its apply from their own linked account is refused and the apply
+// stays held, another linked approver's comment applies it, and a pull request whose author the
+// forge did not name is approved from no comment.
+func TestReviewCommentApplyNeedsTwoForgeAccounts(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Provider      string
+		Author        int64
+		Approver      int64
+		WantResult    string
+		WantReplyText string
+	}{{ // Test 0: The author approves their own pull request on GitHub.
+		Provider: trigger.ProviderGitHub, Author: forgeApproverOne, Approver: forgeApproverOne,
+		WantResult: "refused/separation_of_duties", WantReplyText: "pull request's author cannot",
+	}, { // Test 1: The author approves their own merge request on GitLab.
+		Provider: trigger.ProviderGitLab, Author: forgeApproverOne, Approver: forgeApproverOne,
+		WantResult: "refused/separation_of_duties", WantReplyText: "pull request's author cannot",
+	}, { // Test 2: Another linked approver applies it.
+		Provider: trigger.ProviderGitHub, Author: forgeApproverOne, Approver: forgeApproverTwo,
+		WantResult: "applied",
+	}, { // Test 3: The forge did not name the author, so no comment approves.
+		Provider: trigger.ProviderGitHub, Author: 0, Approver: forgeApproverTwo,
+		WantResult: "refused/separation_of_duties", WantReplyText: "did not say who opened",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			cs := newCommentServer(t, test.Provider)
+			cs.forge.SetAuthor(7, test.Author)
+			cs.planReported(t)
+			_, out := cs.post(t, 640, test.Approver, "/switchtender apply")
+			if diff := cmp.Diff(test.WantResult, out["result"]); diff != "" {
+				t.Fatalf("apply result mismatch (-want +got):\n%s", diff)
+			}
+			if test.WantResult == "applied" {
+				return
+			}
+			cs.waitRun(t, out["run"], run.StatusPendingApproval)
+			if n := cs.approvedApplies(t); n != 0 {
+				t.Errorf("approved applies = %d, want 0", n)
+			}
+			if r := cs.replies(); len(r) != 1 || !strings.Contains(r[0], test.WantReplyText) {
+				t.Errorf("replies = %q, want one saying %q", r, test.WantReplyText)
 			}
 		})
 	}

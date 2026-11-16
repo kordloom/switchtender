@@ -60,6 +60,9 @@ const (
 	maxScanDepth = 32
 	// maxScanLabel is how much of a name read from a playbook the grade repeats.
 	maxScanLabel = 80
+	// maxScanEntries is how many files and directories the scan lists across the tree, looking for
+	// what Ansible loads code or configuration from.
+	maxScanEntries = 50000
 )
 
 // PlaybookSignals is what a playbook scan could see, and what it could not.
@@ -114,6 +117,7 @@ func ScanPlaybookIn(fsys fs.FS, name, place string) (PlaybookSignals, error) {
 	}
 	s.loadConfig()
 	s.scanPlays(name, plays, 0)
+	s.scanTree()
 	for file := range s.files {
 		out.Inputs = append(out.Inputs, file)
 	}
@@ -279,11 +283,15 @@ func (s *playbookScan) scanPlays(file string, plays []map[string]any, depth int)
 	basedir := path.Dir(file)
 	for _, play := range plays {
 		s.checkMode(file, playLabel(play), play)
-		// A play's own vars and environment are templated on the controller before any host is
-		// addressed, so a controller-side lookup in one runs for real under --check. The tasks are
-		// walked below, each on its own, so only the play-level values are read here.
-		s.controllerExec(file, playLabel(play), play["vars"])
-		s.controllerExec(file, playLabel(play), play["environment"])
+		// A play's own values, its hosts, vars, environment, and role parameters among them, are
+		// templated on the controller before any host is addressed, so a lookup in one runs for
+		// real under --check. The task lists are walked below, each task on its own, so everything
+		// else in the play is read here.
+		for _, key := range sortedKeys(play) {
+			if !playTaskLists[key] {
+				s.controllerExec(file, playLabel(play), map[string]any{key: play[key]})
+			}
+		}
 		for _, key := range sortedKeys(play) {
 			// An imported playbook is a play-level entry naming another playbook, resolved against
 			// the directory of the one importing it.
@@ -304,6 +312,95 @@ func (s *playbookScan) scanPlays(file string, plays []map[string]any, depth int)
 		}
 	}
 }
+
+// scanTree lists the whole tree for what Ansible loads code or configuration from without any
+// playbook naming it: a library, module_utils, or *_plugins directory, beside a playbook or inside
+// a role, an ansible.cfg, which can add plugin paths and change what a dry run does, and a
+// requirements file that installs collections, whose plugins the dry run may then call. Each is a
+// finding wherever it sits, rather than only where Ansible's search order would look, so a copy of
+// that order cannot drift from the real one. A tree too large to list in full is named as unread.
+func (s *playbookScan) scanTree() {
+	entries := 0
+	_ = fs.WalkDir(s.fsys, ".", func(name string, d fs.DirEntry, err error) error {
+		if err != nil {
+			s.skip("the tree of "+s.place+" at "+strconv.Quote(util.Clip(name, maxScanLabel)),
+				"could not be listed")
+			return nil
+		}
+		if entries++; entries > maxScanEntries {
+			s.skip("the rest of "+s.place, fmt.Sprintf("past the %d entries one scan lists",
+				maxScanEntries))
+			return fs.SkipAll
+		}
+		base := path.Base(name)
+		if d.IsDir() && base == ".git" {
+			return fs.SkipDir
+		}
+		if why := treeLoads(name, base, d); why != "" {
+			s.treeFinding(name, why)
+		}
+		return nil
+	})
+	for _, name := range []string{"requirements.yml", "requirements.yaml", "roles/requirements.yml",
+		"roles/requirements.yaml"} {
+		if s.isFile(name) && s.installsCollections(name) {
+			s.treeFinding(name, "a requirements file that installs collections, whose plugins the "+
+				"dry run may call")
+		}
+	}
+}
+
+// treeLoads says what Ansible may load from the entry name, whose last element is base, or returns
+// empty when it loads nothing from it unasked. A directory is matched as a directory or as a link
+// to one, since a link is followed when Ansible looks.
+func treeLoads(name, base string, d fs.DirEntry) string {
+	dirLike := d.IsDir() || d.Type()&fs.ModeSymlink != 0
+	switch {
+	case base == "ansible.cfg":
+		return "an ansible.cfg, which can add plugin paths and change what the dry run does"
+	case dirLike && (base == "library" || base == "module_utils"):
+		return "a " + base + " directory, whose modules Ansible loads from the tree"
+	case dirLike && strings.HasSuffix(base, "_plugins") && base != "_plugins":
+		return "a " + base + " directory, whose plugins Ansible loads from the tree and runs on " +
+			"the controller"
+	case !d.IsDir() && (base == "requirements.yml" || base == "requirements.yaml") &&
+		path.Base(path.Dir(name)) == "collections":
+		return "a collections requirements file, whose collections' plugins the dry run may call"
+	}
+	return ""
+}
+
+// installsCollections reports whether the requirements file name asks for collections: a mapping
+// with a collections key, the form ansible-galaxy installs collections from. A file that cannot be
+// read is named as unread, since it could ask for them.
+func (s *playbookScan) installsCollections(name string) bool {
+	content, err := s.read(name)
+	if err != nil {
+		s.skip(label("requirements file", name), s.why(err))
+		return false
+	}
+	var doc map[string]any
+	if yaml.Unmarshal(content, &doc) != nil {
+		return false
+	}
+	_, ok := doc["collections"]
+	return ok
+}
+
+// treeFinding records one finding about the tree, deduped like every other.
+func (s *playbookScan) treeFinding(name, why string) {
+	finding := util.Clip(util.SafeText(name), 2*maxScanLabel) + ": " + why + ", which --check " +
+		"does not govern"
+	if s.listed[finding] {
+		return
+	}
+	s.listed[finding] = true
+	s.out.Forced = append(s.out.Forced, finding)
+}
+
+// playTaskLists are the play keys holding task lists, which the scan walks task by task.
+var playTaskLists = map[string]bool{"pre_tasks": true, "tasks": true, "post_tasks": true,
+	"handlers": true}
 
 // followPlaybook reads a playbook an import_playbook names, from beside the one importing it.
 func (s *playbookScan) followPlaybook(basedir, how string, value any, depth int) {
@@ -446,6 +543,7 @@ func (s *playbookScan) followDependencies(ctx scanContext, what, dir string) {
 		for _, dep := range asList(meta["dependencies"]) {
 			if args, ok := dep.(map[string]any); ok {
 				s.checkMode(file, label("role dependency", roleName(dep)), args)
+				s.controllerExec(file, label("role dependency", roleName(dep)), args)
 			}
 			s.followRole(ctx, "role", roleName(dep), "", "")
 		}
@@ -576,30 +674,54 @@ func (s *playbookScan) checkMode(file, what string, holder map[string]any) {
 	s.out.Forced = append(s.out.Forced, finding)
 }
 
-// controllerLookup matches a pipe lookup in a Jinja expression. The pipe lookup runs its argument
-// as a command on the controller while a template is rendered, which happens before any host is
-// addressed and is not suppressed by --check, so it runs for real during a dry run. It matches the
-// lookup, query, and q spellings and the fully qualified name, ignoring case.
-var controllerLookup = regexp.MustCompile(
-	`(?i)\b(?:lookup|query|q)\s*\(\s*['"]\s*(?:ansible\.builtin\.)?pipe\s*['"]`)
+// safeLookups are the lookup plugins a dry run may call and still be change free. Each one only
+// reshapes the values it is handed or reads the play's own variables, and runs nothing. A lookup
+// runs on the controller while a template is rendered, before any host is addressed and whatever
+// --check says, so every other plugin counts against the dry run: the ones that run a command or
+// read a file, and any plugin the scan has never heard of, such as a new one in a later Ansible or
+// one a collection carries. The list is short on purpose. A plugin is cleared by being added here,
+// never by the scan failing to recognize it.
+var safeLookups = map[string]bool{
+	"vars": true, "items": true, "list": true, "dict": true, "indexed_items": true,
+	"subelements": true, "together": true, "nested": true, "sequence": true,
+}
 
-// controllerExec records a finding when value holds a controller-side lookup that runs a command
-// during templating, which --check does not prevent. It walks strings, lists, and mappings so a
-// lookup nested in a module argument, a var, or a loop is found, and it treats a with_pipe loop key
-// as the same execution. A dry run reaching here is not a preview, so the finding costs it the
-// change-free classification an exemption from the hold would otherwise rest on.
+// lookupName matches the names Jinja reaches a lookup plugin through: the lookup and query
+// functions and q, query's short form. Jinja's names are case-sensitive, so only these spellings
+// call anything.
+var lookupName = regexp.MustCompile(`\b(?:lookup|query|q)\b`)
+
+// lookupCall matches, at the start of the text, a call of one of those names whose first argument
+// is a quoted literal standing alone, and captures the plugin it names. Anything joined to the
+// literal, an escape inside it, or a name passed in a variable does not match, since the plugin it
+// calls is then only known at run time.
+var lookupCall = regexp.MustCompile(`^(?:lookup|query|q)\s*\(\s*(?:'([^'\\]*)'|"([^"\\]*)")\s*[,)]`)
+
+// controllerExec records a finding when value reaches a lookup plugin the scan cannot clear, which
+// runs on the controller during templating whatever --check says. It walks strings, lists, and
+// mappings, so a lookup nested in a module argument, a var, or a loop is found.
+//
+// The scan clears rather than catches. A dry run stays change free only when every lookup, query,
+// and q call names, as a quoted literal, a plugin on safeLookups, every with_ loop key names one
+// too, and the names lookup and query appear nowhere else. Matching the plugins that are known to
+// run something lost to the first spelling nobody listed: another plugin that runs a command, the
+// function called through parentheses or a variable, or the plugin's name built from pieces. A
+// word in a task's name costs the classification as well, which is the price of not having to
+// guess. A finding costs the dry run the change-free classification an exemption from the hold
+// would otherwise rest on.
 func (s *playbookScan) controllerExec(file, where string, value any) {
 	switch v := value.(type) {
 	case string:
-		if controllerLookup.MatchString(v) {
-			s.forceControllerExec(file, where)
+		if why := unclearedLookup(v); why != "" {
+			s.forceControllerExec(file, where, why)
 		}
 	case map[string]any:
 		for _, key := range sortedKeys(v) {
-			// with_pipe is the loop form of the pipe lookup and runs the same command on the
-			// controller, with nothing in the value itself to match, so the key is read directly.
-			if shortName(key) == "with_pipe" {
-				s.forceControllerExec(file, where)
+			// A with_ key is the loop form of the lookup it names and runs it on the controller the
+			// same way, with nothing in the value to match, so the key itself is read.
+			if plugin, ok := strings.CutPrefix(shortName(key), "with_"); ok && !safeLookups[plugin] {
+				s.forceControllerExec(file, where, "loops with "+strconv.Quote(util.Clip(key,
+					maxScanLabel))+", a lookup plugin the scan does not know to run nothing")
 			}
 			s.controllerExec(file, where, v[key])
 		}
@@ -610,12 +732,48 @@ func (s *playbookScan) controllerExec(file, where string, value any) {
 	}
 }
 
+// unclearedLookup returns why text reaches a lookup plugin the scan cannot clear, empty when every
+// use of the lookup names in it is a call naming a plugin on safeLookups as a quoted literal.
+//
+// A q that is neither called nor written where an expression would hand it on is read as a word,
+// such as a command's -q flag, because q is too common a letter to deny. A q passed on in an
+// expression, such as (q) or set f = q, counts like any other use.
+func unclearedLookup(text string) string {
+	for _, loc := range lookupName.FindAllStringIndex(text, -1) {
+		name, rest := text[loc[0]:loc[1]], text[loc[1]:]
+		next := strings.TrimLeft(rest, " \t\r\n")
+		if name == "q" && !strings.HasPrefix(next, "(") && !qPassedOn(text[:loc[0]], next) {
+			continue
+		}
+		m := lookupCall.FindStringSubmatch(text[loc[0]:])
+		if m == nil {
+			return "uses " + name + " other than as a call naming its lookup plugin in quotes, so " +
+				"the plugin it reaches is only known at run time"
+		}
+		plugin := strings.TrimPrefix(m[1]+m[2], "ansible.builtin.")
+		if !safeLookups[plugin] {
+			return "calls the lookup plugin " + strconv.Quote(util.Clip(m[1]+m[2], maxScanLabel)) +
+				", which the scan does not know to run nothing"
+		}
+	}
+	return ""
+}
+
+// qPassedOn reports whether a q between before and next is written where a Jinja expression hands
+// the function on rather than as a word: closed by a bracket, a filter, a comma, a dot, or the end
+// of the expression, and not a command's flag.
+func qPassedOn(before, next string) bool {
+	if strings.HasSuffix(before, "-") {
+		return false
+	}
+	return next == "" || strings.ContainsAny(next[:1], ")]}%|,.[=")
+}
+
 // forceControllerExec records one controller-execution finding, deduped like every other, so a
 // lookup repeated across a task's arguments is reported once.
-func (s *playbookScan) forceControllerExec(file, where string) {
-	finding := util.Clip(util.SafeText(file), 2*maxScanLabel) + ": " + where +
-		" runs a command on the controller with a pipe lookup during templating, which --check does " +
-		"not prevent"
+func (s *playbookScan) forceControllerExec(file, where, why string) {
+	finding := util.Clip(util.SafeText(file), 2*maxScanLabel) + ": " + where + " " + why +
+		", and a lookup runs on the controller during templating, which --check does not prevent"
 	if s.listed[finding] {
 		return
 	}

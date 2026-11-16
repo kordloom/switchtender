@@ -26,6 +26,7 @@ import (
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/decision"
 	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/forgelink"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/policy"
@@ -37,6 +38,7 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/template"
 	"github.com/kordloom/switchtender/internal/trigger"
+	"github.com/kordloom/switchtender/internal/user"
 )
 
 // reviewForgeToken is the token the fake forges accept.
@@ -44,6 +46,10 @@ const reviewForgeToken = "ghp_review_token_value_0000"
 
 // reviewCloudSecret is a credential the template runs with, which the fake plan prints.
 const reviewCloudSecret = "cloud-secret-value-4242"
+
+// forgePusher is the forge account a pull request event names as its sender unless a test says
+// otherwise, linked to an operator who may plan the template.
+const forgePusher int64 = 1000
 
 // prOriginRepo is a git repository shaped like a forge's: main holds one commit, and the pull
 // request's head is published under its pull or merge request ref on a commit no branch holds.
@@ -202,6 +208,12 @@ type reviewServer struct {
 	decisions decision.Store
 	// disp is the dispatcher executing the runs.
 	disp *dispatch.Dispatcher
+	// users holds the SwitchTender accounts.
+	users user.Store
+	// links holds the forge account links.
+	links forgelink.Store
+	// pusher is the SwitchTender account forgePusher is linked to.
+	pusher *user.User
 }
 
 // reviewSetup customizes a review server before the trigger is created.
@@ -362,7 +374,10 @@ func newReviewServer(t *testing.T, setup reviewSetup) *reviewServer {
 	if within == 0 {
 		within = time.Minute
 	}
+	users := user.NewMemStore()
+	links := forgelink.NewMemStore()
 	opts := []Option{
+		WithUsers(users), WithForgeLinks(links),
 		WithTriggers(trigger.NewMemStore(), sealer), WithTemplates(templates),
 		WithCredentials(creds, sealer), WithProjects(projects), WithPolicies(policies), WithAudit(audits),
 		WithReviewReporting("https://st.example.com", forge.Client(), 5*time.Millisecond),
@@ -381,7 +396,7 @@ func newReviewServer(t *testing.T, setup reviewSetup) *reviewServer {
 	rs := &reviewServer{
 		handler: srv.Handler(), srv: srv, forge: forge, runs: runs, audits: audits, policies: policies,
 		specs: specs, origin: origin, headSHA: head, provider: setup.Provider, decisions: decisions,
-		disp: disp,
+		disp: disp, users: users, links: links,
 	}
 	reqBody := map[string]any{
 		"name": "pr plans", "template_id": "tpl_net",
@@ -398,7 +413,29 @@ func newReviewServer(t *testing.T, setup reviewSetup) *reviewServer {
 	}
 	rs.hookPath, rs.secret = created.WebhookPath, created.SigningSecret
 	rs.triggerID = created.Trigger.ID
+	rs.pusher = rs.link(t, "pusher", user.RoleOperator, forgePusher)
 	return rs
+}
+
+// link creates a SwitchTender account named name with role and links the forge account forgeID to
+// it on the server's forge.
+func (rs *reviewServer) link(t *testing.T, name string, role user.Role, forgeID int64) *user.User {
+	t.Helper()
+	ctx := context.Background()
+	u, err := user.New(name, "a-long-enough-password", role)
+	if err != nil {
+		t.Fatalf("user.New() error = %v", err)
+	}
+	if err := rs.users.Save(ctx, u); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := rs.links.Create(ctx, &forgelink.Link{ID: fmt.Sprintf("fl_%s_%d", name, forgeID),
+		UserID: u.ID, Provider: rs.provider,
+		APIURL:      forgelink.CanonicalAPIURL(rs.provider, rs.forge.APIURL()),
+		ForgeUserID: forgeID, CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	return u
 }
 
 // do sends a JSON API request.
@@ -415,9 +452,15 @@ func (rs *reviewServer) do(t *testing.T, method, path string, body any) *httptes
 	return rec
 }
 
-// payload returns a pull request event for the server's provider proposing sha. A head repository
-// other than the base makes it a fork.
+// payload returns a pull request event for the server's provider proposing sha, sent by
+// forgePusher. A head repository other than the base makes it a fork.
 func (rs *reviewServer) payload(action, sha, headRepo string) []byte {
+	return rs.payloadFrom(action, sha, headRepo, forgePusher, false)
+}
+
+// payloadFrom returns a pull request event the way payload does, sent by the forge account sender,
+// which GitHub marks as a bot when bot is set.
+func (rs *reviewServer) payloadFrom(action, sha, headRepo string, sender int64, bot bool) []byte {
 	if rs.provider == trigger.ProviderGitLab {
 		source := 5
 		if headRepo != "" {
@@ -427,19 +470,24 @@ func (rs *reviewServer) payload(action, sha, headRepo string) []byte {
 		if action == "update" {
 			oldrev = strings.Repeat("0", 40)
 		}
-		return []byte(fmt.Sprintf(`{"object_kind":"merge_request",`+
+		return []byte(fmt.Sprintf(`{"object_kind":"merge_request","user":{"id":%d},`+
 			`"project":{"path_with_namespace":"infra/network"},"object_attributes":{"iid":7,`+
 			`"action":%q,"oldrev":%q,"source_project_id":%d,"target_project_id":5,`+
 			`"source_branch":"feature","url":"https://gitlab.example.com/mr/7","last_commit":{"id":%q}}}`,
-			action, oldrev, source, sha))
+			sender, action, oldrev, source, sha))
 	}
 	if headRepo == "" {
 		headRepo = "acme/infra"
 	}
+	kind := "User"
+	if bot {
+		kind = "Bot"
+	}
 	return []byte(fmt.Sprintf(`{"action":%q,"number":7,"pull_request":{`+
 		`"html_url":"https://github.example.com/acme/infra/pull/7",`+
 		`"head":{"sha":%q,"ref":"feature","repo":{"full_name":%q}},`+
-		`"base":{"sha":"x","ref":"main","repo":{"full_name":"acme/infra"}}}}`, action, sha, headRepo))
+		`"base":{"sha":"x","ref":"main","repo":{"full_name":"acme/infra"}}},`+
+		`"sender":{"id":%d,"type":%q}}`, action, sha, headRepo, sender, kind))
 }
 
 // opened and pushed are the provider's names for a new pull request and a push to one.
@@ -1132,5 +1180,104 @@ func TestReviewPlanMatchingNoHostsIsSkipped(t *testing.T) {
 		if !chainHasPath(t, rs.audits, "/hooks/"+rs.triggerID+"/review/7/"+path) {
 			t.Errorf("the chain has no %s entry", path)
 		}
+	}
+}
+
+// TestReviewHookPlansOnlyForALinkedPerson proves a pull request's own event starts a plan only
+// when its sender is a person linked to a SwitchTender account that may plan the template, and
+// that the plan runs as that account. A plan executes the head with the template's credentials,
+// so an unlinked sender, a bot, and a linked account that may not launch work start nothing: the
+// refusal is on the chain, and the pull request is told once, however often that sender pushes,
+// that a linked person can start the plan with a comment.
+//
+//nolint:funlen // Test function.
+func TestReviewHookPlansOnlyForALinkedPerson(t *testing.T) {
+	t.Parallel()
+	const viewer int64 = 1100
+	tests := []struct {
+		Provider    string
+		Sender      int64
+		Bot         bool
+		WantRefused string
+	}{{ // Test 0: An unlinked sender on GitHub starts nothing.
+		Provider: trigger.ProviderGitHub, Sender: forgeStranger,
+		WantRefused: "the sender is not linked to a SwitchTender account",
+	}, { // Test 1: An unlinked sender on GitLab starts nothing.
+		Provider: trigger.ProviderGitLab, Sender: forgeStranger,
+		WantRefused: "the sender is not linked to a SwitchTender account",
+	}, { // Test 2: A linked operator on GitHub starts the plan as their account.
+		Provider: trigger.ProviderGitHub, Sender: forgePusher,
+	}, { // Test 3: A linked operator on GitLab starts the plan as their account.
+		Provider: trigger.ProviderGitLab, Sender: forgePusher,
+	}, { // Test 4: GitHub marks the sender a bot, linked or not, and it starts nothing.
+		Provider: trigger.ProviderGitHub, Sender: forgePusher, Bot: true,
+		WantRefused: "the sender is a bot",
+	}, { // Test 5: GitLab's users API marks the linked sender a bot, and it starts nothing.
+		Provider: trigger.ProviderGitLab, Sender: forgePusher, Bot: true,
+		WantRefused: "the sender is a bot",
+	}, { // Test 6: A linked account whose role cannot launch work starts nothing.
+		Provider: trigger.ProviderGitHub, Sender: viewer,
+		WantRefused: "the sender's SwitchTender account may not plan this template",
+	}, { // Test 7: An event that names no sender starts nothing.
+		Provider: trigger.ProviderGitHub, Sender: 0,
+		WantRefused: "the sender is not linked to a SwitchTender account",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			rs := newReviewServer(t, reviewSetup{Provider: test.Provider})
+			rs.link(t, "viewer", user.RoleViewer, viewer)
+			if test.Bot && test.Provider == trigger.ProviderGitLab {
+				rs.forge.SetBot(test.Sender, true)
+			}
+			rec := rs.fire(t, rs.eventName(),
+				rs.payloadFrom(rs.opened(), rs.headSHA, "", test.Sender, test.Bot), "")
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("webhook = %d %s, want 202", rec.Code, rec.Body.String())
+			}
+			if test.WantRefused == "" {
+				planned := rs.planRun(t, rec)
+				rs.waitStatus(t, rs.headSHA, successState)
+				got, err := rs.runs.Get(ctx, planned.ID)
+				if err != nil {
+					t.Fatalf("Get() error = %v", err)
+				}
+				if diff := cmp.Diff([]string{rs.pusher.ID, rs.pusher.Username, actorTypePullRequest},
+					[]string{got.ActorUserID, got.Actor, got.ActorType}); diff != "" {
+					t.Errorf("plan runs as mismatch (-want +got):\n%s", diff)
+				}
+				return
+			}
+			var body map[string]string
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode %s: %v", rec.Body.String(), err)
+			}
+			if diff := cmp.Diff(test.WantRefused, body["refused"]); diff != "" {
+				t.Errorf("refusal mismatch (-want +got):\n%s", diff)
+			}
+			// The same sender pushes again, which is refused again and told nothing new.
+			second := rs.origin.Push(t, map[string]string{"infra/plan.txt": "again\n"})
+			rec = rs.fire(t, rs.eventName(),
+				rs.payloadFrom(rs.pushed(), second, "", test.Sender, test.Bot), "")
+			if rec.Code != http.StatusAccepted || !strings.Contains(rec.Body.String(), "refused") {
+				t.Fatalf("second webhook = %d %s, want 202 refused", rec.Code, rec.Body.String())
+			}
+			rs.srv.reviews.Wait()
+			list, err := rs.runs.List(ctx)
+			if err != nil {
+				t.Fatalf("List() error = %v", err)
+			}
+			if len(list) != 0 || len(rs.specs.all()) != 0 {
+				t.Errorf("a refused sender launched %d runs", len(list))
+			}
+			c := rs.forge.Comments(7)
+			if len(c) != 1 || !strings.Contains(c[0].Body, "`/switchtender plan`") {
+				t.Errorf("comments = %+v, want one reply naming /switchtender plan", c)
+			}
+			if !chainHasPath(t, rs.audits, "/hooks/"+rs.triggerID+"/review/7/refused") {
+				t.Error("the refusal is not on the chain")
+			}
+		})
 	}
 }
