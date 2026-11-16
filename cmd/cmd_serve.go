@@ -1708,7 +1708,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		dispatch.WithProjects(bundle.Projects(), syncer),
 		dispatch.WithDefaultImage(serveDefaultImage),
 		imageResolverOption(),
-		dispatch.WithRefuseUnpinnedImage(!serveAllowUnpinnedImage),
+		unpinnedImageOption(),
 		dispatch.WithWebhooks(notifyWebhooks),
 		dispatch.WithSlack(notifySlack),
 		dispatch.WithMattermost(notifyMattermost),
@@ -2340,6 +2340,13 @@ func imageResolverOption() dispatch.Option {
 		return dispatch.WithImageResolver(nil)
 	}
 	return dispatch.WithImageResolver(newImageResolver())
+}
+
+// unpinnedImageOption returns the dispatch option that settles a submitted run whose image tag
+// could not be pinned to a digest. The submission is refused, so an approval always covers a
+// digest, unless --allow-unpinned-image is given, which binds the run to its tag.
+func unpinnedImageOption() dispatch.Option {
+	return dispatch.WithRefuseUnpinnedImage(!serveAllowUnpinnedImage)
 }
 
 // newImageResolver returns the resolver the server asks registries through. Whoever submits a run

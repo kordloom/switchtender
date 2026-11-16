@@ -140,7 +140,11 @@ func (h *harness) bootstrap(namespace string) error {
 		Role     string
 	}{
 		{"casey", "admin"},
-		{"release-agent", "operator"},
+		// The agent's account is an admin on purpose. An agent's token is capped at operator
+		// whatever its account holds, so each refusal of the agent in the phases is a refusal of
+		// an agent. Under an operator account the same refusals would be an operator's, and would
+		// say nothing about agents.
+		{"release-agent", "admin"},
 	} {
 		err := h.apiCall("POST", "/v1/users", admin, map[string]any{
 			"username": account.Username,
@@ -266,8 +270,16 @@ func (h *harness) failed() int {
 // run executes a command, returning its combined output, with the private kubeconfig in its
 // environment so kubectl and helm never read the user's.
 func (h *harness) run(name string, args ...string) (string, error) {
+	return h.runEnv(nil, name, args...)
+}
+
+// runEnv is run with env added to the command's environment, each entry in the form KEY=value. It
+// is how a secret reaches a command: the arguments of a running process can be read by every
+// account on the machine, and run quotes them in the error it returns, so a token never rides
+// there.
+func (h *harness) runEnv(env []string, name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
-	cmd.Env = append(os.Environ(), "KUBECONFIG="+h.kubeconfig)
+	cmd.Env = append(append(os.Environ(), "KUBECONFIG="+h.kubeconfig), env...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("%s %s: %w\n%s", name, strings.Join(args, " "), err, out)
