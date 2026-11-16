@@ -75,7 +75,11 @@ function wireActions(runId) {
 			explain.disabled = true;
 			try {
 				const res = await postAction("/runs/" + runId + "/explain");
-				if (bodyEl) bodyEl.textContent = res.explanation || "No explanation was returned.";
+				if (bodyEl) {
+					bodyEl.textContent = res.explanation || "No explanation was returned.";
+					const note = hiddenValuesNote(res.hidden_values);
+					if (note) bodyEl.appendChild(note);
+				}
 			} catch (e) {
 				if (bodyEl) {
 					bodyEl.textContent = e.message === "ai is not enabled"
@@ -87,6 +91,21 @@ function wireActions(runId) {
 			}
 		});
 	}
+}
+
+// hiddenValuesNote says, beside the AI answer, how many values in the command were hidden from the
+// model. The model reads the masked command, so its answer cannot weigh what those values do, and
+// the reader is told rather than left to assume it saw what the What will run block shows. It
+// returns null when nothing was hidden.
+function hiddenValuesNote(count) {
+	const n = Number(count) || 0;
+	if (n <= 0) return null;
+	const note = document.createElement("p");
+	note.className = "muted explain-hidden";
+	note.textContent = (n === 1 ? "1 value" : n + " values") + " in the command " +
+		(n === 1 ? "was" : "were") + " hidden from the model, so this answer does not account for " +
+		(n === 1 ? "it." : "them.");
+	return note;
 }
 
 // updateActions shows cancel while the run is active and retry on a finished split that did not
@@ -368,7 +387,7 @@ async function loadPipeline(pipelineId) {
 	const run = await getJSON("/runs/" + pipelineId);
 	const stepData = await getJSON("/runs/" + pipelineId + "/steps");
 	renderHeader(run);
-	renderSteps(stepData.steps || []);
+	renderSteps(stepData.steps || [], run);
 	setStatus("");
 	if (!isTerminal(run.status)) {
 		await openPipelineStream(pipelineId);
@@ -463,7 +482,7 @@ async function openPipelineStream(pipelineId) {
 			const run = await getJSON("/runs/" + pipelineId);
 			const stepData = await getJSON("/runs/" + pipelineId + "/steps");
 			renderHeader(run);
-			renderSteps(stepData.steps || []);
+			renderSteps(stepData.steps || [], run);
 		} catch (_) { /* keep the last view on a refresh failure */ }
 	};
 	source.addEventListener("event", () => {
@@ -477,12 +496,18 @@ async function openPipelineStream(pipelineId) {
 	});
 }
 
-// renderSteps lists a pipeline's step runs in order with status and playbook.
-function renderSteps(steps) {
+// renderSteps lists a pipeline's step runs in order with status and playbook, each with the What will
+// run block for what it executes. A step the workflow has not reached has no step run yet, so it is
+// drawn from the workflow's own steps in run, which is how a held workflow that has not started
+// shows every step's command before anyone approves it.
+function renderSteps(steps, run) {
 	const panel = document.getElementById("steps-panel");
 	const list = document.getElementById("steps");
 	list.innerHTML = "";
-	if (!steps.length) {
+	const reached = new Set(steps.map((s) => s.step_name));
+	const declared = (run && run.steps) || [];
+	const planned = declared.filter((p) => !reached.has(p.name));
+	if (!steps.length && !planned.length) {
 		panel.hidden = true;
 		return;
 	}
@@ -506,9 +531,29 @@ function renderSteps(steps) {
 		}
 		label.textContent = text;
 		row.appendChild(label);
-		list.appendChild(row);
+		list.appendChild(stepEntry(row, whatWillRunEl(s)));
+	}
+	for (const p of planned) {
+		const row = document.createElement("div");
+		row.className = "shard-row";
+		const label = document.createElement("span");
+		label.className = "shard-label";
+		const detail = p.type === "approval" ? "approval" : toolLabel(p);
+		label.textContent = (declared.indexOf(p) + 1) + ". " + (p.name || "step") +
+			(detail ? "  ·  " + detail : "") + "  ·  not started";
+		row.appendChild(label);
+		list.appendChild(stepEntry(row, whatWillRunEl(p)));
 	}
 	panel.hidden = false;
+}
+
+// stepEntry wraps one step's row and its What will run block, when it has one, in a single entry.
+function stepEntry(row, block) {
+	const entry = document.createElement("div");
+	entry.className = "step-entry";
+	entry.appendChild(row);
+	if (block) entry.appendChild(block);
+	return entry;
 }
 
 // approvalStepLabel says where a workflow approval step stands: waiting, approved, denied, timed out,
@@ -1124,6 +1169,134 @@ function renderReportCallout(run) {
 	host.hidden = false;
 }
 
+// renderWhatWillRun fills the What will run panel above the decision buttons. The header's Command
+// field is a summary, the most telling line of the script, so a script that opened with a harmless
+// comment read as that comment where the decision was made. This panel holds the whole command and
+// every setting that changes what it does, while the run waits for a decision and after it ends. A
+// workflow has no command of its own, so its steps carry the block in the step list instead.
+function renderWhatWillRun(run) {
+	const host = document.getElementById("what-will-run");
+	if (!host) return;
+	host.textContent = "";
+	const block = (run.kind === "pipeline" || (run.steps && run.steps.length)) ? null : whatWillRunEl(run);
+	host.hidden = !block;
+	if (!block) return;
+	const head = document.createElement("div");
+	head.className = "panel-head";
+	const title = document.createElement("h2");
+	title.textContent = !isTerminal(run.status)
+		? "What will run"
+		: run.started_at ? "What ran" : "What was asked to run";
+	head.appendChild(title);
+	host.appendChild(head);
+	host.appendChild(block);
+}
+
+// whatWillRunEl builds the What will run block for a run or one workflow step: the whole command in
+// a pre, written as text and never through the short label the runs list uses, with a copy control,
+// then one line for each setting that changes what runs. Every value is the run as the server
+// returned it, which already masks secret-shaped values for a reader below admin. It returns null
+// for an approval step and for a run with nothing to show.
+function whatWillRunEl(spec) {
+	if (spec.kind === "approval" || spec.type === "approval") return null;
+	const tool = spec.tool || "ansible";
+	const ansible = tool === "ansible";
+	const text = ansible ? (spec.playbook || "") : (spec.command || "");
+	if (!text) return null;
+	const caption = ansible ? "Playbook"
+		: (tool === "terraform" || tool === "opentofu") ? "Directory" : "Command";
+	const block = document.createElement("div");
+	block.className = "what-will-run";
+	const head = document.createElement("div");
+	head.className = "what-will-run-head";
+	const label = document.createElement("span");
+	label.className = "what-will-run-caption";
+	label.textContent = caption;
+	head.appendChild(label);
+	head.appendChild(copyButton(text, "Copy the " + caption.toLowerCase()));
+	block.appendChild(head);
+	const pre = document.createElement("pre");
+	pre.className = "what-will-run-command";
+	pre.textContent = text;
+	block.appendChild(pre);
+
+	const vars = spec.extra_vars || {};
+	const keys = Object.keys(vars).sort();
+	if (keys.length) {
+		whatWillRunLine(block, "Extra variables", keys.map((k) => k + "=" + varText(vars[k])).join("  "));
+	}
+	if (spec.sealed_vars && spec.sealed_vars.length) {
+		whatWillRunLine(block, "Sealed variables", spec.sealed_vars.join(", ") + " (values sealed)");
+	}
+	if (spec.tags && spec.tags.length) whatWillRunLine(block, "Tags", spec.tags.join(", "));
+	if (spec.skip_tags && spec.skip_tags.length) whatWillRunLine(block, "Skip tags", spec.skip_tags.join(", "));
+	if (spec.credential_ids && spec.credential_ids.length) {
+		const value = whatWillRunLine(block, "Credentials", "");
+		const named = [];
+		for (const [i, id] of spec.credential_ids.entries()) {
+			if (i) value.appendChild(document.createTextNode(", "));
+			const cred = document.createElement("span");
+			cred.dataset.credentialId = id;
+			cred.dataset.tip = "Credential " + id + ". Its secret is never shown";
+			cred.textContent = id;
+			value.appendChild(cred);
+			named.push(cred);
+		}
+		credentialNameMap().then((names) => {
+			for (const cred of named) {
+				const name = names[cred.dataset.credentialId];
+				if (name) cred.textContent = name;
+			}
+		});
+	}
+	if (spec.git_ref) whatWillRunLine(block, "Git ref", spec.git_ref);
+	if (spec.pinned_commit) whatWillRunLine(block, "Pinned commit", spec.pinned_commit);
+	if (spec.limit) whatWillRunLine(block, "Limit", spec.limit);
+	if (spec.timeout) {
+		whatWillRunLine(block, "Timeout", spec.timeout + (spec.timeout === 1 ? " second" : " seconds"));
+	}
+	return block;
+}
+
+// whatWillRunLine appends one labeled setting to a What will run block and returns its value span.
+function whatWillRunLine(block, label, text) {
+	const line = document.createElement("div");
+	line.className = "what-will-run-line";
+	const l = document.createElement("span");
+	l.className = "what-will-run-label";
+	l.textContent = label;
+	line.appendChild(l);
+	const v = document.createElement("span");
+	v.className = "what-will-run-value";
+	v.textContent = text;
+	line.appendChild(v);
+	block.appendChild(line);
+	return v;
+}
+
+// varText renders one extra variable's value as it reaches the run: a string as it is, anything
+// else as JSON.
+function varText(value) {
+	return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+// credentialNamesRead holds the one read of the credential list a page makes for the What will run
+// block, so a live refresh of the header does not ask again.
+let credentialNamesRead = null;
+
+// credentialNameMap resolves to the stored credentials' names by id. The list carries names and
+// kinds and never a secret. A reader it refuses gets an empty map, and the block keeps the ids.
+function credentialNameMap() {
+	if (!credentialNamesRead) {
+		credentialNamesRead = getJSON("/credentials").then((data) => {
+			const names = {};
+			for (const c of data.credentials || []) names[c.id] = c.name;
+			return names;
+		}).catch(() => ({}));
+	}
+	return credentialNamesRead;
+}
+
 // inventoryNames caches stored-inventory names by id for the header, filled once per page.
 let inventoryNames = null;
 
@@ -1262,6 +1435,7 @@ function renderHeader(run) {
 	renderPolicyNotes(run);
 	renderFailureCallout(run);
 	renderReportCallout(run);
+	renderWhatWillRun(run);
 	if (run.actor) {
 		const who = field("Requested by",
 			run.actor + (run.actor_type === "agent" ? " (agent)" : ""), null, run.actor);

@@ -218,6 +218,16 @@ func TestTemplateToolError(t *testing.T) {
 		Req: createTemplateRequest{Name: "t", Tool: "ansible", Playbook: "site.yml",
 			Notifications: []run.NotifyTarget{{Kind: run.NotifyGrafana, URL: "https://gf"}}},
 		Want: "grafana target needs an annotation url and an api token",
+	}, { // Test 12: A name holding a direction override is refused, naming the character.
+		Name: "name with a direction override",
+		Req:  createTemplateRequest{Name: "t\u202ex", Tool: "ansible", Playbook: "site.yml"},
+		Want: "text holds a hidden or control character: the name holds U+202E RIGHT-TO-LEFT " +
+			"OVERRIDE at character 2",
+	}, { // Test 13: So is a name holding a zero-width space.
+		Name: "name with a zero-width space",
+		Req:  createTemplateRequest{Name: "deploy\u200b", Tool: "ansible", Playbook: "site.yml"},
+		Want: "text holds a hidden or control character: the name holds U+200B ZERO WIDTH SPACE " +
+			"at character 7",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {

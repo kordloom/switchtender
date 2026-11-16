@@ -3,6 +3,7 @@ package dispatch
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -83,5 +84,31 @@ func TestDispatcherNotifiesTeams(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("teams webhook never received the notification")
+	}
+}
+
+// TestTeamsCardEscapesOutsideText proves a playbook, hold note, policy name, actor, error, or step
+// from outside cannot plant a markdown link in a Teams card's title or facts.
+func TestTeamsCardEscapesOutsideText(t *testing.T) {
+	t.Parallel()
+	const link = "[x](https://x.example/)"
+	for testNum, in := range hostileRuns() {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			in = in.Clone()
+			in.Playbook = link + hostileText
+			in.Error, in.HoldNote, in.Actor = link, link, link
+			card := teamsCardPayload(in).Attachments[0].Content
+			title, _ := card.Body[0]["text"].(string)
+			if strings.Contains(title, "](") || !strings.Contains(title, `\[x\]\(`) {
+				t.Errorf("title = %q, want the bracket link escaped", title)
+			}
+			facts, _ := card.Body[1]["facts"].([]map[string]string)
+			for _, f := range facts {
+				if strings.Contains(f["value"], "](") {
+					t.Errorf("fact %q = %q, want no bracket link", f["title"], f["value"])
+				}
+			}
+		})
 	}
 }

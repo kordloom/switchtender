@@ -209,6 +209,10 @@ func createInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 			respondError(w, log, http.StatusBadRequest, "name is required")
 			return
 		}
+		if err := dispatch.PlainText("name", req.Name); err != nil {
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		}
 		if denyNonAdminConstructed(w, r, log, req.Kind) {
 			return
 		}
@@ -280,6 +284,10 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 		}
 		if req.Name == "" {
 			respondError(w, log, http.StatusBadRequest, "name is required")
+			return
+		}
+		if err := dispatch.PlainText("name", req.Name); err != nil {
+			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
 		}
 		id := r.PathValue("id")

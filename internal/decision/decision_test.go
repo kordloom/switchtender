@@ -141,6 +141,8 @@ func TestCanonical(t *testing.T) {
 		In: "bad\xffbyte", WantText: "bad�byte",
 	}, { // Test 6: Whitespace alone is no reason at all.
 		In: " \n\t ", WantText: "",
+	}, { // Test 7: A zero-width space and an isolate go, from the one shared list.
+		In: "ok\u200bto\u2066go", WantText: "oktogo",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

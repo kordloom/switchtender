@@ -57,6 +57,7 @@ func TestClassifySubmitNamesEveryKnownError(t *testing.T) {
 			dispatch.ErrStepInput, dispatch.ErrUnnamedStep, dispatch.ErrDuplicateStep,
 			dispatch.ErrUnknownDependency, dispatch.ErrDependencyCycle, run.ErrApprovalStep,
 			run.ErrDenyPath, run.ErrLimitFile, inventory.ErrResolve, inventory.ErrComposition,
+			dispatch.ErrHiddenCharacter,
 		},
 	}, { // Test 1: A credential this server cannot open.
 		WantClass: submitSecret, Errs: []error{credential.ErrNoSecret, credential.ErrUnreadable},

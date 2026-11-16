@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/run"
@@ -193,6 +194,9 @@ type listTemplatesResponse struct {
 func templateToolError(req createTemplateRequest) string {
 	if req.Name == "" {
 		return "name is required"
+	}
+	if err := dispatch.PlainText("name", req.Name); err != nil {
+		return err.Error()
 	}
 	if err := run.ValidateNotifyTargets(req.Notifications); err != nil {
 		return err.Error()

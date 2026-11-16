@@ -91,3 +91,29 @@ test("a single sign-on fragment replaces every cached detail of the previous acc
 		assert.equal(page.app.accountName(), tc.WantName, "test " + i + ": badge name");
 	}
 });
+
+test("a single sign-on error shows one fixed sentence and never the text it carried", () => {
+	const tests = [
+		// Test 0: A sentence somebody put in a link is not shown.
+		{ Hash: "#error=Call+the+help+desk",
+			Want: "Single sign-on did not complete. Try again, or ask your administrator." },
+		// Test 1: Neither is a code.
+		{ Hash: "#error=access_denied",
+			Want: "Single sign-on did not complete. Try again, or ask your administrator." },
+		// Test 2: An empty error says nothing.
+		{ Hash: "#error=", Want: "" },
+		// Test 3: No fragment says nothing.
+		{ Hash: "", Want: "" },
+	];
+	for (const [i, tc] of tests.entries()) {
+		const page = loadPage("login");
+		const win = sandboxOf(page.app);
+		win.history.replaceState = () => {};
+		win.location.hash = tc.Hash;
+		page.app.loadLogin();
+		const status = page.document.getElementById("status");
+		const shown = status.hidden ? "" : status.textContent;
+		assert.equal(shown, tc.Want, "test " + i);
+		assert.doesNotMatch(status.textContent, /help desk/, "test " + i);
+	}
+});

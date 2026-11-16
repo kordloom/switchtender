@@ -177,3 +177,10 @@ var ErrBadGitRef = errors.New("invalid git ref for this run")
 // ErrLowSpace is returned when a new run is refused because the disk its record is written to has
 // less free space than the floor. Runs already admitted are not stopped.
 var ErrLowSpace = errors.New("too little free space to record new runs")
+
+// ErrHiddenCharacter is returned when a run's command, playbook, labels, or intent, or a template or
+// inventory name, holds a character that changes how the text around it is displayed without being
+// visible itself, such as a direction override, a zero-width space, or a control character other
+// than a tab or a line feed. An approver reads that text to decide what they are allowing, so it
+// must display as it is.
+var ErrHiddenCharacter = errors.New("text holds a hidden or control character")

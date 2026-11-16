@@ -2,6 +2,7 @@ package util
 
 import (
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -107,4 +108,69 @@ func JoinWords(words []string, conjunction string) string {
 		return words[0] + " " + conjunction + " " + words[1]
 	}
 	return strings.Join(words[:len(words)-1], ", ") + ", " + conjunction + " " + words[len(words)-1]
+}
+
+// HiddenRuneName returns the Unicode name of r when r is a character that changes how the text
+// around it is displayed, or what a terminal does with it, without being visible itself, and empty
+// for any other character. The characters are the bidirectional embedding, override, isolate, and
+// mark characters, the zero-width space, joiners, word joiner, and byte order mark, and every
+// control character except a tab and a line feed.
+//
+// This is the one list of such characters. A decision reason has them removed, since a reason is
+// never refused for what it looks like, and a run's command, playbook, labels, and intent and a
+// template or inventory name are refused for holding one, since an approver reads those to decide
+// what they are allowing.
+func HiddenRuneName(r rune) string {
+	switch r {
+	case '\t', '\n':
+		return ""
+	case 0x00:
+		return "NULL"
+	case 0x08:
+		return "BACKSPACE"
+	case 0x0D:
+		return "CARRIAGE RETURN"
+	case 0x1B:
+		return "ESCAPE"
+	case 0x7F:
+		return "DELETE"
+	case 0x061C:
+		return "ARABIC LETTER MARK"
+	case 0x200B:
+		return "ZERO WIDTH SPACE"
+	case 0x200C:
+		return "ZERO WIDTH NON-JOINER"
+	case 0x200D:
+		return "ZERO WIDTH JOINER"
+	case 0x200E:
+		return "LEFT-TO-RIGHT MARK"
+	case 0x200F:
+		return "RIGHT-TO-LEFT MARK"
+	case 0x202A:
+		return "LEFT-TO-RIGHT EMBEDDING"
+	case 0x202B:
+		return "RIGHT-TO-LEFT EMBEDDING"
+	case 0x202C:
+		return "POP DIRECTIONAL FORMATTING"
+	case 0x202D:
+		return "LEFT-TO-RIGHT OVERRIDE"
+	case 0x202E:
+		return "RIGHT-TO-LEFT OVERRIDE"
+	case 0x2060:
+		return "WORD JOINER"
+	case 0x2066:
+		return "LEFT-TO-RIGHT ISOLATE"
+	case 0x2067:
+		return "RIGHT-TO-LEFT ISOLATE"
+	case 0x2068:
+		return "FIRST STRONG ISOLATE"
+	case 0x2069:
+		return "POP DIRECTIONAL ISOLATE"
+	case 0xFEFF:
+		return "ZERO WIDTH NO-BREAK SPACE"
+	}
+	if unicode.IsControl(r) {
+		return "CONTROL CHARACTER"
+	}
+	return ""
 }

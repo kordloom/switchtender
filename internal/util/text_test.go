@@ -295,3 +295,49 @@ func TestJoinWords(t *testing.T) {
 		})
 	}
 }
+
+// TestHiddenRuneName pins the one list of characters that change how text displays without being
+// visible, which a run refuses at submit and a decision reason has removed.
+func TestHiddenRuneName(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// In is the character being asked about.
+		In rune
+		// WantName is its name when it is hidden, and empty when it is not.
+		WantName string
+	}{
+		{In: 'a', WantName: ""},                             // Test 0: A letter is visible.
+		{In: ' ', WantName: ""},                             // Test 1: A space is visible.
+		{In: '\t', WantName: ""},                            // Test 2: A tab is allowed.
+		{In: '\n', WantName: ""},                            // Test 3: A line feed is allowed.
+		{In: 'é', WantName: ""},                             // Test 4: An accented letter.
+		{In: '日', WantName: ""},                             // Test 5: A non-Latin letter.
+		{In: 0x00, WantName: "NULL"},                        // Test 6: A NUL byte.
+		{In: 0x07, WantName: "CONTROL CHARACTER"},           // Test 7: A bell.
+		{In: 0x0D, WantName: "CARRIAGE RETURN"},             // Test 8: A carriage return.
+		{In: 0x1B, WantName: "ESCAPE"},                      // Test 9: A terminal escape.
+		{In: 0x7F, WantName: "DELETE"},                      // Test 10: The delete control.
+		{In: 0x85, WantName: "CONTROL CHARACTER"},           // Test 11: A C1 control.
+		{In: 0x202E, WantName: "RIGHT-TO-LEFT OVERRIDE"},    // Test 12: A direction override.
+		{In: 0x202A, WantName: "LEFT-TO-RIGHT EMBEDDING"},   // Test 13: An embedding.
+		{In: 0x2066, WantName: "LEFT-TO-RIGHT ISOLATE"},     // Test 14: An isolate.
+		{In: 0x2069, WantName: "POP DIRECTIONAL ISOLATE"},   // Test 15: The isolate's end.
+		{In: 0x200F, WantName: "RIGHT-TO-LEFT MARK"},        // Test 16: A direction mark.
+		{In: 0x061C, WantName: "ARABIC LETTER MARK"},        // Test 17: The Arabic mark.
+		{In: 0x200B, WantName: "ZERO WIDTH SPACE"},          // Test 18: A zero-width space.
+		{In: 0x200D, WantName: "ZERO WIDTH JOINER"},         // Test 19: A zero-width joiner.
+		{In: 0x2060, WantName: "WORD JOINER"},               // Test 20: A word joiner.
+		{In: 0xFEFF, WantName: "ZERO WIDTH NO-BREAK SPACE"}, // Test 21: A byte order mark.
+		{In: 0x2029, WantName: ""},                          // Test 22: Outside both ranges.
+		{In: 0x206A, WantName: ""},                          // Test 23: Just past the isolates.
+		{In: utf8.RuneError, WantName: ""},                  // Test 24: The replacement mark.
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			if diff := cmp.Diff(test.WantName, HiddenRuneName(test.In)); diff != "" {
+				t.Errorf("HiddenRuneName(%U) mismatch (-want +got):\n%s", test.In, diff)
+			}
+		})
+	}
+}

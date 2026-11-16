@@ -348,3 +348,83 @@ func TestHeadBytes(t *testing.T) {
 		})
 	}
 }
+
+// TestExplainSaysWhenValuesAreHidden proves the AI review is told the command it reads has masked
+// values and how many, and that the answer carries the same count for the panel to show.
+//
+// The review of a held run was given the masked command with nothing saying so, and its answer read
+// as a judgment of the whole command while it had never seen the values under secret-sounding names.
+func TestExplainSaysWhenValuesAreHidden(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Run              *run.Run
+		WantHiddenValues int
+		WantSentence     string
+	}{{ // Test 0: A held proposal whose command carries two secret assignments.
+		Run: &run.Run{
+			ID: "run_held", Tool: "bash", Status: run.StatusPendingApproval,
+			Intent:  "rotate the keys",
+			Command: "export DB_PASSWORD=hunter2\nAPI_TOKEN=abc123 ./rotate.sh",
+		},
+		WantHiddenValues: 2,
+		WantSentence:     "Hidden values: 2 values were replaced with [redacted]",
+	}, { // Test 1: A finished run with one secret assignment uses the singular.
+		Run: &run.Run{
+			ID: "run_done", Tool: "bash", Status: run.StatusFailed,
+			Command: "export DB_PASSWORD=hunter2\npsql -c 'select 1'",
+		},
+		WantHiddenValues: 1,
+		WantSentence:     "Hidden values: 1 value was replaced with [redacted]",
+	}, { // Test 2: A command with nothing to mask says nothing and counts zero.
+		Run: &run.Run{
+			ID: "run_plain", Tool: "bash", Status: run.StatusFailed,
+			Command: "systemctl restart nginx",
+		},
+		WantHiddenValues: 0,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			store := run.NewMemStore()
+			if err := store.Save(context.Background(), test.Run); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+			var prompt string
+			provider := ai.ProviderFunc(func(_ context.Context, _, user string) (string, error) {
+				prompt = user
+				return "advice", nil
+			})
+			handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithAI(provider)).Handler()
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec,
+				httptest.NewRequest(http.MethodPost, "/v1/runs/"+test.Run.ID+"/explain", nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("explain status = %d, want 200: %s", rec.Code, rec.Body.String())
+			}
+			var body struct {
+				HiddenValues *int `json:"hidden_values"`
+			}
+			if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if body.HiddenValues == nil {
+				t.Fatal("response carries no hidden_values field")
+			}
+			if *body.HiddenValues != test.WantHiddenValues {
+				t.Errorf("hidden_values = %d, want %d", *body.HiddenValues, test.WantHiddenValues)
+			}
+			if strings.Contains(prompt, "hunter2") || strings.Contains(prompt, "abc123") {
+				t.Errorf("prompt carries a masked value: %q", prompt)
+			}
+			if test.WantSentence == "" {
+				if strings.Contains(prompt, "Hidden values:") {
+					t.Errorf("prompt claims hidden values for a plain command: %q", prompt)
+				}
+				return
+			}
+			if !strings.Contains(prompt, test.WantSentence) {
+				t.Errorf("prompt missing %q:\n%s", test.WantSentence, prompt)
+			}
+		})
+	}
+}

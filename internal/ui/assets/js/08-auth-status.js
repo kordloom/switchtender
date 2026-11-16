@@ -81,10 +81,16 @@ function consumeSSOFragment() {
 	if (params.get("user")) localStorage.setItem("st_user", params.get("user"));
 }
 
-// ssoError returns a single sign-on error passed back in the URL fragment, or empty when none.
+// SSO_ERROR is the one sentence the sign-in page shows when single sign-on comes back with an
+// error. The address that carried the error can be written by anybody who sends a link, so the
+// page never shows the text it carried.
+const SSO_ERROR = "Single sign-on did not complete. Try again, or ask your administrator.";
+
+// ssoError returns SSO_ERROR when single sign-on passed an error back in the URL fragment, or empty
+// when none.
 function ssoError() {
 	if (!location.hash || location.hash.indexOf("error=") === -1) return "";
-	return new URLSearchParams(location.hash.slice(1)).get("error") || "";
+	return new URLSearchParams(location.hash.slice(1)).get("error") ? SSO_ERROR : "";
 }
 
 // authHeaders builds the Authorization header when a token is stored.

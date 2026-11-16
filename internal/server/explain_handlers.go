@@ -88,6 +88,15 @@ const explainStatsHosts = 20
 // so the TTL is a memory bound, not a freshness requirement.
 const explainCacheTTL = 15 * time.Minute
 
+// explainResponse is the answer to an explain request.
+type explainResponse struct {
+	// Explanation is the model's answer.
+	Explanation string `json:"explanation"`
+	// HiddenValues is how many values were masked out of the command the model was given, so a
+	// reader knows the answer could not weigh them.
+	HiddenValues int `json:"hidden_values"`
+}
+
 // explainCall tracks one in-flight or completed explanation for a run.
 type explainCall struct {
 	// done closes when the provider call finishes.
@@ -190,6 +199,9 @@ func explainRunHandler(store run.Store, provider ai.Provider, authz *authorizer,
 		}
 		system := explainSystemPrompt
 		var prompt string
+		// hidden counts the values masked out of the command the prompt carries, so the answer can
+		// say the model never saw them. A reconcile of a playbook sends no command, so it hides none.
+		hidden := 0
 		switch {
 		case reconcileProposal:
 			source, err := store.Get(r.Context(), rn.ProposedFrom)
@@ -207,6 +219,7 @@ func explainRunHandler(store run.Store, provider ai.Provider, authz *authorizer,
 				system = planApplySystemPrompt
 				prompt = buildPlanApplyPrompt(rn, source,
 					logTail(r.Context(), store, rn.ProposedFrom, explainLogTail))
+				hidden = hiddenValueCount(rn.Command)
 			} else {
 				system = proposalSystemPrompt
 				prompt = buildProposalPrompt(rn, source,
@@ -215,6 +228,7 @@ func explainRunHandler(store run.Store, provider ai.Provider, authz *authorizer,
 		case intentProposal:
 			system = intentProposalSystemPrompt
 			prompt = buildIntentProposalPrompt(rn)
+			hidden = hiddenValueCount(rn.Command)
 		default:
 			// Only the tail is wanted, so only the tail is read. Reading the whole log to slice the end
 			// off meant a run that failed after a gigabyte of output, which is exactly the run somebody
@@ -222,6 +236,7 @@ func explainRunHandler(store run.Store, provider ai.Provider, authz *authorizer,
 			// call.
 			prompt = buildExplainPrompt(rn, logTail(r.Context(), store, id, explainLogTail),
 				explainEvents(r.Context(), store, id))
+			hidden = hiddenValueCount(rn.Command)
 		}
 		answer, err := group.do(id+"|"+string(rn.Status), func() (string, error) {
 			return provider.Complete(r.Context(), system, prompt)
@@ -230,8 +245,8 @@ func explainRunHandler(store run.Store, provider ai.Provider, authz *authorizer,
 			respondAIError(w, log, "explain run", err)
 			return
 		}
-		respondJSON(w, log, http.StatusOK,
-			map[string]string{"explanation": strings.TrimSpace(answer)}, wantsPretty(r))
+		resp := explainResponse{Explanation: strings.TrimSpace(answer), HiddenValues: hidden}
+		respondJSON(w, log, http.StatusOK, resp, wantsPretty(r))
 	}
 }
 
@@ -298,6 +313,7 @@ func buildExplainPrompt(rn *run.Run, logBytes []byte, events []event.Event) stri
 	if rn.Command != "" {
 		b.WriteString("\nCommand: ")
 		b.WriteString(promptCommand(rn.Command, explainCommandCap))
+		b.WriteString(hiddenValuesSentence(hiddenValueCount(rn.Command)))
 	}
 	if rn.Error != "" {
 		b.WriteString("\nError: ")
@@ -356,6 +372,7 @@ func buildPlanApplyPrompt(rn, source *run.Run, plan []byte) string {
 	b.WriteString(" apply of ")
 	b.WriteString(promptCommand(rn.Command, explainCommandCap))
 	b.WriteString(", run for real.")
+	b.WriteString(hiddenValuesSentence(hiddenValueCount(rn.Command)))
 	if rn.HeldByPolicy != "" {
 		b.WriteString("\nHeld because: ")
 		b.WriteString(rn.HeldByPolicy)
@@ -390,6 +407,7 @@ func buildIntentProposalPrompt(rn *run.Run) string {
 	if rn.Command != "" {
 		b.WriteString("\nCommand: ")
 		b.WriteString(promptCommand(rn.Command, explainCommandCap))
+		b.WriteString(hiddenValuesSentence(hiddenValueCount(rn.Command)))
 	}
 	if rn.Limit != "" {
 		b.WriteString("\nLimited to hosts: ")
@@ -536,8 +554,6 @@ func statsSection(events []event.Event) string {
 	return ""
 }
 
-// headBytes returns up to limit leading bytes of s without splitting a multibyte rune, appending a
-// truncation note when the value was cut.
 // promptCommand returns a run's script trimmed to limit and with inline secrets removed, for the one
 // place the raw script leaves the host.
 //
@@ -557,6 +573,33 @@ func promptCommand(command string, limit int) string {
 	return headBytes(redacted, limit)
 }
 
+// hiddenValueCount returns how many values promptCommand masks out of command.
+func hiddenValueCount(command string) int {
+	if command == "" {
+		return 0
+	}
+	_, found := util.RedactAssignments(command, scrub.Marker)
+	return len(found)
+}
+
+// hiddenValuesSentence tells the model that count values in the command it was given were replaced
+// with the mask, so it neither guesses them nor reasons as if it read the whole command, and asks it
+// to say so in its answer. It returns an empty string when nothing was hidden.
+func hiddenValuesSentence(count int) string {
+	if count <= 0 {
+		return ""
+	}
+	noun := "values were"
+	if count == 1 {
+		noun = "value was"
+	}
+	return fmt.Sprintf("\nHidden values: %d %s replaced with %s in the command above before it "+
+		"was sent to you. Do not guess them, and say in your answer that the command has hidden "+
+		"values you could not weigh.", count, noun, scrub.Marker)
+}
+
+// headBytes returns up to limit leading bytes of s without splitting a multibyte rune, appending a
+// truncation note when the value was cut.
 func headBytes(s string, limit int) string {
 	if len(s) <= limit {
 		return s
