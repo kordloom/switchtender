@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	osuser "os/user"
-	"path/filepath"
 	"time"
 
 	"go.uber.org/zap"
@@ -76,10 +75,12 @@ func (c clockedAudit) Append(ctx context.Context, e *audit.Entry) error {
 
 // seedAgent shows the agent gate doing its work, all of it real. The agent asks to restart the app
 // on one web host and to apply the network root, and both wait for a person by default, the apply
-// before anything plans. Its routine smoke test runs under an exemption. It asks for a workflow that would apply Terraform, and the dispatcher refuses
-// it at submission. It tries to approve its own held run, and the gate refuses it at the door. Both
-// refusals are on the chain, recorded the way every refused request is.
-func seedAgent(ctx context.Context, d Deps, playbook, inv, tfDir string, log *zap.Logger) {
+// before anything plans. Both are held, so each comes from the project that holds it, named in ids,
+// and is pinned to that project's commit. Its routine smoke test runs under an exemption. It asks
+// for a workflow that would apply Terraform, and the dispatcher refuses it at submission. It tries
+// to approve its own held run, and the gate refuses it at the door. Both refusals are on the chain,
+// recorded the way every refused request is.
+func seedAgent(ctx context.Context, d Deps, ids seededIDs, log *zap.Logger) {
 	if d.Tokens == nil || d.Users == nil || d.Policies == nil || d.Audit == nil || d.Runs == nil {
 		return
 	}
@@ -96,20 +97,21 @@ func seedAgent(ctx context.Context, d Deps, playbook, inv, tfDir string, log *za
 		return agentRequest(ctx, api, plain, method, path, body)
 	}
 	labels := map[string]string{"env": "prod", "incident": agentIncident}
-	restart := filepath.Join(filepath.Dir(playbook), "restart-app.yml")
 
 	// The fix an agent reaches for first: restart the app on the one web host that stopped
 	// answering. It waits for a person, held by default.
 	code, held := call(http.MethodPost, "/v1/runs", map[string]any{
-		"playbook": restart, "inventory": inv, "limit": "web01", "labels": labels})
+		"playbook": projectRestart, "inventory": projectInventory, "limit": "web01",
+		"project_id": ids.id(ids.Projects, webProject, ""), "labels": labels})
 	expect(log, "the agent's restart", code, http.StatusAccepted)
 	stepClock(d)
 
 	// An apply of the network root, held before anything plans. Releasing it would plan it, and the
 	// apply its plan proposes would wait for a second approval carrying the saved plan.
 	code, _ = call(http.MethodPost, "/v1/runs", map[string]any{
-		"tool": run.ToolTerraform, "command": tfDir,
-		"labels": map[string]string{"env": "prod", "team": "network", "incident": agentIncident}})
+		"tool": run.ToolTerraform, "command": projectNetwork,
+		"project_id": ids.id(ids.Projects, dbProject, ""),
+		"labels":     map[string]string{"env": "prod", "team": "network", "incident": agentIncident}})
 	expect(log, "the agent's apply", code, http.StatusAccepted)
 	stepClock(d)
 
@@ -127,10 +129,10 @@ func seedAgent(ctx context.Context, d Deps, playbook, inv, tfDir string, log *za
 	// A workflow that would carry the apply inside it, where one approval of the workflow would
 	// release a plan nobody saw. The dispatcher refuses it at submission and records the refusal.
 	code, _ = call(http.MethodPost, "/v1/pipelines", map[string]any{
-		"name": "Remediate web and network", "inventory": inv,
+		"name": "Remediate web and network", "inventory": projectInventory,
 		"steps": []map[string]any{
-			{"name": "restart", "playbook": restart},
-			{"name": "apply", "tool": run.ToolTerraform, "command": tfDir},
+			{"name": "restart", "playbook": projectRestart},
+			{"name": "apply", "tool": run.ToolTerraform, "command": projectNetwork},
 		}})
 	expect(log, "the agent's workflow", code, http.StatusForbidden)
 	stepClock(d)
@@ -255,20 +257,23 @@ func stepClock(d Deps) {
 
 // seedWaitingWorkflow seeds a person's release that is waiting at its approval step right now: the
 // build ran, and the workflow paused at the step that asks whether to ship it. It is the workflow
-// the approvals queue shows waiting, with what already ran and what each answer runs next.
-func seedWaitingWorkflow(ctx context.Context, d Deps, playbook, inv string, log *zap.Logger) {
+// the approvals queue shows waiting, with what already ran and what each answer runs next. An
+// approval stands in front of its deploy, so it comes from the web-platform project, whose id is
+// projectID, and is pinned to that project's commit.
+func seedWaitingWorkflow(ctx context.Context, d Deps, projectID string, log *zap.Logger) {
 	if d.Runs == nil {
 		return
 	}
 	steps := []run.PipelineStep{
-		{Name: "build", Playbook: playbook},
+		{Name: "build", Playbook: projectPlaybook},
 		{Name: "approve-release", Type: run.StepApproval, DependsOn: []string{"build"},
 			Description: "Release 4.3 built cleanly on every host. Ship it to production?"},
-		{Name: "deploy", Playbook: playbook, DependsOn: []string{"approve-release"}},
+		{Name: "deploy", Playbook: projectPlaybook, DependsOn: []string{"approve-release"}},
 	}
-	pipe, err := d.Submitter.SubmitPipeline(ctx, "Release 4.3", inv, steps,
+	pipe, err := d.Submitter.SubmitPipeline(ctx, "Release 4.3", projectInventory, steps,
 		seedOpts(ctx, d, "api", "", "admin",
-			map[string]string{"env": "prod", "ticket": "REL-43", "change": "REL-43"})...)
+			map[string]string{"env": "prod", "ticket": "REL-43", "change": "REL-43"},
+			run.WithProject(projectID))...)
 	if err != nil {
 		log.Warn("demo: seed the waiting release: " + err.Error())
 		return

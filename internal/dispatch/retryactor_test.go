@@ -22,13 +22,14 @@ import (
 func TestARetryCarriesTheActorTheGateJudges(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
+	projects, from := heldFrom(t)
 	d := New(store, &failingLister{hosts: []string{"web01", "web02"}}, nil,
-		WithPolicies(policy.NewMemStore()))
+		WithPolicies(policy.NewMemStore()), projects)
 	defer d.Close()
 	ctx := context.Background()
 
 	// The original runs and its shards fail, which is what makes a retry available.
-	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2)
+	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2, from)
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}

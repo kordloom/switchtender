@@ -212,7 +212,9 @@ func TestLoginBrandedSSO(t *testing.T) {
 }
 
 // TestLoginDemoShowcase proves a read-only demo with no identity provider still advertises SSO with a
-// disabled button, so a visitor sees the capability exists, and never a live sign-in link.
+// disabled button, so a visitor sees the capability exists, and never a live sign-in link. The note
+// under the button names directory sign-in as the Pro feature it is and links the price list. It
+// said the feature was built in, on a page whose banner names the Community build.
 func TestLoginDemoShowcase(t *testing.T) {
 	t.Parallel()
 	handler := ui.New(zap.NewNop(), nil, true, 0, false, false, false, "", ui.WithDemo(true)).Handler()
@@ -224,6 +226,20 @@ func TestLoginDemoShowcase(t *testing.T) {
 	}
 	if !strings.Contains(body, "disabled") {
 		t.Error("the demo SSO button is not disabled")
+	}
+	for _, want := range []string{
+		`title="Directory sign-in is a Pro feature. `,
+		`Directory sign-in (SSO and LDAP) is a Pro feature. <a href="https://switchtender.com/pricing"`,
+		`>See pricing.</a>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the demo login does not carry %q", want)
+		}
+	}
+	for _, stale := range []string{"built in", "configured per install"} {
+		if strings.Contains(body, stale) {
+			t.Errorf("the demo login still says %q", stale)
+		}
 	}
 	if strings.Contains(body, "/auth/oidc/login") || strings.Contains(body, "/auth/saml/login") {
 		t.Error("the demo login exposes a live SSO link with no provider configured")
@@ -240,7 +256,8 @@ func TestAReadOnlyInstallIsNotCalledTheDemo(t *testing.T) {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		body := rec.Body.String()
-		for _, demo := range []string{"This public demo", "sso-demo-note", `data-demo="true"`} {
+		for _, demo := range []string{"This public demo", "sso-demo-note", "is a Pro feature",
+			`data-demo="true"`} {
 			if strings.Contains(body, demo) {
 				t.Errorf("%s on a read-only install carries the demo's %q", path, demo)
 			}

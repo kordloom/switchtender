@@ -78,10 +78,13 @@ func TestRejectingASplitSettlesItsHeldShards(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, &countingRunnerLister{hosts: []string{"web01", "web02"}}, nil, WithNoJanitor())
+	projects, from := heldFrom(t)
+	d := New(store, &countingRunnerLister{hosts: []string{"web01", "web02"}}, nil, WithNoJanitor(),
+		projects)
 	defer d.Close()
 
-	parent, err := d.SubmitSplit(ctx, "site.yml", "hosts.ini", 2, run.WithRequireApproval(true))
+	parent, err := d.SubmitSplit(ctx, "site.yml", "hosts.ini", 2, run.WithRequireApproval(true),
+		from)
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
@@ -125,10 +128,11 @@ func TestRejectWithoutAReasonRecordsADefault(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor())
+	projects, from := heldFrom(t, "play.yml")
+	d := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor(), projects)
 	defer d.Close()
 
-	created, err := d.Submit(ctx, "play.yml", "inv", run.WithRequireApproval(true))
+	created, err := d.Submit(ctx, "play.yml", "inv", run.WithRequireApproval(true), from)
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}

@@ -217,13 +217,21 @@ func addonsLabel(addons []string) string {
 	return strings.Join(addons, ", ")
 }
 
+// mintExpiry is the last second of the UTC day that falls days after now. A term is sold through
+// its end date, so the license is good for the whole of that date whatever the time of day it was
+// minted at.
+func mintExpiry(now time.Time, days int) time.Time {
+	end := now.UTC().AddDate(0, 0, days)
+	return time.Date(end.Year(), end.Month(), end.Day(), 23, 59, 59, 0, time.UTC)
+}
+
 // mintClaims is the license body the mint flags describe, issued at now.
 func mintClaims(id string, now time.Time) license.Claims {
 	return license.Claims{
 		V: 1, ID: id,
 		Org: mintOrg, Tier: mintTier, Hosts: mintHosts, Kid: license.IssuerKid,
 		Issued:  now.Format(time.RFC3339),
-		Expires: now.AddDate(0, 0, mintDays).Format(time.RFC3339),
+		Expires: mintExpiry(now, mintDays).Format(time.RFC3339),
 		Addons:  mintAddons,
 	}
 }

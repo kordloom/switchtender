@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -177,6 +178,62 @@ func TestPuppetReadsNodesFactsAndAPlainList(t *testing.T) {
 			}
 			if test.WantVar != "" && !strings.Contains(content, test.WantVar) {
 				t.Errorf("inventory is missing %q:\n%s", test.WantVar, content)
+			}
+		})
+	}
+}
+
+// TestPuppetCAListReadsOnlySignedCertificates pins that `puppetserver ca list --all` imports its
+// signed certnames and counts, without importing, the requested and revoked ones.
+func TestPuppetCAListReadsOnlySignedCertificates(t *testing.T) {
+	t.Parallel()
+	const full = "Requested Certificates:\n" +
+		"    pending.prod       (SHA256)  AA:BB\n" +
+		"Signed Certificates:\n" +
+		"    web01.prod         (SHA256)  CC:DD\talt names: [\"DNS:web01.prod\"]\n" +
+		"    db01.prod          (SHA256)  EE:FF\n" +
+		"Revoked Certificates:\n" +
+		"    old.prod           (SHA256)  11:22\n"
+	tests := []struct {
+		// Doc is the pasted CA listing.
+		Doc string
+		// WantHosts are the hosts the inventory must carry.
+		WantHosts []string
+		// WantWarn is text the warnings must carry, empty when none is expected.
+		WantWarn string
+		// Want is the error the import must return.
+		Want error
+	}{{ // Test 0: All three sections import only the two signed names.
+		Doc:       full,
+		WantHosts: []string{"web01.prod", "db01.prod"},
+		WantWarn:  "2 certificates requested and not yet signed, or revoked, were not imported",
+	}, { // Test 1: Only unsigned sections leave no host and are refused.
+		Doc:  "Requested Certificates:\n    a.prod  (SHA256)  AA\nRevoked Certificates:\n    b.prod  (SHA256)  BB\n",
+		Want: ErrNothingRecognized,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			plan, err := FromPuppet([]byte(test.Doc), time.Now())
+			if !errors.Is(err, test.Want) {
+				t.Fatalf("FromPuppet error = %v, want %v", err, test.Want)
+			}
+			if err != nil {
+				return
+			}
+			content := plan.Inventories[0].Content
+			for _, h := range test.WantHosts {
+				if !strings.Contains(content, h) {
+					t.Errorf("inventory is missing %q:\n%s", h, content)
+				}
+			}
+			for _, h := range []string{"Requested", "Signed", "Revoked", "pending.prod", "old.prod"} {
+				if strings.Contains(content, h) {
+					t.Errorf("inventory imported %q:\n%s", h, content)
+				}
+			}
+			if !strings.Contains(strings.Join(plan.Warnings, "\n"), test.WantWarn) {
+				t.Errorf("warnings lack %q:\n%v", test.WantWarn, plan.Warnings)
 			}
 		})
 	}

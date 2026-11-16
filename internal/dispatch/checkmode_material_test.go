@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -69,8 +68,8 @@ func (m *materialRunner) Run(ctx context.Context, spec roundhouse.Spec, out io.W
 func TestAnApprovedForcingDryRunKeepsItsRunMaterial(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	dir := t.TempDir()
-	dispatchtest.WriteFiles(t, dir, map[string]string{"site.yml": forcedTaskPlaybook})
+	// A held dry run comes from a project, so the playbook is committed to one.
+	p := dispatchtest.LocalProject(t, map[string]string{"site.yml": forcedTaskPlaybook})
 	issuer, err := federation.NewIssuer("https://st.example.com", federation.NewMemKeyStore(),
 		fedSealer)
 	if err != nil {
@@ -90,14 +89,15 @@ func TestAnApprovedForcingDryRunKeepsItsRunMaterial(t *testing.T) {
 	store := run.NewMemStore()
 	d := New(store, runner, zap.NewNop(), WithInventories(invs), WithPolicies(excludeDryRuns(t)),
 		WithNoJanitor(), WithCredentials(creds, fedSealer), WithFederation(issuer),
-		WithFactCache(factcache.NewMemStore()), WithRunFilesRoot(t.TempDir()))
+		WithFactCache(factcache.NewMemStore()), WithRunFilesRoot(t.TempDir()),
+		WithProjects(p.Store, p.Syncer))
 	t.Cleanup(d.Close)
 	if err := invs.Save(ctx, &inventory.Inventory{ID: "inv_smart", Name: "web everywhere",
 		Kind: inventory.KindSmart, OrgID: "org_x", HostFilter: "groups__name=web"}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	held, err := d.Submit(ctx, filepath.Join(dir, "site.yml"), "", run.WithTool(run.ToolAnsible),
-		run.WithDryRun(true), run.WithInventory("inv_smart"),
+	held, err := d.Submit(ctx, "site.yml", "", run.WithTool(run.ToolAnsible),
+		run.WithDryRun(true), run.WithInventory("inv_smart"), run.WithProject(p.ID),
 		run.WithCredentialIDs([]string{"cred_oidc"}), run.WithFactCache(true, 0),
 		run.WithSealedVars(map[string]string{"db_password": sealed}))
 	if err != nil {

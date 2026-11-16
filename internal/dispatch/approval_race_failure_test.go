@@ -219,11 +219,12 @@ func TestApprovalThatLosesItsRaceLeavesTheChainVerifiable(t *testing.T) {
 			records := decision.NewMemStore()
 			gated := apprNewGatedDecisions(records, "approver-a")
 			runner := &commandRecorder{}
+			projects, from := heldFrom(t, "play.yml")
 			replicaA := New(store, runner, nil, WithNoJanitor(), WithAudits(audits),
-				WithDecisions(gated), WithOwner("replica-a"))
+				WithDecisions(gated), WithOwner("replica-a"), projects)
 			defer replicaA.Close()
 			replicaB := New(store, runner, nil, WithNoJanitor(), WithAudits(audits),
-				WithDecisions(records), WithOwner("replica-b"))
+				WithDecisions(records), WithOwner("replica-b"), projects)
 			defer replicaB.Close()
 
 			var target, workID string
@@ -242,7 +243,7 @@ func TestApprovalThatLosesItsRaceLeavesTheChainVerifiable(t *testing.T) {
 				target, workID, created = node.ID, parent.ID, node.CreatedAt
 			} else {
 				held, err := replicaB.Submit(ctx, "play.yml", "inv", run.WithRequireApproval(true),
-					run.WithActor("requester"))
+					run.WithActor("requester"), from)
 				if err != nil {
 					t.Fatalf("Submit() error = %v", err)
 				}

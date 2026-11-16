@@ -24,10 +24,11 @@ func TestACancelDuringAClaimedApprovalEndsTheRun(t *testing.T) {
 	store := run.NewMemStore()
 	audits := apprNewGatedAudits(audit.NewMemStore(), "/decision/approved")
 	runner := &commandRecorder{}
-	d := New(store, runner, nil, WithNoJanitor(), WithAudits(audits))
+	projects, from := heldFrom(t, "play.yml")
+	d := New(store, runner, nil, WithNoJanitor(), WithAudits(audits), projects)
 	defer d.Close()
 	held, err := d.Submit(ctx, "play.yml", "inv", run.WithRequireApproval(true),
-		run.WithActor("requester"))
+		run.WithActor("requester"), from)
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}

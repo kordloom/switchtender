@@ -71,6 +71,9 @@ limited to the drifted host, applying exactly the divergent tasks, and a Terrafo
 apply carries out the plan file the check saved. The construction is deterministic. No model builds
 it.
 
+A reconcile is held, so a check that named its playbook by a path on the server cannot be
+reconciled: the request is refused with `403`. Run the check from a project.
+
 A Terraform or OpenTofu check keeps the plan it saved, sealed, when it finds drift, and the reconcile
 carries that plan with its digest bound into the approval, so the approver releases the plan shown
 with the check and the apply runs `apply <planfile>` rather than planning again. A later check of the

@@ -290,7 +290,8 @@ func TestComposedRunMatchesInputScopedPolicy(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	d, invs, _, _ := composeFixture(t, WithPolicies(policies))
+	projects, from := heldFrom(t)
+	d, invs, _, _ := composeFixture(t, WithPolicies(policies), projects)
 	for _, inv := range []*inventory.Inventory{
 		{ID: "inv_dbonly", Name: "databases only", Kind: inventory.KindSmart, OrgID: "org_x",
 			HostFilter: "groups__name=db"},
@@ -309,7 +310,7 @@ func TestComposedRunMatchesInputScopedPolicy(t *testing.T) {
 		{InventoryID: "inv_dbonly", WantStatus: run.StatusPending},       // Test 1: Never touches inv_a.
 	}
 	for testNum, test := range tests {
-		created, err := d.Submit(ctx, "site.yml", "", run.WithInventory(test.InventoryID))
+		created, err := d.Submit(ctx, "site.yml", "", run.WithInventory(test.InventoryID), from)
 		if err != nil {
 			t.Fatalf("test %d: Submit() error = %v", testNum, err)
 		}

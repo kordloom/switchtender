@@ -92,12 +92,13 @@ func TestAnExemptionCoversOneAccountsAgentAndItsDerivedRuns(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d retry", testNum), func(t *testing.T) {
 			t.Parallel()
 			store := run.NewMemStore()
+			projects, from := heldFrom(t)
 			d := New(store, &failingLister{hosts: []string{"web01", "web02"}}, zap.NewNop(),
-				WithNoJanitor(), WithPolicies(accountRules(t)))
+				WithNoJanitor(), WithPolicies(accountRules(t)), projects)
 			t.Cleanup(d.Close)
 			// A person's split fails, which is what makes a retry available.
 			parent, err := d.SubmitSplit(context.Background(), "site.yml", "inv", 2,
-				dispatchtest.PersonOpts()...)
+				append(dispatchtest.PersonOpts(), from)...)
 			if err != nil {
 				t.Fatalf("SubmitSplit() error = %v", err)
 			}
@@ -120,19 +121,19 @@ func TestAnExemptionCoversOneAccountsAgentAndItsDerivedRuns(t *testing.T) {
 		})
 		t.Run(fmt.Sprintf("test %d apply", testNum), func(t *testing.T) {
 			t.Parallel()
-			dir := t.TempDir()
-			dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": dispatchtest.CleanConfig})
+			// A held agent's apply comes from a project.
+			p := dispatchtest.LocalProject(t, map[string]string{"main.tf": dispatchtest.CleanConfig})
 			store := run.NewMemStore()
 			// A plan-content rule plans every apply first, the exempt one included, so the apply
 			// its plan proposes faces the rules on its own.
 			planned := &policy.Policy{ID: "pol_teardown", Name: "large teardown",
 				Tool: run.ToolTerraform, MaxDestroy: 5}
 			d := New(store, dispatchtest.PlanRunner("Plan: 0 to add, 0 to change, 1 to destroy"), zap.NewNop(),
-				WithNoJanitor(), WithPolicies(accountRules(t, planned)))
+				WithNoJanitor(), WithPolicies(accountRules(t, planned)), WithProjects(p.Store, p.Syncer))
 			t.Cleanup(d.Close)
 			ctx, opts := boundAgent(test.Account)
 			created, err := d.Submit(ctx, "", "", append(opts, run.WithTool(run.ToolTerraform),
-				run.WithCommand(dir))...)
+				run.WithCommand("."), run.WithProject(p.ID))...)
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}

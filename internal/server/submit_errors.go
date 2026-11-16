@@ -27,7 +27,8 @@ const (
 	// submitSecret is a credential whose secret this server cannot open, because nobody set it or
 	// it was sealed under another key.
 	submitSecret
-	// submitPolicy is a submission a deny rule or the license refused.
+	// submitPolicy is a submission a deny rule, the license, or a rule of the dispatcher's own
+	// refused, such as a held run that names its playbook by path.
 	submitPolicy
 	// submitContent is an inventory whose content could not be read from where it lives, its
 	// content source or ansible-inventory, or an image tag its registry did not pin to a digest. The
@@ -62,8 +63,11 @@ var submitClasses = []struct {
 	{class: submitSecret, errs: []error{credential.ErrNoSecret, credential.ErrUnreadable}},
 	{class: submitPolicy, errs: []error{
 		dispatch.ErrPolicyDenied, dispatch.ErrQueueUnlicensed, dispatch.ErrAgentPathSplit,
+		dispatch.ErrHeldByPath,
 	}},
-	{class: submitContent, errs: []error{inventory.ErrContentRead, dispatch.ErrImageUnpinned}},
+	{class: submitContent, errs: []error{
+		inventory.ErrContentRead, dispatch.ErrImageUnpinned, dispatch.ErrCommitUnpinned,
+	}},
 	{class: submitCapacity, errs: []error{dispatch.ErrLowSpace}},
 	{class: submitInput, errs: []error{inventory.ErrComposition, inventory.ErrResolve}},
 }

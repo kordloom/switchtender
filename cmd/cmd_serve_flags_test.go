@@ -2,12 +2,15 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/license"
 )
 
 // quietServeFlags points every serve flag this package reads at a value that starts a plain,
@@ -281,5 +284,72 @@ func TestWorkerRefusesWithoutATeamLicense(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "A Team license is required for running distributed workers") {
 		t.Errorf("runWorker() error = %v, want the workers gate", err)
+	}
+}
+
+// licenseDirectorySignIn gives the process a live Pro license and marks directory sign-in as
+// carried for the duration of the test, so runServe passes the license gate and reaches the sign-in
+// settings. The caller must not be parallel, because both are shared by the whole process.
+func licenseDirectorySignIn(t *testing.T) {
+	t.Helper()
+	restoreLicense(t)
+	if !license.Carried(license.FeatureSSO) {
+		license.Carry(license.FeatureSSO)
+		t.Cleanup(func() { license.Uncarry(license.FeatureSSO) })
+	}
+	license.Set(&license.License{Claims: license.Claims{
+		Tier: license.TierPro, Org: "acme",
+		Expires: time.Now().Add(24 * time.Hour).Format(time.RFC3339),
+	}})
+}
+
+// TestServeRefusesJWTSignInWithNoAudience drives runServe with bearer JWT sign-in on and a license
+// that covers it, and proves a missing audience stops the server unless the operator passed the
+// flag that accepts any.
+//
+// The audience claim is what tells a token minted for this install from one the same issuer minted
+// for another application, so a server that starts without it accepts both. The cases that are let
+// through end at the Community directory, which refuses naming the tier: reaching that refusal is
+// the proof the audience check passed.
+func TestServeRefusesJWTSignInWithNoAudience(t *testing.T) {
+	tests := []struct {
+		Name     string
+		Audience string
+		AllowAny bool
+		WantWord string
+		Want     error
+	}{{ // Test 0: No audience and no flag is refused, and the refusal names the way out.
+		Name: "no audience", WantWord: "--jwt-allow-any-audience", Want: ErrUsage,
+	}, { // Test 1: An audience passes the check.
+		Name: "audience set", Audience: "switchtender", Want: license.ErrRequiresTier,
+	}, { // Test 2: The flag lets a missing audience through.
+		Name: "any audience allowed", AllowAny: true, Want: license.ErrRequiresTier,
+	}, { // Test 3: An audience passes with the flag set as well.
+		Name: "audience and flag", Audience: "switchtender", AllowAny: true,
+		Want: license.ErrRequiresTier,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			// Not parallel: runServe reads package-level flag variables and the process license.
+			quietServeFlags(t)
+			licenseDirectorySignIn(t)
+			setString(t, &serveJWTJWKSURL, "https://jwt.example/jwks")
+			setString(t, &serveJWTAudience, test.Audience)
+			setBool(t, &serveJWTAllowAnyAudience, test.AllowAny)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			cmd := testCommand()
+			cmd.SetContext(ctx)
+
+			err := runServe(cmd, nil)
+			if !errors.Is(err, test.Want) {
+				t.Fatalf("%s: runServe() error = %v, want %v", test.Name, err, test.Want)
+			}
+			if !strings.Contains(err.Error(), test.WantWord) {
+				t.Errorf("%s: runServe() error = %v, want it to name %q", test.Name, err,
+					test.WantWord)
+			}
+		})
 	}
 }

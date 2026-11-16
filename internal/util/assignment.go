@@ -28,13 +28,17 @@ type assignmentForm struct {
 	read func(rest, line string, closer byte) (int, bool)
 	// decode returns what a program receives from raw, the value as written.
 	decode func(raw string, closer byte) string
+	// inline holds the read and decode used instead for an assignment written inside a command line,
+	// or is nil when read already reads the value as a command line does.
+	inline *assignmentForm
 }
 
 // assignmentForms are the textual forms, read together in one scan of text no parser accepted and of
 // the string leaves of text one did.
 var assignmentForms = []assignmentForm{
 	{pattern: iniAssignment, read: shellWordLen, decode: shellValue},
-	{pattern: yamlAssignment, read: yamlValue, decode: yamlValueDecode},
+	{pattern: yamlAssignment, read: yamlValue, decode: yamlValueDecode,
+		inline: &assignmentForm{read: yamlWordLen, decode: yamlWordDecode}},
 }
 
 // maxNestedAssignmentDepth bounds how deep a secret may be nested inside another assignment's value
@@ -79,7 +83,7 @@ type Assignment struct {
 // still found. The scan never rewinds, so it stays linear in the length of the text.
 func RedactAssignments(text, mask string) (string, []Assignment) {
 	var found []Assignment
-	text = redactDepth(text, mask, &found, maxNestedAssignmentDepth)
+	text = redactDepth(text, mask, &found, maxNestedAssignmentDepth, false)
 	// A credential can also ride inside a URL, as scheme://user:password@host, where no name=value
 	// pattern sees it: pg_dump postgres://backup:pass@db and git clone https://x:token@host both
 	// carry a secret no assignment names. Only the audit digest scrubbed this shape, so a receipt
@@ -146,7 +150,17 @@ func (a Assignment) Readings() []string {
 // at that same boundary, so a second pass reads the mask as the whole value and writes it back. The
 // redacted text is what gets stored, signed, and disclosed, and a record whose digest covers it has
 // to come out the same on every path that redacts it.
-func redactDepth(text, mask string, found *[]Assignment, depth int) string {
+//
+// A name: value value is read one of two ways. One that opens its line is a YAML entry, whose plain
+// scalar holds spaces and runs to the end of the line, so a passphrase in an inventory no parser
+// accepted is masked whole. One written inside a command line is one shell word, as a name=value
+// value is. Masking to the end of that line hid everything after the secret from every reader below
+// admin and from the receipt digest, so echo password: x > file and echo password: x --limit all
+// disclosed the same text under one digest. Inside a quote the line opened, or inside a value read
+// the wide way, the text is a string handed whole to another program, such as a header to curl or a
+// YAML scalar to ansible-playbook -e, which reads its value to the end of that string. wide carries
+// that last case into a nested scan.
+func redactDepth(text, mask string, found *[]Assignment, depth int, wide bool) string {
 	var out strings.Builder
 	// next holds each form's leftmost match at or after pos, with offsets into text, searched again
 	// only once pos passes its start, and nil for a form with no match left. A match ahead of pos is
@@ -161,7 +175,10 @@ func redactDepth(text, mask string, found *[]Assignment, depth int) string {
 	// Counting a stray quote that a plain value took as an ordinary byte, as in pass:0"&pass:"hunter2,
 	// read the next value as the end of a quoted string and left the password after it in the clear.
 	var quote byte
-	pos := 0
+	// lineStart is where the line holding pos begins. It moves forward with pos, so finding the line a
+	// name sits on never scans back over the text, which on a long line of assignments read one word
+	// at a time would make the scan quadratic.
+	pos, lineStart := 0, 0
 	for pos < len(text) {
 		best := -1
 		for i, form := range assignmentForms {
@@ -178,7 +195,18 @@ func redactDepth(text, mask string, found *[]Assignment, depth int) string {
 		form, loc := assignmentForms[best], next[best]
 		name := text[loc[2]:loc[3]]
 		valueStart := loc[6]
-		line := lineBefore(text, valueStart)
+		if i := strings.LastIndexByte(text[pos:loc[2]], '\n'); i >= 0 {
+			lineStart = pos + i + 1
+		}
+		lead := text[lineStart:loc[2]]
+		// valueLine is where the line holding the value begins, which is what says whether a quote is
+		// open around it. An earlier line cannot leave one open for this one: a shell word and a YAML
+		// scalar both end at the newline.
+		valueLine := lineStart
+		if i := strings.LastIndexByte(text[loc[2]:valueStart], '\n'); i >= 0 {
+			valueLine = loc[2] + i + 1
+		}
+		line := text[valueLine:valueStart]
 		between := text[pos:valueStart]
 		if i := strings.LastIndexByte(between, '\n'); i >= 0 {
 			quote, between = 0, between[i+1:]
@@ -200,11 +228,20 @@ func redactDepth(text, mask string, found *[]Assignment, depth int) string {
 				closer = 0
 			case valueStart+1 < len(text) && !wordEnds[text[valueStart+1]]:
 				valueStart++
-				line = lineBefore(text, valueStart)
+				line = text[valueLine:valueStart]
 				closer, quote = 0, 0
 			}
 		}
-		n, keepQuotes := form.read(text[valueStart:], line, closer)
+		// A quote the line's count leaves open keeps the wide reading even when the value's own quote
+		// showed the count wrong. Redacting the masked text again sees the same count with no quote on
+		// the value to correct it, reads wide, and a narrower first reading came out different the
+		// second time.
+		wideHere := wide || quote != 0 || opensEntry(lead)
+		read, decode := form.read, form.decode
+		if form.inline != nil && !wideHere {
+			read, decode = form.inline.read, form.inline.decode
+		}
+		n, keepQuotes := read(text[valueStart:], line, closer)
 		valueEnd := valueStart + n
 		value := text[valueStart:valueEnd]
 		out.WriteString(text[pos:valueStart])
@@ -218,7 +255,7 @@ func redactDepth(text, mask string, found *[]Assignment, depth int) string {
 			} else {
 				out.WriteString(mask)
 			}
-			*found = append(*found, Assignment{Name: name, Value: form.decode(value, closer), Raw: value})
+			*found = append(*found, Assignment{Name: name, Value: decode(value, closer), Raw: value})
 		case depth > 0 && (strings.IndexByte(value, '=') >= 0 || strings.IndexByte(value, ':') >= 0):
 			// The value may be a secret joined onto this one, like a=psql;password=x or a yaml line
 			// note: ... ansible_ssh_pass: x, so it can hold either separator. Scan it once, spending a
@@ -234,15 +271,44 @@ func redactDepth(text, mask string, found *[]Assignment, depth int) string {
 			// events, and the live stream while the receipt showed it redacted.
 			open, inner, close := splitQuoted(value)
 			out.WriteString(open)
-			out.WriteString(redactDepth(inner, mask, found, depth-1))
+			out.WriteString(redactDepth(inner, mask, found, depth-1, wideHere || open != ""))
 			out.WriteString(close)
 		default:
 			out.WriteString(value)
+		}
+		lineStart = valueLine
+		if i := strings.LastIndexByte(value, '\n'); i >= 0 {
+			lineStart = valueStart + i + 1
 		}
 		pos = valueEnd
 	}
 	out.WriteString(text[pos:])
 	return out.String()
+}
+
+// opensEntry reports whether lead, the text before a name on its line, leaves the name opening a
+// YAML mapping entry: nothing before it but indentation, the dash of each sequence item, and the
+// quote of a quoted name. It reads lead from the right and stops at the first other byte, so the
+// cost is the indentation and not the line.
+func opensEntry(lead string) bool {
+	i := len(lead)
+	if i > 0 && (lead[i-1] == '"' || lead[i-1] == '\'') {
+		i--
+	}
+	for ; i > 0; i-- {
+		switch lead[i-1] {
+		case ' ', '\t':
+		case '-':
+			// A dash marks a sequence item only with a space after it. Joined to the name, as in
+			// --token: x, it is part of a command line's option.
+			if i == len(lead) || (lead[i] != ' ' && lead[i] != '\t') {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // matchFrom returns the leftmost match of pattern in text at or after from, with its offsets into
@@ -263,16 +329,6 @@ func matchFrom(pattern *regexp.Regexp, text string, from int) []int {
 // run's output, a tool that echoed the secret put it in the stored log while the receipt showed it
 // redacted.
 const shellSeparators = ";&|"
-
-// lineBefore returns what precedes valueStart on its own line, which is what says whether a quote is
-// open around the value. An earlier line cannot leave one open for this one: a shell word and a YAML
-// scalar both end at the newline.
-func lineBefore(text string, valueStart int) string {
-	if i := strings.LastIndexByte(text[:valueStart], '\n'); i >= 0 {
-		return text[i+1 : valueStart]
-	}
-	return text[:valueStart]
-}
 
 // splitQuoted separates a value's surrounding quote pair from its contents, returning empty
 // delimiters for a value that is not quoted. It is the inverse of leaving the quotes on, which is

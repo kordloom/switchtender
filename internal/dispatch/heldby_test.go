@@ -59,11 +59,13 @@ func TestHeldRunNamesTheRuleThatStoppedIt(t *testing.T) {
 func TestEveryHeldRunSaysWhatHeldIt(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
-	d := New(store, &dispatchtest.FakeRunnerLister{HostNames: []string{"a", "b"}}, nil)
+	projects, from := heldFrom(t, "play.yml")
+	d := New(store, &dispatchtest.FakeRunnerLister{HostNames: []string{"a", "b"}}, nil, projects)
 	defer d.Close()
 
 	// Held because the submission asked for it, with no policy in play at all.
-	r, err := d.Submit(context.Background(), "play.yml", "inv", run.WithRequireApproval(true))
+	r, err := d.Submit(context.Background(), "play.yml", "inv", run.WithRequireApproval(true),
+		from)
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -77,7 +79,7 @@ func TestEveryHeldRunSaysWhatHeldIt(t *testing.T) {
 
 	// Every shard of a held split says the same thing as the split.
 	parent, err := d.SubmitSplit(context.Background(), "play.yml", "inv", 2,
-		run.WithRequireApproval(true))
+		run.WithRequireApproval(true), from)
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
@@ -107,13 +109,15 @@ func TestPipelineHeldByAStepNamesTheRule(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save() policy error = %v", err)
 	}
-	d := New(store, &dispatchtest.FakeRunnerLister{HostNames: []string{"a"}}, nil, WithPolicies(policies))
+	projects, from := heldFrom(t)
+	d := New(store, &dispatchtest.FakeRunnerLister{HostNames: []string{"a"}}, nil, WithPolicies(policies),
+		projects)
 	defer d.Close()
 
 	parent, err := d.SubmitPipeline(context.Background(), "release", "inv", []run.PipelineStep{
 		{Name: "configure", Playbook: "site.yml"},
 		{Name: "provision", Tool: "terraform", Command: "infra/prod"},
-	})
+	}, from)
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}

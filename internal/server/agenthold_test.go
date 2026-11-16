@@ -20,6 +20,7 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/forgelink"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/mcp"
@@ -124,6 +125,17 @@ type agentHoldServer struct {
 	Admin string
 }
 
+// agentHoldPlaybooks are the files the project every held run here comes from commits: the deploy
+// playbook the seeded runs and template name, a clean check and one that forces a real restart,
+// and a Terraform root.
+var agentHoldPlaybooks = map[string]string{
+	"site.yml": "- hosts: all\n  tasks: []\n",
+	"look.yml": "- hosts: all\n  tasks:\n    - name: Look\n      ansible.builtin.ping:\n",
+	"restart.yml": "- hosts: all\n  tasks:\n    - name: Restart web\n" +
+		"      ansible.builtin.service: name=web state=restarted\n      check_mode: false\n",
+	"infra/main.tf": dispatchtest.CleanConfig,
+}
+
 // newAgentHoldServer serves db with a dispatcher whose runner succeeds at once. With policyStore
 // false the dispatcher has no policy store at all, the shape of an install with no rules, which the
 // built-in hold must cover as well.
@@ -134,7 +146,11 @@ func newAgentHoldServer(t *testing.T, db agentHoldDB, policyStore bool) *agentHo
 		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
 			return roundhouse.Result{ExitCode: 0}, nil
 		})
-	opts := []dispatch.Option{dispatch.WithNoJanitor(), dispatch.WithInventories(db.inventories)}
+	// A held run comes from a project, so every Ansible and Terraform run here names this one.
+	p := dispatchtest.LocalProject(t, agentHoldPlaybooks)
+	p.SaveIn(t, db.projects)
+	opts := []dispatch.Option{dispatch.WithNoJanitor(), dispatch.WithInventories(db.inventories),
+		dispatch.WithProjects(db.projects, p.Syncer)}
 	if policyStore {
 		opts = append(opts, dispatch.WithPolicies(db.policies))
 	}
@@ -398,18 +414,9 @@ func TestAgentHoldExemptionIsCommunity(t *testing.T) {
 //nolint:funlen // Test function.
 func TestAgentHoldDryRun(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	clean := filepath.Join(dir, "look.yml")
-	forced := filepath.Join(dir, "restart.yml")
-	for path, text := range map[string]string{
-		clean: "- hosts: all\n  tasks:\n    - name: Look\n      ansible.builtin.ping:\n",
-		forced: "- hosts: all\n  tasks:\n    - name: Restart web\n" +
-			"      ansible.builtin.service: name=web state=restarted\n      check_mode: false\n",
-	} {
-		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
-			t.Fatalf("write playbook: %v", err)
-		}
-	}
+	// The playbooks are committed to the project the fixture serves.
+	const project = `","project_id":"` + dispatchtest.LocalProjectID
+	clean, forced := "look.yml"+project, "restart.yml"+project
 	const checks = `{"name":"lead checks","effect":"exempt","actor":"release-agent",` +
 		`"account":"dev-lead","command_contains":"rotate-certs"}`
 	tests := []struct {
@@ -491,7 +498,8 @@ func TestAgentHoldApplyWaitsBeforeItPlans(t *testing.T) {
 		// Body is the request body.
 		Body string
 	}{{ // Test 0: An apply submitted directly.
-		Path: "/v1/runs", Body: `{"tool":"terraform","command":"infra"}`,
+		Path: "/v1/runs",
+		Body: `{"tool":"terraform","command":"infra","project_id":"` + dispatchtest.LocalProjectID + `"}`,
 	}, { // Test 1: A rerun of a person's finished apply.
 		Path: "/v1/runs/run_tf_done/rerun", Body: `{}`,
 	}}
@@ -503,7 +511,8 @@ func TestAgentHoldApplyWaitsBeforeItPlans(t *testing.T) {
 						t.Parallel()
 						s := newAgentHoldServer(t, backend.Open(t), true)
 						done := &run.Run{ID: "run_tf_done", Tool: run.ToolTerraform,
-							Command: "infra", Status: run.StatusSucceeded,
+							Command: "infra", ProjectID: dispatchtest.LocalProjectID,
+							Status:    run.StatusSucceeded,
 							CreatedAt: time.Now().Add(-time.Hour), Actor: "dev-lead-cli",
 							ActorType: "token"}
 						if err := s.DB.runs.Save(context.Background(), done); err != nil {
@@ -536,7 +545,7 @@ func agentHoldSeed(t *testing.T, db agentHoldDB) {
 	ctx := context.Background()
 	for _, tpl := range []*template.Template{
 		{ID: "tpl_deploy", Name: "deploy", Tool: run.ToolAnsible, Playbook: "site.yml",
-			Inventory: "hosts.ini"},
+			Inventory: "hosts.ini", ProjectID: dispatchtest.LocalProjectID},
 		{ID: "tpl_flow", Name: "release flow", Steps: []run.PipelineStep{
 			{Name: "build", Tool: run.ToolBash, Command: "./build.sh"},
 			{Name: "ship", Tool: run.ToolBash, Command: "./ship.sh"}}},
@@ -548,7 +557,8 @@ func agentHoldSeed(t *testing.T, db agentHoldDB) {
 	at := time.Now().Add(-time.Hour)
 	person := func(id string, status run.Status) *run.Run {
 		return &run.Run{ID: id, Playbook: "site.yml", Inventory: "hosts.ini",
-			Status: status, CreatedAt: at, Actor: "dev-lead-cli", ActorType: "token"}
+			ProjectID: dispatchtest.LocalProjectID, Status: status, CreatedAt: at,
+			Actor: "dev-lead-cli", ActorType: "token"}
 	}
 	if err := db.runs.Save(ctx, person("run_done", run.StatusSucceeded)); err != nil {
 		t.Fatalf("runs.Save(run_done) error = %v", err)
@@ -576,8 +586,8 @@ func agentHoldSeed(t *testing.T, db agentHoldDB) {
 	if err := db.runs.Save(ctx, shard); err != nil {
 		t.Fatalf("runs.Save(run_split_c0) error = %v", err)
 	}
-	// A drift check of a person's that found drift on web01, naming no stored object, so the
-	// reconcile it proposes reaches the gate rather than stopping at a missing reference.
+	// A drift check of a person's that found drift on web01, drawn from the fixture's project, so
+	// the reconcile it proposes reaches the gate rather than stopping at a missing reference.
 	check := person("chk_web", run.StatusRunning)
 	check.DryRun = true
 	if err := db.runs.Save(ctx, check); err != nil {

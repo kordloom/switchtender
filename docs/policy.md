@@ -34,6 +34,9 @@ workflow, and a retry, a rerun, or a relaunch of failed shards the agent asks fo
 carries the agent's identity, so it faces the same hold. The receipt for the run proves who
 approved it or which rule exempted it.
 
+An agent's held run must come from a project: a playbook or a Terraform root it names by a path on
+the server is refused at submission, with the rule and the fix in the answer.
+
 A dry run waits like any other run an agent asks for. Check mode and a plan are not inert: Ansible
 runs lookups, vars files, and plugins on the controller under `--check`, and a Terraform or OpenTofu
 plan runs provider code and data sources, all with this server's credentials, so a preview can read
@@ -194,8 +197,9 @@ A workflow is approved as a whole, and the approval binds the workflow as it was
 decision commits a digest of its spec: every step as written, with its tool, its command or playbook,
 its inventory, whether it is a dry run, and the steps it depends on, along with the workflow's
 variables, the digests of its secret answers, its credentials, its image, and the inventory snapshot
-it was submitted with. A workflow held while it reads from a project is pinned to the commit its
-branch pointed at when it was held, and every step runs that commit.
+it was submitted with. A held workflow, and a workflow with an approval step, comes from a project
+and is pinned to the commit its branch pointed at when it was submitted, and every step runs that
+commit. One whose Ansible or Terraform step names a file by a path on the server is refused.
 
 What a step works out only when it runs is not part of that approval. A Terraform or OpenTofu apply
 step plans and applies when the step runs, so the plan it applies is never shown to the person who

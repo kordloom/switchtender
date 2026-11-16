@@ -651,13 +651,14 @@ func TestApprovalStepInheritsSeparationOfDuties(t *testing.T) {
 		Tool: run.ToolTerraform, MaxDestroy: 0, RequireDistinctApprover: true}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	d := New(store, &commandRecorder{}, nil, WithNoJanitor(), WithPolicies(rules))
+	projects, from := heldFrom(t)
+	d := New(store, &commandRecorder{}, nil, WithNoJanitor(), WithPolicies(rules), projects)
 	defer d.Close()
 	steps := []run.PipelineStep{
 		{Name: "gate", Type: run.StepApproval},
 		{Name: "apply", Tool: run.ToolTerraform, Command: "infra", DependsOn: []string{"gate"}},
 	}
-	parent, err := d.SubmitPipeline(ctx, "infra", "", steps, run.WithActor("requester"))
+	parent, err := d.SubmitPipeline(ctx, "infra", "", steps, run.WithActor("requester"), from)
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}

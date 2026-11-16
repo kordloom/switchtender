@@ -254,7 +254,9 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 		r.Status = run.StatusPendingApproval
 	}
 	recordHold(r, holdRequested)
-	d.pinHeldRunCommit(r)
+	if err := d.bindHeldRun(r); err != nil {
+		return nil, err
+	}
 	created, dup, err := d.idempotentSave(ctx, r)
 	if err != nil {
 		return nil, err
@@ -386,7 +388,9 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		parent.Status = run.StatusPendingApproval
 	}
 	recordHold(parent, holdRequested)
-	d.pinHeldRunCommit(parent)
+	if err := d.bindHeldRun(parent); err != nil {
+		return nil, err
+	}
 	created, dup, err := d.idempotentSave(ctx, parent)
 	if err != nil {
 		return nil, err
@@ -704,7 +708,9 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string, opt
 	// the approver signed off on one change and a later one executed. A retry is exactly where
 	// that gap stays open longest, since it sits in front of an approver by the same rules that
 	// held the run it retries.
-	d.pinHeldRunCommit(retry)
+	if err := d.bindHeldRun(retry); err != nil {
+		return nil, err
+	}
 	saved, dup, err := d.idempotentSave(ctx, retry)
 	if err != nil {
 		return nil, err

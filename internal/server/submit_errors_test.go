@@ -15,6 +15,7 @@ import (
 	"github.com/kordloom/switchtender/internal/ai"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/run"
@@ -59,12 +60,16 @@ func TestClassifySubmitNamesEveryKnownError(t *testing.T) {
 		},
 	}, { // Test 1: A credential this server cannot open.
 		WantClass: submitSecret, Errs: []error{credential.ErrNoSecret, credential.ErrUnreadable},
-	}, { // Test 2: A deny rule, the license, or an agent's split of an inventory named by path.
+	}, { // Test 2: A deny rule, the license, an agent's split of an inventory named by path, or a
+		// held run that names its playbook by path.
 		WantClass: submitPolicy, Errs: []error{
 			dispatch.ErrPolicyDenied, dispatch.ErrQueueUnlicensed, dispatch.ErrAgentPathSplit,
+			dispatch.ErrHeldByPath,
 		},
-	}, { // Test 3: An inventory or image tag that could not be read from where it lives.
-		WantClass: submitContent, Errs: []error{inventory.ErrContentRead, dispatch.ErrImageUnpinned},
+	}, { // Test 3: An inventory, image tag, or held run's commit that could not be read.
+		WantClass: submitContent, Errs: []error{
+			inventory.ErrContentRead, dispatch.ErrImageUnpinned, dispatch.ErrCommitUnpinned,
+		},
 	}, { // Test 4: A disk too full to record a new run.
 		WantClass: submitCapacity, Errs: []error{dispatch.ErrLowSpace},
 	}}
@@ -522,5 +527,54 @@ func TestAPreviewTellsAFaultFromTheInventory(t *testing.T) {
 				t.Errorf("preview answered %s, want the fault's detail kept to the log", rec.Body.String())
 			}
 		})
+	}
+}
+
+// TestADriftReconcileOfAPathCheckIsRefusedAsPolicy pins the reconcile's answer to the path rule.
+// The proposal is born held, and a check that named its playbook by a path on the server proposes a
+// held run no approval can bind. The dispatcher refuses it, nothing is stored, and the operator is
+// answered 403 with the rule and the fix rather than a server failure.
+func TestADriftReconcileOfAPathCheckIsRefusedAsPolicy(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	at := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	check := &run.Run{ID: "chk_path", Playbook: "/srv/playbooks/site.yml",
+		Inventory: "/srv/playbooks/hosts.ini", DryRun: true, Status: run.StatusRunning,
+		CreatedAt: at}
+	if err := store.Save(ctx, check); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := store.SaveHostSummary(ctx, check.ID, []run.HostSummary{
+		{Host: "web01", Changed: 2, Worst: "changed", RanAt: at}}); err != nil {
+		t.Fatalf("SaveHostSummary() error = %v", err)
+	}
+	done := check.Clone()
+	done.Status = run.StatusSucceeded
+	if err := store.Save(ctx, done); err != nil {
+		t.Fatalf("Save() finalize error = %v", err)
+	}
+	d := dispatch.New(store, dispatchtest.OKRunner(), zap.NewNop(), dispatch.WithNoJanitor())
+	defer d.Close()
+	handler := New(store, d, zap.NewNop(), WithReconciler(&testReconciler{})).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/drift/reconcile",
+		strings.NewReader(`{"host":"web01"}`)))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("reconcile status = %d, want 403: %s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{dispatch.ErrHeldByPath.Error(), "put it in a project"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("reconcile answer %q lacks %q", rec.Body.String(), want)
+		}
+	}
+	runs, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(runs) != 1 {
+		t.Errorf("the store holds %d runs, want only the check", len(runs))
 	}
 }

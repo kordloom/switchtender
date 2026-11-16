@@ -330,6 +330,9 @@ func advanceQuote(q byte, s string) byte {
 //
 // A block scalar, password: | followed by indented lines, takes those lines. Reading only the
 // indicator masked a | and left a private key on the lines below it.
+//
+// This is the reading of a value that opens a YAML entry or sits inside a quoted string. A value
+// written inside a command line is one shell word, and yamlWordLen reads it.
 func yamlValue(rest, line string, closer byte) (n int, keepQuotes bool) {
 	if n := yamlBlockLen(rest, line); n > 0 {
 		return n, false
@@ -346,6 +349,30 @@ func yamlValue(rest, line string, closer byte) (n int, keepQuotes bool) {
 		start = end
 	}
 	return start + plainLen(rest[start:], closer, true), false
+}
+
+// yamlWordLen reads the value of a name: value assignment written inside a command line and returns
+// how many bytes it spans and whether its quotes stay around the mask. The shell hands the program
+// one word there, so the value is that word, as a name=value value is, and the command after it
+// stays readable. A quoted scalar followed by the comma or bracket of a flow mapping still ends at
+// its quote and keeps it, so a JSON body stays JSON.
+func yamlWordLen(rest, _ string, closer byte) (int, bool) {
+	if c := rest[0]; c == '"' || c == '\'' {
+		end := yamlQuotedEnd(rest, closer)
+		if end > 0 && end < len(rest) && strings.IndexByte(",}]", rest[end]) >= 0 {
+			return end, true
+		}
+	}
+	return shellWord(rest, closer, nil), false
+}
+
+// yamlWordDecode returns what a program receives from raw, a name: value value read as one word of
+// a command line: a quoted scalar as YAML and JSON read it, and any other word as the shell does.
+func yamlWordDecode(raw string, closer byte) string {
+	if v, ok := yamlDecode(raw); ok {
+		return v
+	}
+	return shellValue(raw, closer)
 }
 
 // yamlQuotedEnd returns the index just past the closing quote of the YAML scalar rest begins with,

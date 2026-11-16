@@ -18,6 +18,7 @@ import (
 
 	"github.com/kordloom/switchtender/identity"
 	"github.com/kordloom/switchtender/internal/decision"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // ErrVerify is returned when a bundle cannot be checked at all: it does not parse, or its producer
@@ -30,6 +31,10 @@ var ErrVerify = errors.New("audit verify")
 type BundleReport struct {
 	// SignatureOK reports that the producer's ed25519 signature covers the bundle unaltered.
 	SignatureOK bool
+	// SignatureProblem says why the signatures do not hold when the reason is more than a signature
+	// that does not cover the bytes, such as an entry naming a key the producer block does not
+	// hold. Empty otherwise.
+	SignatureProblem string
 	// ChainOK reports that every claim's link recomputes and the claims chain to one another.
 	ChainOK bool
 	// AnchorsOK reports that every carried anchor names a claim the bundle holds. True when there are
@@ -54,6 +59,22 @@ type BundleReport struct {
 	TimestampsVerified int
 	// TimestampProblems names each carried token that does not fix its anchor's link.
 	TimestampProblems []string
+	// TimestampSigners names the certificate that signed each carried token that verified, in the
+	// order the anchors appear, so a reader can hold each one against an authority they trust.
+	TimestampSigners []TimestampSigner
+	// AuthorityPins is how many timestamp authority fingerprints the caller pinned. With none, a
+	// token is named and not counted. With any, a verified token whose signer matches none of them
+	// fails the anchors.
+	AuthorityPins int
+	// PinProblems names, with its signer, each verified token that matches no pinned authority.
+	// Any entry fails the anchors.
+	PinProblems []string
+	// AnchorsCounted is how many carried anchors the anchors line counts: each anchor that carries
+	// no timestamp token, whose position rests on where it was published, and each verified token
+	// whose signer is pinned. A token whose signer is unpinned is named in TimestampSigners and not
+	// counted, since it verifies under a certificate it carries and anyone can make one. With no
+	// pin given it never changes the verdict.
+	AnchorsCounted int
 	// ClaimCount and AnchorCount report the size of what was checked.
 	ClaimCount  int
 	AnchorCount int
@@ -83,6 +104,10 @@ type BundleReport struct {
 	SpecConsistent bool
 	// SpecBody is the disclosed redacted spec JSON, meaningful when SpecConsistent.
 	SpecBody []byte
+	// SpecMasked counts the secret values redaction masked out of the disclosed spec, one for each
+	// marker left in their place. The spec digest covers the masked text, so each is a part of the
+	// change this document does not show.
+	SpecMasked int
 	// ReleaseEntries counts the step releases the document carries, disclosed or not. A receipt
 	// cannot disclose a release whose step record is gone, and the chain still holds its entry, so
 	// a count beside ReleasesPresent says how many the document could not show.
@@ -177,6 +202,56 @@ type verifiedDecision struct {
 	verdict string
 	// actor is who decided, as the chain committed it.
 	actor string
+}
+
+// TimestampSigner is the certificate that signed one verified timestamp token. The token carries
+// the certificate, so its subject is whatever the token's maker wrote, and the fingerprint is what
+// a reader compares against an authority they trust.
+type TimestampSigner struct {
+	// Seq is the coordinate the token's anchor names.
+	Seq int64
+	// Subject is the signer certificate's subject name.
+	Subject string
+	// Fingerprint is the SHA-256 of the signer certificate's DER encoding, as "sha256:" and
+	// lowercase hex.
+	Fingerprint string
+	// IssuerSubject is the subject of a certificate the token carries that directly signed the
+	// signer's, empty when the token carries none.
+	IssuerSubject string
+	// IssuerFingerprint is that issuer certificate's fingerprint, in the form Fingerprint uses.
+	IssuerFingerprint string
+	// PinnedBy says which certificate matched an authority the reader pinned: PinnedBySigner,
+	// PinnedByIssuer, or empty when neither did. A token no pin matched is not counted as an anchor.
+	PinnedBy string
+}
+
+// Which certificate of a timestamp token matched a pinned authority.
+const (
+	// PinnedBySigner is a pin on the certificate that signed the token.
+	PinnedBySigner = "signer"
+	// PinnedByIssuer is a pin on a certificate the token carries that directly signed the signer's.
+	PinnedByIssuer = "issuer"
+)
+
+// VerifyOption sets what a verify call holds a bundle's evidence to beyond its signature and
+// chain.
+type VerifyOption func(*verifyOptions)
+
+// verifyOptions is what the options passed to a verify call set.
+type verifyOptions struct {
+	// authorityPins are the timestamp authority fingerprints as the caller gave them.
+	authorityPins []string
+}
+
+// WithAuthorityPins holds every carried timestamp token to the timestamp authorities whose
+// certificate fingerprints are given, in any form AuthorityPinFingerprint reads. A token counts as
+// an anchor only when its signer certificate, or a certificate it carries that directly signed the
+// signer's, matches one. A verified token that matches none fails the anchors, the way a bundle
+// signed by a key other than the pinned one is refused.
+func WithAuthorityPins(pins ...string) VerifyOption {
+	return func(o *verifyOptions) {
+		o.authorityPins = append(o.authorityPins, pins...)
+	}
 }
 
 // DisclosedRelease is one digest-verified step release read back from a receipt: the record a
@@ -287,9 +362,10 @@ func (r *BundleReport) OK() bool {
 // linkOf that EntryHash produces them with, so a verdict here cannot drift from what the producer
 // committed. When pinnedKeyID is non-empty, a bundle signed by any other key is refused before its
 // signature is even checked, which is how a relying party ties trust to a key it obtained out of band
-// rather than to whatever key the file names.
-func VerifyBundle(signed []byte, pinnedKeyID string) (*BundleReport, error) {
-	return verifyBundle(signed, pinnedKeyID, "")
+// rather than to whatever key the file names. Options hold the evidence to more, such as the
+// timestamp authorities WithAuthorityPins names.
+func VerifyBundle(signed []byte, pinnedKeyID string, opts ...VerifyOption) (*BundleReport, error) {
+	return verifyBundle(signed, pinnedKeyID, "", opts)
 }
 
 // VerifyBundleForInstall is VerifyBundle for a relying party that has explicitly accepted a key
@@ -297,15 +373,31 @@ func VerifyBundle(signed []byte, pinnedKeyID string) (*BundleReport, error) {
 // pinned key even though the key was not the one the id was born from. Requiring both parameters is
 // the point: rotation acceptance is a deliberate pairing of an install with its new key, never an
 // ambient effect of trusting the key alone.
-func VerifyBundleForInstall(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleReport, error) {
+func VerifyBundleForInstall(signed []byte, pinnedKeyID, acceptedInstall string,
+	opts ...VerifyOption) (*BundleReport, error) {
 	if pinnedKeyID == "" || acceptedInstall == "" {
 		return nil, fmt.Errorf("%w: rotation acceptance requires both the pinned key and the install id",
 			ErrVerify)
 	}
-	return verifyBundle(signed, pinnedKeyID, acceptedInstall)
+	return verifyBundle(signed, pinnedKeyID, acceptedInstall, opts)
 }
 
-func verifyBundle(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleReport, error) {
+// verifyBundle is VerifyBundle and VerifyBundleForInstall, acceptedInstall empty for the first.
+func verifyBundle(signed []byte, pinnedKeyID, acceptedInstall string, opts []VerifyOption) (*BundleReport, error) {
+	var o verifyOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+	// A pin that does not read is refused before anything else, so a mistyped fingerprint is never
+	// treated as no pin and the bundle judged as if the caller had not asked.
+	pins := make(map[string]bool, len(o.authorityPins))
+	for _, p := range o.authorityPins {
+		fp, err := AuthorityPinFingerprint(p)
+		if err != nil {
+			return nil, err
+		}
+		pins[fp] = true
+	}
 	var b Bundle
 	if err := json.Unmarshal(signed, &b); err != nil {
 		return nil, fmt.Errorf("%w: parse bundle: %w", ErrVerify, err)
@@ -325,7 +417,7 @@ func verifyBundle(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleRe
 	}
 	rep := &BundleReport{
 		KeyID: b.Producer.KeyID, Subject: b.Subject,
-		ClaimCount: len(b.Claims), AnchorCount: len(b.Anchors),
+		ClaimCount: len(b.Claims), AnchorCount: len(b.Anchors), AuthorityPins: len(pins),
 	}
 	if b.Chain != nil {
 		rep.Head = b.Chain.Head
@@ -375,11 +467,11 @@ func verifyBundle(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleRe
 	// the upgrade still read as tampered.
 	names := producerNames(pub, b.Producer.InstallID)
 
-	sigOK, err := verifyBundleSignature(signed, pub, b.Producer.KeyID)
+	sigOK, sigProblem, err := verifyBundleSignature(signed, pub, b.Producer.KeyID)
 	if err != nil {
 		return rep, err
 	}
-	rep.SignatureOK = sigOK
+	rep.SignatureOK, rep.SignatureProblem = sigOK, sigProblem
 	var head BundleCoord
 	profile := ChainProfile
 	if b.Chain != nil {
@@ -462,8 +554,8 @@ func verifyBundle(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleRe
 	// A carried timestamp token is read, not taken on trust. A token that does not fix the link its
 	// anchor names is a failure of the anchor, not a note beside it: the anchor's whole purpose is to be
 	// the part of the record the producer cannot write.
-	rep.TimestampsVerified, rep.TimestampProblems = verifyBundleProofs(&b, claimAt)
-	if len(rep.TimestampProblems) > 0 {
+	verifyBundleProofs(&b, claimAt, rep, pins)
+	if len(rep.TimestampProblems) > 0 || len(rep.PinProblems) > 0 {
 		rep.AnchorsOK = false
 	}
 	verifyOutcomeDisclosure(b.Claims, rep)
@@ -1146,6 +1238,7 @@ func verifySpecConsistency(claims []BundleClaim, rep *BundleReport) {
 		if !rep.SpecPresent {
 			rep.SpecPresent = true
 			rep.SpecBody = body
+			rep.SpecMasked = maskedValues(body)
 			disclosed = got
 			continue
 		}
@@ -1174,6 +1267,39 @@ func verifySpecConsistency(claims []BundleClaim, rep *BundleReport) {
 			rep.settle(i, "spec_body", MemberUnchecked, "nothing verified names a spec digest")
 		}
 	}
+}
+
+// maskedValues counts the secret values redaction masked in a disclosed spec, one for each marker
+// it left in place of one. A masked spec verifies, since its digest was taken over the masked text,
+// and a count of no redaction beside it would tell a reader the spec was whole when a secret, and
+// whatever the mask took with it, was missing. The spec is read as JSON so the count
+// does not depend on how its text escapes the marker, and text that is not JSON is counted as it
+// stands.
+func maskedValues(spec []byte) int {
+	var tree any
+	if json.Unmarshal(spec, &tree) != nil {
+		return strings.Count(string(spec), redactedMarker)
+	}
+	return countMarkers(tree)
+}
+
+// countMarkers counts the redaction markers in every string a JSON value holds, its object keys
+// included.
+func countMarkers(value any) int {
+	n := 0
+	switch v := value.(type) {
+	case string:
+		n = strings.Count(v, redactedMarker)
+	case map[string]any:
+		for key, child := range v {
+			n += strings.Count(key, redactedMarker) + countMarkers(child)
+		}
+	case []any:
+		for _, child := range v {
+			n += countMarkers(child)
+		}
+	}
+	return n
 }
 
 // verifyOutcomeDisclosure checks a receipt that discloses a run's outcome. The outcome claim carries
@@ -1241,37 +1367,59 @@ func verifyOutcomeDisclosure(claims []BundleClaim, rep *BundleReport) {
 // the cross-verify gate runs this mirror against the reference corpus precisely because a mirror
 // CAN disagree with the reference; the earlier wording here claimed it could not, while this
 // function was quietly a release behind the list and refusing spec-valid bundles.
-func verifyBundleSignature(signed []byte, pub ed25519.PublicKey, keyID string) (bool, error) {
+//
+// It returns whether a producer signature verifies and, when the entries fail for a reason other
+// than a signature that does not cover the bytes, what that reason is.
+func verifyBundleSignature(signed []byte, pub ed25519.PublicKey, keyID string) (bool, string, error) {
 	value, err := jcs.Parse(signed)
 	if err != nil {
-		return false, fmt.Errorf("%w: canonicalize bundle: %w", ErrVerify, err)
+		return false, "", fmt.Errorf("%w: canonicalize bundle: %w", ErrVerify, err)
 	}
 	m, ok := value.(map[string]any)
 	if !ok {
-		return false, fmt.Errorf("%w: bundle is not a JSON object", ErrVerify)
+		return false, "", fmt.Errorf("%w: bundle is not a JSON object", ErrVerify)
 	}
 	sigs, ok := m["signatures"].([]any)
 	if !ok || len(sigs) == 0 {
-		return false, nil
+		return false, "", nil
 	}
-	// The producer's own signatures, not whichever was written first. A bundle may carry several,
-	// and taking the first lets anyone prepend one and decide which key gets checked. The format
-	// requires at least one entry naming the producer key to verify, in any position, so each such
-	// entry is tried in turn, the way the open verifier and the reference do.
-	var candidates []string
-	for _, raw := range sigs {
+	// The algorithm is outside the signed bytes, so an entry naming one this verifier does not
+	// implement is refused as unsupported rather than judged as ed25519 regardless, the way the
+	// reference verifier refuses it before reading any signature. Every entry is read first, so one
+	// a verifying producer entry sits in front of is not skipped.
+	for i, raw := range sigs {
 		sigObj, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		if id, _ := sigObj["key_id"].(string); id == keyID {
-			if s, _ := sigObj["sig"].(string); s != "" {
-				candidates = append(candidates, s)
-			}
+		if alg, _ := sigObj["alg"].(string); alg != "ed25519" {
+			return false, "", fmt.Errorf("%w: signature %d alg %q, this verifier implements ed25519",
+				ErrVerify, i, util.Clip(alg, 40))
+		}
+	}
+	// The producer block holds one key, so every entry must name it. The array sits outside the
+	// signed bytes, so an entry under another key is a rider nothing vouches for, and the reference
+	// verifier fails the bundle over it rather than skipping it. Skipping it would read VERIFIED on
+	// bytes the reference refuses.
+	var candidates []string
+	for i, raw := range sigs {
+		sigObj, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if id, _ := sigObj["key_id"].(string); id != keyID {
+			return false, fmt.Sprintf("signature %d names a key the producer block does not hold", i),
+				nil
+		}
+		// The producer's own signatures, not whichever was written first. The format requires at
+		// least one entry naming the producer key to verify, in any position, so each is tried in
+		// turn, the way the open verifier and the reference do.
+		if s, _ := sigObj["sig"].(string); s != "" {
+			candidates = append(candidates, s)
 		}
 	}
 	if len(candidates) == 0 {
-		return false, nil
+		return false, "", nil
 	}
 	m["signatures"] = []any{}
 	delete(m, "attestations")
@@ -1285,7 +1433,7 @@ func verifyBundleSignature(signed []byte, pub ed25519.PublicKey, keyID string) (
 	}
 	canonical, err := jcs.Serialize(m)
 	if err != nil {
-		return false, fmt.Errorf("%w: canonicalize bundle: %w", ErrVerify, err)
+		return false, "", fmt.Errorf("%w: canonicalize bundle: %w", ErrVerify, err)
 	}
 	for _, s := range candidates {
 		sig, err := base64.StdEncoding.DecodeString(s)
@@ -1293,10 +1441,10 @@ func verifyBundleSignature(signed []byte, pub ed25519.PublicKey, keyID string) (
 			continue
 		}
 		if ed25519.Verify(pub, canonical, sig) {
-			return true, nil
+			return true, "", nil
 		}
 	}
-	return false, nil
+	return false, "", nil
 }
 
 // verifyBundleTree checks a sparse receipt: every disclosed claim folds through its audit path to
@@ -1576,16 +1724,22 @@ func verifyBundleAnchors(b *Bundle) bool {
 }
 
 // verifyBundleProofs checks every embedded timestamp token against the link its anchor names, and
-// reports how many verified and what was wrong with the rest. claimAt holds each claim's time as
-// readBundleTimes read it, in claim order.
+// records on rep how many verified, the certificate that signed each one, what was wrong with the
+// rest, and how many anchors count. claimAt holds each claim's time as readBundleTimes read it, in
+// claim order, and pins holds the timestamp authority fingerprints the caller pinned.
 //
 // A carried token used to be described rather than checked: an anchor reported as satisfied because the
 // chain reached its link, and a proof string reported as an offline proof because it was present. The
 // authority's own statement, which is the only part of an anchor that does not come from the producer,
 // went unread by every verifier.
-func verifyBundleProofs(b *Bundle, claimAt []time.Time) (int, []string) {
-	var verified int
-	var problems []string
+//
+// A token that verifies is not counted as an anchor on that alone. It verifies under the
+// certificate it carries, so a producer who rewrote their chain could sign a backdated token with a
+// certificate made on the spot. Its signer is named instead, and the token counts only when that
+// signer, or a certificate it carries that directly signed the signer's, is pinned. With pins
+// given, a token that matches none fails the anchors, the way a bundle under an unpinned producer
+// key is refused. With none given, nothing here changes the verdict.
+func verifyBundleProofs(b *Bundle, claimAt []time.Time, rep *BundleReport, pins map[string]bool) {
 	// Claim times by seq, for the backdate rule. See AnchorClockSkew.
 	atSeq := make(map[int64]time.Time, len(b.Claims))
 	for i := range b.Claims {
@@ -1593,22 +1747,60 @@ func verifyBundleProofs(b *Bundle, claimAt []time.Time) (int, []string) {
 	}
 	for _, a := range b.Anchors {
 		if a.Type != AnchorRFC3161 || a.Proof == "" {
+			rep.AnchorsCounted++
 			continue
 		}
-		genTime, err := VerifyTimestampProofTime(a.Link, a.Proof)
+		att, err := ReadTimestampProof(a.Link, a.Proof)
 		if err != nil {
-			problems = append(problems, fmt.Sprintf("anchor at %d: %v", a.Seq, err))
+			rep.TimestampProblems = append(rep.TimestampProblems,
+				fmt.Sprintf("anchor at %d: %v", a.Seq, err))
 			continue
 		}
+		genTime := att.GenTime
 		if at, ok := atSeq[a.Seq]; ok && !genTime.IsZero() &&
 			genTime.Before(at.Add(-AnchorClockSkew)) {
-			problems = append(problems, fmt.Sprintf(
+			rep.TimestampProblems = append(rep.TimestampProblems, fmt.Sprintf(
 				"anchor at %d attests %s over an entry the bundle says happened at %s: a timestamp"+
 					" cannot precede the entry it covers", a.Seq,
 				genTime.UTC().Format(time.RFC3339), at.UTC().Format(time.RFC3339)))
 			continue
 		}
-		verified++
+		rep.TimestampsVerified++
+		signer := timestampSigner(a.Seq, att, pins)
+		switch {
+		case signer.PinnedBy != "":
+			rep.AnchorsCounted++
+		case len(pins) > 0:
+			rep.PinProblems = append(rep.PinProblems, fmt.Sprintf("anchor at %d: its token is signed "+
+				"by %s (%s), which matches no timestamp authority you pinned", a.Seq,
+				valueOrNone(signer.Subject), signer.Fingerprint))
+		}
+		rep.TimestampSigners = append(rep.TimestampSigners, signer)
 	}
-	return verified, problems
+}
+
+// timestampSigner names the certificate that signed a verified token, the carried certificate
+// that directly signed it if there is one, and which of the two matches a pin.
+func timestampSigner(seq int64, att *TimestampAttestation, pins map[string]bool) TimestampSigner {
+	s := TimestampSigner{
+		Seq: seq, Subject: att.Signer.Subject.String(), Fingerprint: certFingerprint(att.Signer),
+	}
+	if issuer := directIssuer(att.Signer, att.Carried, pins); issuer != nil {
+		s.IssuerSubject, s.IssuerFingerprint = issuer.Subject.String(), certFingerprint(issuer)
+	}
+	switch {
+	case pins[s.Fingerprint]:
+		s.PinnedBy = PinnedBySigner
+	case s.IssuerFingerprint != "" && pins[s.IssuerFingerprint]:
+		s.PinnedBy = PinnedByIssuer
+	}
+	return s
+}
+
+// valueOrNone returns s, or a placeholder naming its absence when it is empty.
+func valueOrNone(s string) string {
+	if s == "" {
+		return "a certificate naming no subject"
+	}
+	return s
 }

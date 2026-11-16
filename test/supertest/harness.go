@@ -1,7 +1,9 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -11,11 +13,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
+
+	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
 // harness holds everything the phases share: where the cluster's kubeconfig lives, where the
@@ -132,7 +140,11 @@ func (h *harness) bootstrap(namespace string) error {
 		Role     string
 	}{
 		{"casey", "admin"},
-		{"release-agent", "operator"},
+		// The agent's account is an admin on purpose. An agent's token is capped at operator
+		// whatever its account holds, so each refusal of the agent in the phases is a refusal of
+		// an agent. Under an operator account the same refusals would be an operator's, and would
+		// say nothing about agents.
+		{"release-agent", "admin"},
 	} {
 		err := h.apiCall("POST", "/v1/users", admin, map[string]any{
 			"username": account.Username,
@@ -258,8 +270,16 @@ func (h *harness) failed() int {
 // run executes a command, returning its combined output, with the private kubeconfig in its
 // environment so kubectl and helm never read the user's.
 func (h *harness) run(name string, args ...string) (string, error) {
+	return h.runEnv(nil, name, args...)
+}
+
+// runEnv is run with env added to the command's environment, each entry in the form KEY=value. It
+// is how a secret reaches a command: the arguments of a running process can be read by every
+// account on the machine, and run quotes them in the error it returns, so a token never rides
+// there.
+func (h *harness) runEnv(env []string, name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
-	cmd.Env = append(os.Environ(), "KUBECONFIG="+h.kubeconfig)
+	cmd.Env = append(append(os.Environ(), "KUBECONFIG="+h.kubeconfig), env...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("%s %s: %w\n%s", name, strings.Join(args, " "), err, out)
@@ -316,6 +336,106 @@ func (h *harness) writePodFile(namespace, pod, path, content string) error {
 		return fmt.Errorf("write %s into %s: %s bytes landed, want %s", path, pod, got, want)
 	}
 	return nil
+}
+
+// writePodRepo commits files on main to a git repository built here and lands it whole at dir
+// inside a pod, so a project on the install can name that folder as its remote. The image carries
+// no git and needs none: the repository is built in this process, and the server syncs a local
+// folder in its own. A held run must come from a project, and this is how a playbook the harness
+// writes becomes one.
+//
+// The repository travels as a gzipped tar carried on the argv as base64, for the reason
+// writePodFile gives, and the folder's .git/HEAD is checked after it lands.
+func (h *harness) writePodRepo(namespace, pod, dir string, files map[string]string) error {
+	src, err := os.MkdirTemp(h.work, "repo-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(src) }()
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(src, name), []byte(body), 0o600); err != nil {
+			return err
+		}
+	}
+	repo, err := git.PlainInitWithOptions(src, &git.PlainInitOptions{
+		InitOptions: git.InitOptions{DefaultBranch: plumbing.Main},
+	})
+	if err != nil {
+		return fmt.Errorf("init the repository for %s: %w", dir, err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		return err
+	}
+	if err := wt.AddGlob("."); err != nil {
+		return fmt.Errorf("stage the repository for %s: %w", dir, err)
+	}
+	if _, err := wt.Commit("supertest", &git.CommitOptions{Author: &object.Signature{
+		Name: "supertest", Email: "supertest@switchtender.invalid", When: time.Now()}}); err != nil {
+		return fmt.Errorf("commit the repository for %s: %w", dir, err)
+	}
+	archive, err := tarGz(src)
+	if err != nil {
+		return fmt.Errorf("pack the repository for %s: %w", dir, err)
+	}
+	encoded := base64.StdEncoding.EncodeToString(archive)
+	script := fmt.Sprintf("mkdir -p %s && printf %%s %s | base64 -d | tar -xzf - -C %s && "+
+		"cat %s/.git/HEAD", dir, encoded, dir, dir)
+	out, err := h.kubectl("exec", "-n", namespace, pod, "--", "sh", "-c", script)
+	if err != nil {
+		return fmt.Errorf("land the repository at %s in %s: %w", dir, pod, err)
+	}
+	if !strings.Contains(out, "refs/heads/main") {
+		return fmt.Errorf("land the repository at %s in %s: HEAD reads %q", dir, pod, out)
+	}
+	return nil
+}
+
+// tarGz packs the folder src, its .git included, as a gzipped tar with paths relative to src.
+func tarGz(src string) ([]byte, error) {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(zw)
+	err := filepath.WalkDir(src, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil || path == src {
+			return walkErr
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		hdr, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		hdr.Name = filepath.ToSlash(rel)
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		_, err = tw.Write(body)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := tw.Close(); err != nil {
+		return nil, err
+	}
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // kubectl runs kubectl against the supertest cluster.

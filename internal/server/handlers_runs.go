@@ -484,8 +484,13 @@ func retryRunHandler(store run.Store, retrier Retrier, authz *authorizer, log *z
 			respondError(w, log, http.StatusConflict, err.Error())
 			return
 		case errors.Is(err, dispatch.ErrPolicyDenied) ||
-			errors.Is(err, dispatch.ErrQueueUnlicensed):
+			errors.Is(err, dispatch.ErrQueueUnlicensed) ||
+			errors.Is(err, dispatch.ErrHeldByPath) ||
+			errors.Is(err, dispatch.ErrAgentPathSplit):
 			respondError(w, log, http.StatusForbidden, err.Error())
+			return
+		case errors.Is(err, dispatch.ErrCommitUnpinned):
+			respondError(w, log, http.StatusBadGateway, err.Error())
 			return
 		case errors.Is(err, dispatch.ErrLowSpace):
 			log.Warn("server: retry run: " + err.Error())
@@ -550,8 +555,13 @@ func relaunchFailedHandler(store run.Store, retrier Retrier, authz *authorizer, 
 			respondError(w, log, http.StatusConflict, err.Error())
 			return
 		case errors.Is(err, dispatch.ErrPolicyDenied) ||
-			errors.Is(err, dispatch.ErrQueueUnlicensed):
+			errors.Is(err, dispatch.ErrQueueUnlicensed) ||
+			errors.Is(err, dispatch.ErrHeldByPath) ||
+			errors.Is(err, dispatch.ErrAgentPathSplit):
 			respondError(w, log, http.StatusForbidden, err.Error())
+			return
+		case errors.Is(err, dispatch.ErrCommitUnpinned):
+			respondError(w, log, http.StatusBadGateway, err.Error())
 			return
 		case errors.Is(err, dispatch.ErrLowSpace):
 			log.Warn("server: relaunch failed hosts: " + err.Error())

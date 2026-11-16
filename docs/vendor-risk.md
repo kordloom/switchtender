@@ -21,6 +21,7 @@ when you configure them, and each is optional:
 | Connection | When | Where |
 | --- | --- | --- |
 | Timestamp anchoring | You run `switchtender audit anchor` | The RFC 3161 timestamp authority you name; the default is freetsa.org |
+| Demo anchoring | You run `switchtender demo`. This one is on by default | freetsa.org, which is sent hashes of the seeded chain's head and none of its entries. `--anchor-tsa` names another RFC 3161 authority, and `--anchor-tsa ""` skips it |
 | Witness countersignatures | You enroll the install with `switchtender witness enroll` | The [hosted witness](witness.md) at witness.switchtender.com, or a push witness you run yourself with this binary. It receives the producer public key, the install id, and the license file at enrollment, then each span beat's number, time, position, entry hash, tree root, and consistency proof. No run content, host names, credentials, or personal data |
 | Advisory AI | You configure a provider | Your provider, including local Ollama; read-only, executes nothing |
 | Project sync | You add a git project | Your repository host |

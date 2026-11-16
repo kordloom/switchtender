@@ -19,6 +19,7 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/mcp"
@@ -38,8 +39,10 @@ const (
 	splitSeededHook = "managed-hook"
 	// splitRawRun is a run body that splits the path.
 	splitRawRun = `{"playbook":"site.yml","inventory":"` + splitRawPath + `","shards":2}`
-	// splitStoredRun is a run body that splits the stored inventory.
-	splitStoredRun = `{"playbook":"site.yml","inventory_id":"inv_fleet","shards":2}`
+	// splitStoredRun is a run body that splits the stored inventory. It names the fixture's project,
+	// since an agent's run is held and a held run comes from a project.
+	splitStoredRun = `{"playbook":"site.yml","inventory_id":"inv_fleet","shards":2,` +
+		`"project_id":"` + dispatchtest.LocalProjectID + `"}`
 	// splitRawTemplate is a template body whose saved run splits the path.
 	splitRawTemplate = `{"name":"deploy","playbook":"site.yml","inventory":"` + splitRawPath +
 		`","shards":2}`
@@ -53,9 +56,10 @@ const (
 	splitTemplateSchedule = `{"name":"fleet nightly","cron":"0 2 * * *","template_id":"tpl_split"}`
 	// splitRawTrigger is a trigger body that fires the template that splits the path.
 	splitRawTrigger = `{"name":"fleet push","template_id":"tpl_split"}`
-	// splitRawWorkflow is a workflow body with one step that names the path.
+	// splitRawWorkflow is a workflow body with one step that names the path, from the fixture's
+	// project, since an agent's workflow is held and a held run comes from a project.
 	splitRawWorkflow = `{"name":"release","steps":[{"name":"deploy","playbook":"site.yml",` +
-		`"inventory":"` + splitRawPath + `"}]}`
+		`"inventory":"` + splitRawPath + `"}],"project_id":"` + dispatchtest.LocalProjectID + `"}`
 	// splitSteppedTemplate is a template body that asks for shards on a workflow.
 	splitSteppedTemplate = `{"name":"deploy","shards":2,"steps":[{"name":"deploy",` +
 		`"playbook":"site.yml","inventory":"` + splitRawPath + `"}]}`
@@ -132,8 +136,12 @@ func newPathSplitServer(t *testing.T) *pathSplitServer {
 	ctx := context.Background()
 	db := agentHoldBackends()[0].Open(t)
 	lister := &splitPathLister{}
+	// An agent's run is held, and a held run comes from a project.
+	p := dispatchtest.LocalProject(t, nil)
+	p.SaveIn(t, db.projects)
 	d := dispatch.New(db.runs, lister, zap.NewNop(), dispatch.WithNoJanitor(),
-		dispatch.WithInventories(db.inventories), dispatch.WithPolicies(db.policies))
+		dispatch.WithInventories(db.inventories), dispatch.WithPolicies(db.policies),
+		dispatch.WithProjects(db.projects, p.Syncer))
 	t.Cleanup(d.Close)
 
 	account := func(name string, role user.Role) *user.User {
@@ -198,7 +206,7 @@ func pathSplitSeed(t *testing.T, db agentHoldDB) {
 		{ID: "tpl_split", Name: "fleet deploy", Playbook: "site.yml", Inventory: splitRawPath,
 			Shards: 2},
 		{ID: "tpl_stored", Name: "stored fleet deploy", Playbook: "site.yml",
-			InventoryID: "inv_fleet", Shards: 2},
+			InventoryID: "inv_fleet", Shards: 2, ProjectID: dispatchtest.LocalProjectID},
 		{ID: "tpl_flow", Name: "release flow", Steps: []run.PipelineStep{
 			{Name: "deploy", Playbook: "site.yml", Inventory: splitRawPath}}},
 	} {
@@ -484,7 +492,8 @@ func TestPathSplitNeedsAnAdminAtEveryEntry(t *testing.T) {
 		WantCode: http.StatusAccepted, WantListings: 1,
 	}, { // Test 36: An agent composing a run of a stored inventory with a limit lists nothing.
 		Entry: "MCP", Caller: "agent", Tool: "propose_adhoc_run",
-		Body:     `{"playbook":"site.yml","inventory_id":"inv_fleet","limit":"a,b"}`,
+		Body: `{"playbook":"site.yml","inventory_id":"inv_fleet","limit":"a,b","project_id":"` +
+			dispatchtest.LocalProjectID + `"}`,
 		WantCode: http.StatusAccepted,
 	}}
 	for testNum, test := range tests {

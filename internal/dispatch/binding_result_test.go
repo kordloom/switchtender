@@ -7,6 +7,7 @@ import (
 	"io"
 	"maps"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -56,10 +57,12 @@ func (p *publishRunner) Run(_ context.Context, spec roundhouse.Spec, _ io.Writer
 	error) {
 	vars := map[string]any{}
 	maps.Copy(vars, spec.ExtraVars)
+	// A run from a project executes the playbook inside its checkout, so the name is what is kept.
+	playbook := filepath.Base(spec.Playbook)
 	p.mu.Lock()
-	p.received[spec.Playbook] = vars
+	p.received[playbook] = vars
 	p.mu.Unlock()
-	if out := p.publish[spec.Playbook]; len(out) > 0 && spec.EventsPath != "" {
+	if out := p.publish[playbook]; len(out) > 0 && spec.EventsPath != "" {
 		data, err := json.Marshal(map[string]any{"type": "stats", "ts": 1719000000, "outputs": out})
 		if err != nil {
 			return roundhouse.Result{ExitCode: -1}, err
@@ -68,7 +71,7 @@ func (p *publishRunner) Run(_ context.Context, spec roundhouse.Spec, _ io.Writer
 			return roundhouse.Result{ExitCode: -1}, err
 		}
 	}
-	if p.fail[spec.Playbook] {
+	if p.fail[playbook] {
 		return roundhouse.Result{ExitCode: 2}, nil
 	}
 	return roundhouse.Result{ExitCode: 0}, nil
@@ -257,9 +260,10 @@ func driveResultWalk(t *testing.T, shape resultShape, fail bool, rewrite func(r 
 	key := bndKey(t)
 	store, chain := newPickedRows(), &bndChain{Store: audit.NewMemStore()}
 	runner := newPublishRunner(fail)
+	projects, from := heldFrom(t, "build.yml", "deploy.yml")
 	keyed := func() *Dispatcher {
 		return New(store, runner, nil, WithNoJanitor(), WithAudits(chain), WithBindingKey(key),
-			WithClaimInterval(5*time.Millisecond))
+			WithClaimInterval(5*time.Millisecond), projects)
 	}
 	act := func() {
 		if rewrite != nil {
@@ -272,11 +276,13 @@ func driveResultWalk(t *testing.T, shape resultShape, fail bool, rewrite func(r 
 	if shape == shapeGraph || shape == shapeSequence {
 		defer first.Close()
 		act()
-		if parent, err = first.SubmitPipeline(ctx, "release", "inv", shape.steps()); err != nil {
+		if parent, err = first.SubmitPipeline(ctx, "release", "inv", shape.steps(),
+			from); err != nil {
 			t.Fatalf("SubmitPipeline() error = %v", err)
 		}
 	} else {
-		if parent, err = first.SubmitPipeline(ctx, "release", "inv", shape.steps()); err != nil {
+		if parent, err = first.SubmitPipeline(ctx, "release", "inv", shape.steps(),
+			from); err != nil {
 			t.Fatalf("SubmitPipeline() error = %v", err)
 		}
 		node := waitParked(t, store.Store, parent.ID)

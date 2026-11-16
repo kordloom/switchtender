@@ -54,12 +54,16 @@ secret() { python3 -c 'import secrets;print(secrets.token_urlsafe(24))'; }
 SWITCHTENDER_ADMIN_PASSWORD="$(secret)" \
   "$BIN" init --db "$DB" --admin approver --config "$WORK/switchtender.env" >/dev/null 2>&1 \
   || fail "init could not create the install"
-SWITCHTENDER_PASSWORD="$(secret)" "$BIN" user new dev-lead --role operator --db "$DB" >/dev/null
+# dev-lead is an admin on purpose. An admin may approve a held run, so when step 4 refuses the
+# agent that acts for dev-lead, the refusal comes from the limits on an agent and not from its
+# person's role. Under an operator the same refusal would show nothing about agents, since no
+# operator may approve.
+SWITCHTENDER_PASSWORD="$(secret)" "$BIN" user new dev-lead --role admin --db "$DB" >/dev/null
 # The agent's token is bound to the person it acts for, so the record names both, and --agent caps
 # it below admin whatever that person's role: it can ask for changes and can never decide on one.
 AGENT=$("$BIN" token new --user dev-lead --name release-agent --agent --db "$DB" | jqp 'd["token"]')
 PERSON=$("$BIN" token new --user approver --name approver --db "$DB" | jqp 'd["token"]')
-ok "dev-lead (operator), approver (admin), and release-agent, an agent acting for dev-lead"
+ok "dev-lead (admin), approver (admin), and release-agent, an agent acting for dev-lead"
 
 step "Starting a SwitchTender on $API"
 mkdir -p "$SANDBOX"
@@ -140,12 +144,17 @@ for _ in $(seq 1 45); do
   sleep 1
 done
 echo "   final status : $FINAL"
+# The run has to say it succeeded as well. A folder that is gone under a run that failed, or under
+# one still running when the wait ended, is a deletion the record does not stand behind.
+[ "$FINAL" = "succeeded" ] || fail "the run did not succeed: its status was $FINAL"
 if [ -d "$SANDBOX" ]; then
   fail "the sandbox still exists, so nothing actually executed"
 fi
 ok "the sandbox is gone. Nothing here was simulated."
 
 step "7. The trail says how far it can be trusted"
+# The answer has to be a pass over entries that exist. An empty chain verifies too, so ok alone
+# would not say that anything was checked.
 curl -sS -H "authorization: Bearer $PERSON" "$API/v1/audit/verify" | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
@@ -153,7 +162,9 @@ print('   ok       :', d.get('ok'))
 print('   entries  :', d.get('count'))
 print('   anchored :', d.get('anchored'))
 print('   level    :', d.get('level'), d.get('level_name'))
-"
+count = d.get('count')
+sys.exit(0 if d.get('ok') is True and type(count) is int and count > 0 else 1)
+" || fail "the trail did not verify, or it verified over no entries"
 ok "a level, not a bare ok. Anchor it and the level rises; this install never did."
 
 step "8. The signed evidence bundle"

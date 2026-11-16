@@ -99,10 +99,14 @@ func TestARowWriterCannotSkipThePlanFirst(t *testing.T) {
 			ctx := context.Background()
 			key := bndKey(t)
 			store, chain := newBndRows(), &bndChain{Store: audit.NewMemStore()}
+			// An agent's apply is held before it plans, so it comes from a project.
+			p := dispatchtest.LocalProject(t, map[string]string{
+				"infra/prod/main.tf": dispatchtest.CleanConfig})
+			projects := WithProjects(p.Store, p.Syncer)
 			submitter := New(store, dispatchtest.OKRunner(), nil, WithNoJanitor(), WithAudits(chain),
-				WithBindingKey(key), WithQueues([]string{"decisions"}))
+				WithBindingKey(key), WithQueues([]string{"decisions"}), projects)
 			opts := []run.SubmitOption{run.WithTool(run.ToolTerraform),
-				run.WithCommand("infra/prod"), run.WithQueue("work")}
+				run.WithCommand("infra/prod"), run.WithQueue("work"), run.WithProject(p.ID)}
 			if test.Agent {
 				opts = append(opts, run.WithActor("agent-1"), run.WithActorType("agent"))
 			} else {
@@ -133,7 +137,7 @@ func TestARowWriterCannotSkipThePlanFirst(t *testing.T) {
 			runner := &phaseRunner{}
 			executor := New(store, runner, nil, WithNoJanitor(), WithAudits(chain),
 				WithBindingKey(key), WithQueues([]string{"work"}),
-				WithClaimInterval(5*time.Millisecond))
+				WithClaimInterval(5*time.Millisecond), projects)
 			defer executor.Close()
 			got := dispatchtest.WaitTerminal(t, store.Store, r.ID)
 			executor.Close()

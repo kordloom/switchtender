@@ -123,7 +123,8 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--saml-role-map` | none | Map an asserted group to a role as `group=role`. A matched group sets the role on every sign-in. Repeatable. |
 | `--jwt-jwks-url` | none | JWKS URL to enable bearer JWT sign-in, so a service can present a JWT minted elsewhere. |
 | `--jwt-issuer` | none | Expected token issuer, the `iss` claim. |
-| `--jwt-audience` | none | Expected token audience. Left empty the audience is not checked, so every token the issuer signs is accepted, including one minted for a different application at the same issuer. Set it unless the issuer serves this install alone. |
+| `--jwt-audience` | none | Expected token audience, the `aud` claim. With `--jwt-jwks-url` set and no audience, `serve` refuses to start unless `--jwt-allow-any-audience` is set. |
+| `--jwt-allow-any-audience` | `false` | Start JWT sign-in with no `--jwt-audience`. The audience is then not checked, so every token the issuer signs is accepted, including one minted for a different application at the same issuer. Set it only when the issuer serves this install alone. |
 | `--jwt-username-claim` | `sub` | Claim naming the account. |
 | `--jwt-groups-claim` | none | Claim holding the user's groups, used with `--jwt-role-map`. |
 | `--jwt-agent-claim` | `st_actor_type` | Claim that marks a token as an AI agent's when it holds the value `agent`. A marked token gets the agent ceiling: it can launch and propose work, but cannot manage identity, access, or secrets, and cannot approve its own held run. |
@@ -504,6 +505,29 @@ but not who signed it, and the verdict says so: `INTACT, BUT UNIDENTIFIED` rathe
 A `--pubkey` given an empty value, which is what a failed key fetch leaves behind, is refused rather
 than treated as no pin.
 
+A timestamp token an anchor carries is checked against the certificate the token itself carries, and
+anyone can make such a certificate. So `verify` prints each token's signer by its certificate's
+subject and SHA-256 fingerprint, with the certificate the token carries that issued it. Pass
+`--tsa-cert` with the fingerprint of a timestamp authority's certificate, as `sha256:<hex>`, bare
+hex, or the colon pairs openssl prints, once for each authority you accept. A token counts as an
+anchor when its signer certificate, or the carried certificate that directly issued it, matches
+one, and a token that matches none fails the receipt. Without `--tsa-cert` each token reads
+`UNPINNED`, is not counted on the anchors line, and does not change the verdict. An empty
+`--tsa-cert` is refused.
+
+Take the fingerprint from the authority, never from the receipt, which only repeats what its
+producer put there. `audit anchor` and the demo ask freetsa.org unless told otherwise, and `serve`
+anchors against the authority `--anchor-tsa-url` names. freetsa.org publishes its signing
+certificate and the root that issued it:
+
+    curl -sO https://freetsa.org/files/tsa.crt
+    openssl x509 -in tsa.crt -noout -fingerprint -sha256
+
+Pass the colon pairs after `Fingerprint=` to `--tsa-cert`. The root is at
+`https://freetsa.org/files/cacert.pem`, and each token carries it, so a pin on the root keeps
+counting tokens after the authority reissues its signing certificate. For any other authority, read
+the fingerprint of the certificate that authority publishes.
+
 An install enrolled with a witness carries the witness's countersignatures in its bundles and
 receipts. Pass `--witness-pubkey` with the key the witness publishes, in either the sha256 key id or
 the raw hex form, so only that witness's countersignatures are counted, and `--witness` with the
@@ -655,9 +679,12 @@ default](policy.md#agent-runs-are-held-by-default) describes. See [Agents](agent
 
 The token is read from `SWITCHTENDER_MCP_TOKEN`, falling back to `SWITCHTENDER_TOKEN`. Prefer the
 environment variable to a flag, whose value is visible in the host's process list. The command
-refuses to start on an admin token. There is deliberately no approve tool, so an agent cannot release
-its own work, and no credential, account, token, grant, or policy tool, so it cannot widen its own
-reach.
+starts only for an agent token, one minted with `switchtender token new --user <account> --agent`.
+Any other token is refused, and so is a server with no accounts, where nothing can be held, and no
+flag turns that off. The refusal covers this command, and the server cannot tell a person from a
+program holding that person's token. There is deliberately no approve tool, so an agent cannot
+release its own work, and no credential, account, token, grant, or policy tool, so it cannot widen
+its own reach.
 
 | Flag | Default | Purpose |
 |------|---------|---------|
@@ -665,7 +692,6 @@ reach.
 | `--allow-adhoc` | off | Also expose the ad-hoc run tool, letting the agent compose a run rather than launch a template an operator defined. The default hold on agent runs and approval policy still apply. |
 | `--token` | none | API token the agent presents. Prefer `SWITCHTENDER_MCP_TOKEN`. |
 | `--timeout` | `1m0s` | Bounds one API call. |
-| `--allow-admin-token` | `false` | Start even when the token has admin rights. An agent should hold an operator-bound token, so this is a deliberate override. |
 
 ## demo
 

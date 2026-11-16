@@ -63,6 +63,9 @@ func createProjectHandler(store project.Store, creds credential.Store, authz *au
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
 		}
+		if denyLocalRepo(w, r, log, req.RepoURL, "") {
+			return
+		}
 		// A project names the credential its clone authenticates with, so writing one has to
 		// authorize that credential the same way a template does. Checking only at launch is the
 		// wrong order and, for a project, there was no check at either point: a caller who may
@@ -129,14 +132,19 @@ func updateProjectHandler(store project.Store, creds credential.Store, authz *au
 		// this handler is creating has no stored organization to compare against, so the check applies.
 		orgID := orgForCreate(req.OrgID)
 		placing := true
+		storedURL := ""
 		if existing, gerr := store.Get(r.Context(), id); gerr == nil {
 			orgID = orgForUpdate(req.OrgID, existing.OrgID)
 			placing = existing.OrgID != orgID
+			storedURL = existing.RepoURL
 			// Moving a project out of an organization is as much a change of who controls it as
 			// moving one in, so the organization it leaves is checked too.
 			if placing && authz.denyForeignOrg(w, r, log, existing.OrgID) {
 				return
 			}
+		}
+		if denyLocalRepo(w, r, log, req.RepoURL, storedURL) {
+			return
 		}
 		if placing && authz.denyForeignOrg(w, r, log, orgID) {
 			return
@@ -172,6 +180,23 @@ func updateProjectHandler(store project.Store, creds credential.Store, authz *au
 		}
 		respondJSON(w, log, http.StatusOK, updated, wantsPretty(r))
 	}
+}
+
+// denyLocalRepo refuses a caller who is not a global admin setting a local repo_url, writing the
+// refusal and reporting that the handler should stop. stored is the URL the project holds today,
+// empty on a create, so saving a local project without changing its URL is not refused.
+//
+// A local URL points the clone at any git folder on the server, and every project's checkout cache
+// is one, so a manage grant on one project could clone another organization's private checkout and
+// read it back through the file browser. Choosing which folder on the server a project reads is a
+// global admin's call, not something a grant on one object delegates.
+func denyLocalRepo(w http.ResponseWriter, r *http.Request, log *zap.Logger, repoURL, stored string) bool {
+	if repoURL == stored || !project.IsLocalRepoURL(repoURL) || actorIsAdmin(r) {
+		return false
+	}
+	respondError(w, log, http.StatusForbidden,
+		"only a global admin may set a local repo_url (a file:// URL or a path on the server)")
+	return true
 }
 
 // listProjectsHandler returns the projects the actor may read. Under strict grants a non-admin sees

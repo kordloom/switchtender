@@ -31,12 +31,29 @@ type attackOutcome struct {
 func keyedAt(t *testing.T, store run.Store, chain audit.Store, runner roundhouse.Runner,
 	queues ...string) *Dispatcher {
 	t.Helper()
-	opts := []Option{WithNoJanitor(), WithAudits(chain), WithBindingKey(bndKey(t)),
-		WithClaimInterval(5 * time.Millisecond)}
+	return keyedWith(t, store, chain, runner, nil, queues...)
+}
+
+// keyedWith is keyedAt with extra options, such as the project a held run comes from.
+func keyedWith(t *testing.T, store run.Store, chain audit.Store, runner roundhouse.Runner,
+	extra []Option, queues ...string) *Dispatcher {
+	t.Helper()
+	opts := append([]Option{WithNoJanitor(), WithAudits(chain), WithBindingKey(bndKey(t)),
+		WithClaimInterval(5 * time.Millisecond)}, extra...)
 	if len(queues) > 0 {
 		opts = append(opts, WithQueues(queues))
 	}
 	return New(store, runner, nil, opts...)
+}
+
+// attackProject returns the option that serves a project committing site.yml and the Terraform
+// root infra/prod, and the option a submission names it with, for a move whose run is held and so
+// comes from a project.
+func attackProject(t *testing.T) ([]Option, run.SubmitOption) {
+	t.Helper()
+	p := dispatchtest.LocalProject(t, map[string]string{"site.yml": dispatchtest.HeldPlaybook,
+		"infra/prod/main.tf": dispatchtest.CleanConfig})
+	return []Option{WithProjects(p.Store, p.Syncer)}, run.WithProject(p.ID)
 }
 
 // planFirstMove submits a terraform apply that must plan first, as a person who asked for approval
@@ -46,9 +63,10 @@ func planFirstMove(t *testing.T, agent bool, edit func(r, decided *run.Run) func
 	t.Helper()
 	ctx := context.Background()
 	store, chain := newBndRows(), audit.NewMemStore()
-	submitter := keyedAt(t, store, chain, &phaseRunner{}, "decisions")
+	projects, from := attackProject(t)
+	submitter := keyedWith(t, store, chain, &phaseRunner{}, projects, "decisions")
 	opts := []run.SubmitOption{run.WithTool(run.ToolTerraform), run.WithCommand("infra/prod"),
-		run.WithQueue("work")}
+		run.WithQueue("work"), from}
 	if agent {
 		opts = append(opts, run.WithActor("agent-1"), run.WithActorType("agent"))
 	} else {
@@ -75,7 +93,7 @@ func planFirstMove(t *testing.T, agent bool, edit func(r, decided *run.Run) func
 	submitter.Close()
 	store.rewrite(r.ID, edit(r, decided))
 	runner := &phaseRunner{}
-	executor := keyedAt(t, store, chain, runner, "work")
+	executor := keyedWith(t, store, chain, runner, projects, "work")
 	got := dispatchtest.WaitTerminal(t, store.Store, r.ID)
 	executor.Close()
 	runner.mu.Lock()
@@ -90,8 +108,10 @@ func heldFlipMove(t *testing.T, approve bool, opts ...run.SubmitOption) attackOu
 	t.Helper()
 	ctx := context.Background()
 	store, chain := run.NewMemStore(), audit.NewMemStore()
-	submitter := keyedAt(t, store, chain, &phaseRunner{}, "decisions")
-	r, err := submitter.Submit(ctx, "", "", append(slices.Clone(opts), run.WithQueue("work"))...)
+	projects, from := attackProject(t)
+	submitter := keyedWith(t, store, chain, &phaseRunner{}, projects, "decisions")
+	r, err := submitter.Submit(ctx, "", "", append(slices.Clone(opts), run.WithQueue("work"),
+		from)...)
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -107,7 +127,7 @@ func heldFlipMove(t *testing.T, approve bool, opts ...run.SubmitOption) attackOu
 	}
 	submitter.Close()
 	runner := &phaseRunner{}
-	executor := keyedAt(t, store, chain, runner, "work")
+	executor := keyedWith(t, store, chain, runner, projects, "work")
 	got := dispatchtest.WaitTerminal(t, store, r.ID)
 	executor.Close()
 	runner.mu.Lock()
@@ -169,10 +189,11 @@ func approvedSplitMove(t *testing.T, add func(split, first *run.Run) *run.Run) a
 	t.Helper()
 	ctx := context.Background()
 	store, chain, runner := run.NewMemStore(), audit.NewMemStore(), &childRunner{}
-	d := keyedAt(t, store, chain, runner, "decisions")
+	projects, from := attackProject(t)
+	d := keyedWith(t, store, chain, runner, projects, "decisions")
 	defer d.Close()
 	split, err := d.SubmitSplit(ctx, "site.yml", "inv", 2, run.WithRequireApproval(true),
-		run.WithQueue("work"))
+		run.WithQueue("work"), from)
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
@@ -200,7 +221,7 @@ func approvedSplitMove(t *testing.T, add func(split, first *run.Run) *run.Run) a
 	if err := store.Save(ctx, row); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	e := keyedAt(t, store, chain, runner, "work")
+	e := keyedWith(t, store, chain, runner, projects, "work")
 	defer e.Close()
 	got := dispatchtest.WaitTerminal(t, store, row.ID)
 	return attackOutcome{Error: got.Error, Ran: runner.count("limit:" + rewritten)}

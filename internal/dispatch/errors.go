@@ -42,6 +42,14 @@ var (
 	// to a digest and this server refuses unpinned images. An approval of a tag would cover whatever
 	// the tag names when the run executes, not the image the approver saw.
 	ErrImageUnpinned = errors.New("image not pinned to a digest")
+	// ErrCommitUnpinned is returned when a run about to be held names a project whose commit could
+	// not be read, so its approval would bind no commit and the run is not saved.
+	ErrCommitUnpinned = errors.New("the project's commit could not be pinned, so the held run " +
+		"was not saved")
+	// ErrHeldByPath is returned when a run an approval stands in front of names its playbook or its
+	// Terraform configuration by a path on the server rather than from a project. An approval binds
+	// a project's commit, and nothing binds what a path holds when the run is released.
+	ErrHeldByPath = errors.New("a held run must come from a project")
 	// ErrNoHostLister is returned when a split is requested but the runner cannot list hosts.
 	ErrNoHostLister = errors.New("host listing unavailable")
 	// ErrAgentPathSplit is returned when an agent's run asks for a split of an inventory named by a

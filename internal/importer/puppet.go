@@ -87,7 +87,7 @@ func FromPuppet(data []byte, now time.Time) (*Plan, error) {
 		return nil, err
 	}
 	plan := &Plan{}
-	nodes, facts, err := decodePuppet(data)
+	nodes, facts, unsigned, err := decodePuppet(data)
 	if err != nil {
 		return nil, err
 	}
@@ -156,6 +156,11 @@ func FromPuppet(data []byte, now time.Time) (*Plan, error) {
 			"itself stopped managing %s", skipped, plural(skipped), wasWere(skipped),
 			itOrThem(skipped))
 	}
+	if unsigned > 0 {
+		plan.warn("%d certificate%s requested and not yet signed, or revoked, %s not imported, "+
+			"since the Puppet server manages only a signed certificate's node",
+			unsigned, plural(unsigned), wasWere(unsigned))
+	}
 	if len(hosts) == 0 {
 		return nil, fmt.Errorf("%w: every puppet node in this document is deactivated or unnamed",
 			ErrNothingRecognized)
@@ -184,24 +189,25 @@ func FromPuppet(data []byte, now time.Time) (*Plan, error) {
 	return plan, nil
 }
 
-// decodePuppet reads the three shapes a Puppet fleet arrives in, returning the nodes and any facts
-// found keyed by certname.
-func decodePuppet(data []byte) ([]puppetNode, map[string]map[string]any, error) {
+// decodePuppet reads the three shapes a Puppet fleet arrives in, returning the nodes, any facts
+// found keyed by certname, and the count of unsigned or revoked certnames left out of a CA list.
+func decodePuppet(data []byte) ([]puppetNode, map[string]map[string]any, int, error) {
 	trimmed := bytes.TrimSpace(data)
 	if len(trimmed) == 0 {
-		return nil, nil, fmt.Errorf("%w: this document is empty", ErrNothingRecognized)
+		return nil, nil, 0, fmt.Errorf("%w: this document is empty", ErrNothingRecognized)
 	}
 	// A plain certname list is not JSON, and it is what `puppet node list` prints. Reading it means
 	// somebody who can reach the CA but not PuppetDB still has a path.
 	if trimmed[0] != '[' && trimmed[0] != '{' {
-		return decodePuppetNodeList(trimmed), nil, nil
+		nodes, unsigned := decodePuppetNodeList(trimmed)
+		return nodes, nil, unsigned, nil
 	}
 
 	// A facts query and a nodes query are both arrays of objects. They are told apart by their
 	// members rather than by a flag, since the caller has no way to say which they ran.
 	var rows []json.RawMessage
 	if err := json.Unmarshal(trimmed, &rows); err != nil {
-		return nil, nil, fmt.Errorf("parse puppet export: %w", err)
+		return nil, nil, 0, fmt.Errorf("parse puppet export: %w", err)
 	}
 	var nodes []puppetNode
 	facts := map[string]map[string]any{}
@@ -250,7 +256,7 @@ func decodePuppet(data []byte) ([]puppetNode, map[string]map[string]any, error) 
 			nodes = append(nodes, puppetNode{Certname: name})
 		}
 	}
-	return nodes, facts, nil
+	return nodes, facts, 0, nil
 }
 
 // digFact returns the value at path inside a structured fact, or nil when any step is missing.
@@ -267,10 +273,14 @@ func digFact(value any, path ...string) any {
 	return value
 }
 
-// decodePuppetNodeList reads the certname per line that `puppet node list` prints, ignoring the
-// status suffix the command appends when it is run with a format that includes one.
-func decodePuppetNodeList(data []byte) []puppetNode {
+// decodePuppetNodeList reads the certname per line that `puppetserver ca list --all` prints, or a
+// bare list of certnames. A "Requested Certificates:" or "Revoked Certificates:" section header
+// starts a section whose names are counted and not returned, since only a signed certificate's
+// node is managed.
+func decodePuppetNodeList(data []byte) ([]puppetNode, int) {
 	var nodes []puppetNode
+	unsigned := 0
+	skipping := false
 	s := bufio.NewScanner(bytes.NewReader(data))
 	s.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for s.Scan() {
@@ -278,11 +288,22 @@ func decodePuppetNodeList(data []byte) []puppetNode {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		// `puppet node list` prints "certname (SHA256) ..." in some versions; the certname is the
-		// first field either way.
-		nodes = append(nodes, puppetNode{Certname: strings.Fields(line)[0]})
+		fields := strings.Fields(line)
+		if len(fields) <= 2 && strings.HasSuffix(strings.ToLower(line), "certificates:") {
+			skipping = !strings.EqualFold(fields[0], "signed")
+			if len(fields) == 1 {
+				skipping = false
+			}
+			continue
+		}
+		if skipping {
+			unsigned++
+			continue
+		}
+		// The certname is the first field, ahead of any fingerprint or alt names tail.
+		nodes = append(nodes, puppetNode{Certname: fields[0]})
 	}
-	return nodes
+	return nodes, unsigned
 }
 
 // itOrThem returns the pronoun a count needs, so one node is it and two nodes are them.

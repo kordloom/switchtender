@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -130,14 +129,15 @@ func TestADryRunThatForcesRealTasksIsHeld(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
-			dir := t.TempDir()
-			dispatchtest.WriteFiles(t, dir, test.Files)
+			// A held dry run comes from a project, so the playbook is read from one.
+			p := dispatchtest.LocalProject(t, test.Files)
 			store := run.NewMemStore()
-			d := New(store, dispatchtest.OKRunner(), zap.NewNop(), WithPolicies(excludeDryRuns(t)), WithNoJanitor())
+			d := New(store, dispatchtest.OKRunner(), zap.NewNop(), WithPolicies(excludeDryRuns(t)),
+				WithNoJanitor(), WithProjects(p.Store, p.Syncer))
 			t.Cleanup(d.Close)
 
-			got, err := d.Submit(ctx, filepath.Join(dir, "site.yml"), "hosts.ini",
-				run.WithTool(run.ToolAnsible), run.WithDryRun(true))
+			got, err := d.Submit(ctx, "site.yml", "hosts.ini",
+				run.WithTool(run.ToolAnsible), run.WithDryRun(true), run.WithProject(p.ID))
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
@@ -190,11 +190,13 @@ func TestADryRunThatForcesRealTasksIsHeld(t *testing.T) {
 func TestAnUnreadablePlaybookFailsClosed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
+	// A held dry run comes from a project, and this one commits no absent.yml.
+	p := dispatchtest.LocalProject(t, nil)
 	d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithPolicies(excludeDryRuns(t)),
-		WithNoJanitor())
+		WithNoJanitor(), WithProjects(p.Store, p.Syncer))
 	t.Cleanup(d.Close)
-	got, err := d.Submit(ctx, filepath.Join(t.TempDir(), "absent.yml"), "hosts.ini",
-		run.WithTool(run.ToolAnsible), run.WithDryRun(true))
+	got, err := d.Submit(ctx, "absent.yml", "hosts.ini",
+		run.WithTool(run.ToolAnsible), run.WithDryRun(true), run.WithProject(p.ID))
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -207,7 +209,7 @@ func TestAnUnreadablePlaybookFailsClosed(t *testing.T) {
 	}
 	if findings := got.DryRunFindings(); len(findings) != 1 ||
 		!strings.HasPrefix(findings[0], "could not read playbook ") ||
-		!strings.Contains(findings[0], "(not on this server)") {
+		!strings.Contains(findings[0], "(not in the project)") {
 		t.Errorf("findings = %q, want the unread playbook named with why", findings)
 	}
 }
@@ -218,14 +220,14 @@ func TestAnUnreadablePlaybookFailsClosed(t *testing.T) {
 func TestAnApprovedForcingDryRunStillRunsInCheckMode(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	dir := t.TempDir()
-	dispatchtest.WriteFiles(t, dir, map[string]string{"site.yml": forcedTaskPlaybook})
+	p := dispatchtest.LocalProject(t, map[string]string{"site.yml": forcedTaskPlaybook})
 	store := run.NewMemStore()
 	runner := &specRecorder{}
-	d := New(store, runner, zap.NewNop(), WithPolicies(excludeDryRuns(t)), WithNoJanitor())
+	d := New(store, runner, zap.NewNop(), WithPolicies(excludeDryRuns(t)), WithNoJanitor(),
+		WithProjects(p.Store, p.Syncer))
 	t.Cleanup(d.Close)
-	held, err := d.Submit(ctx, filepath.Join(dir, "site.yml"), "hosts.ini",
-		run.WithTool(run.ToolAnsible), run.WithDryRun(true))
+	held, err := d.Submit(ctx, "site.yml", "hosts.ini",
+		run.WithTool(run.ToolAnsible), run.WithDryRun(true), run.WithProject(p.ID))
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -263,14 +265,13 @@ func TestAPipelineStepThatForcesRealTasksHoldsThePipeline(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
-			dir := t.TempDir()
-			dispatchtest.WriteFiles(t, dir, map[string]string{"site.yml": test.Step})
+			p := dispatchtest.LocalProject(t, map[string]string{"site.yml": test.Step})
 			d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithPolicies(excludeDryRuns(t)),
-				WithNoJanitor())
+				WithNoJanitor(), WithProjects(p.Store, p.Syncer))
 			t.Cleanup(d.Close)
 			got, err := d.SubmitPipeline(ctx, "nightly", "hosts.ini", []run.PipelineStep{{
-				Name: "check", Playbook: filepath.Join(dir, "site.yml"), DryRun: true,
-			}}, run.WithDryRun(true))
+				Name: "check", Playbook: "site.yml", DryRun: true,
+			}}, run.WithDryRun(true), run.WithProject(p.ID))
 			if err != nil {
 				t.Fatalf("SubmitPipeline() error = %v", err)
 			}

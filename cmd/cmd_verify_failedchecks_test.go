@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -191,6 +192,58 @@ func TestDecidedByNeverPrintsEmptyFields(t *testing.T) {
 			t.Parallel()
 			if got := decidedBy(test.Decision); got != test.WantBy {
 				t.Errorf("decidedBy() = %q, want %q", got, test.WantBy)
+			}
+		})
+	}
+}
+
+// TestVerifyRefusesTheEditedSignatureVectors runs the two signature edits the reference verifier
+// refuses through the command a reader runs. Each changes only the signatures array, outside the
+// signed bytes, so the producer's real signature still verifies. An entry naming alg none is
+// refused as one this verifier does not implement, and an extra entry under a key the producer
+// block does not hold fails the signature and says why. The unedited receipt is the control.
+func TestVerifyRefusesTheEditedSignatureVectors(t *testing.T) {
+	dir := filepath.Join("..", "internal", "audit", "testdata")
+	tests := []struct {
+		// Name says what the case proves.
+		Name string
+		// File is the receipt under the audit testdata.
+		File string
+		// WantOut must appear on stdout, when set.
+		WantOut string
+		// WantErr must appear on stderr, when set.
+		WantErr string
+		// WantCode is the exit code.
+		WantCode int
+	}{{ // Test 0: The unedited receipt verifies.
+		Name: "unedited", File: "release-approved.loomseal.json", WantOut: "signature    OK\n",
+		WantCode: CodeOK,
+	}, { // Test 1: alg none is refused before any signature is judged.
+		Name: "alg none", File: "signature-alg-none.loomseal.json",
+		WantErr: `signature 0 alg "none", this verifier implements ed25519`, WantCode: CodeError,
+	}, { // Test 2: A signature under a foreign key fails the signature and is named.
+		Name: "foreign key", File: "signature-foreign-key.loomseal.json",
+		WantOut:  "signature    FAILED (signature 1 names a key the producer block does not hold)\n",
+		WantErr:  "did not verify: signature 1 names a key the producer block does not hold",
+		WantCode: CodeError,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			// Not parallel: each case forks a copy of this binary.
+			path, err := filepath.Abs(filepath.Join(dir, test.File))
+			if err != nil {
+				t.Fatalf("%s: resolve the fixture: %v", test.Name, err)
+			}
+			stdout, stderr, code := runCLI(t, "verify", path)
+			if code != test.WantCode {
+				t.Fatalf("%s: switchtender verify exited %d, want %d.\nstdout:\n%s\nstderr:\n%s",
+					test.Name, code, test.WantCode, stdout, stderr)
+			}
+			if !strings.Contains(stdout, test.WantOut) {
+				t.Errorf("%s: stdout is missing %q:\n%s", test.Name, test.WantOut, stdout)
+			}
+			if !strings.Contains(stderr, test.WantErr) {
+				t.Errorf("%s: stderr is missing %q:\n%s", test.Name, test.WantErr, stderr)
 			}
 		})
 	}

@@ -205,6 +205,42 @@ func TestRepoURLPartsClassification(t *testing.T) {
 	}
 }
 
+// TestIsLocalRepoURL pins which accepted repository URLs name a path on the server itself. Only a
+// global admin may set one, so a local value read as remote would hand a manage grant the server's
+// filesystem, and a remote value read as local would refuse an ordinary edit.
+func TestIsLocalRepoURL(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// In is the repository URL.
+		In string
+		// WantLocal is whether the URL names a path on the server.
+		WantLocal bool
+	}{
+		{In: "file:///srv/git/repo.git", WantLocal: true},           // Test 0: The file scheme.
+		{In: "FILE:///srv/git/repo.git", WantLocal: true},           // Test 1: The scheme in caps.
+		{In: "/srv/git/repo.git", WantLocal: true},                  // Test 2: A bare absolute path.
+		{In: "./mirrors/repo.git", WantLocal: true},                 // Test 3: A relative path.
+		{In: "mirrors/repo.git", WantLocal: true},                   // Test 4: A relative path, no dot.
+		{In: `mirrors\repo.git`, WantLocal: true},                   // Test 5: A Windows separator.
+		{In: "/srv/git/re:po.git", WantLocal: true},                 // Test 6: A colon after a slash.
+		{In: "https://github.com/org/repo.git", WantLocal: false},   // Test 7: An https remote.
+		{In: "ssh://git@github.com/org/repo.git", WantLocal: false}, // Test 8: An ssh remote.
+		{In: "git@github.com:org/repo.git", WantLocal: false},       // Test 9: The scp-like shorthand.
+		{In: "github.com:org/repo.git", WantLocal: false},           // Test 10: Shorthand, no login.
+		{In: "repo.git", WantLocal: false},                          // Test 11: Neither URL nor path.
+		{In: "", WantLocal: false},                                  // Test 12: Empty.
+		{In: "--upload-pack=/bin/sh", WantLocal: false},             // Test 13: An option.
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			if diff := cmp.Diff(test.WantLocal, IsLocalRepoURL(test.In)); diff != "" {
+				t.Errorf("IsLocalRepoURL(%q) mismatch (-want +got):\n%s", test.In, diff)
+			}
+		})
+	}
+}
+
 // TestParseLooseIPShorthands pins the shorthand address spellings the validator has to understand.
 //
 // net.ParseIP returns nil for "127.1" and for "2130706433", and both reach the loopback interface, so

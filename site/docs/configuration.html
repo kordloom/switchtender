@@ -480,7 +480,12 @@ that variable is unset.</p>
 <tr>
 <td><code>--jwt-audience</code></td>
 <td>none</td>
-<td>Expected token audience. Left empty the audience is not checked, so every token the issuer signs is accepted, including one minted for a different application at the same issuer. Set it unless the issuer serves this install alone.</td>
+<td>Expected token audience, the <code>aud</code> claim. With <code>--jwt-jwks-url</code> set and no audience, <code>serve</code> refuses to start unless <code>--jwt-allow-any-audience</code> is set.</td>
+</tr>
+<tr>
+<td><code>--jwt-allow-any-audience</code></td>
+<td><code>false</code></td>
+<td>Start JWT sign-in with no <code>--jwt-audience</code>. The audience is then not checked, so every token the issuer signs is accepted, including one minted for a different application at the same issuer. Set it only when the issuer serves this install alone.</td>
 </tr>
 <tr>
 <td><code>--jwt-username-claim</code></td>
@@ -1311,6 +1316,26 @@ of band. Without it the receipt is checked against the key it names, which prove
 but not who signed it, and the verdict says so: <code>INTACT, BUT UNIDENTIFIED</code> rather than <code>VERIFIED</code>.
 A <code>--pubkey</code> given an empty value, which is what a failed key fetch leaves behind, is refused rather
 than treated as no pin.</p>
+<p>A timestamp token an anchor carries is checked against the certificate the token itself carries, and
+anyone can make such a certificate. So <code>verify</code> prints each token's signer by its certificate's
+subject and SHA-256 fingerprint, with the certificate the token carries that issued it. Pass
+<code>--tsa-cert</code> with the fingerprint of a timestamp authority's certificate, as <code>sha256:&lt;hex&gt;</code>, bare
+hex, or the colon pairs openssl prints, once for each authority you accept. A token counts as an
+anchor when its signer certificate, or the carried certificate that directly issued it, matches
+one, and a token that matches none fails the receipt. Without <code>--tsa-cert</code> each token reads
+<code>UNPINNED</code>, is not counted on the anchors line, and does not change the verdict. An empty
+<code>--tsa-cert</code> is refused.</p>
+<p>Take the fingerprint from the authority, never from the receipt, which only repeats what its
+producer put there. <code>audit anchor</code> and the demo ask freetsa.org unless told otherwise, and <code>serve</code>
+anchors against the authority <code>--anchor-tsa-url</code> names. freetsa.org publishes its signing
+certificate and the root that issued it:</p>
+<pre><code>curl -sO https://freetsa.org/files/tsa.crt
+openssl x509 -in tsa.crt -noout -fingerprint -sha256
+</code></pre>
+<p>Pass the colon pairs after <code>Fingerprint=</code> to <code>--tsa-cert</code>. The root is at
+<code>https://freetsa.org/files/cacert.pem</code>, and each token carries it, so a pin on the root keeps
+counting tokens after the authority reissues its signing certificate. For any other authority, read
+the fingerprint of the certificate that authority publishes.</p>
 <p>An install enrolled with a witness carries the witness's countersignatures in its bundles and
 receipts. Pass <code>--witness-pubkey</code> with the key the witness publishes, in either the sha256 key id or
 the raw hex form, so only that witness's countersignatures are counted, and <code>--witness</code> with the
@@ -1559,9 +1584,12 @@ switchtender mcp --server https://switchtender.internal
 </code></pre>
 <p>The token is read from <code>SWITCHTENDER_MCP_TOKEN</code>, falling back to <code>SWITCHTENDER_TOKEN</code>. Prefer the
 environment variable to a flag, whose value is visible in the host's process list. The command
-refuses to start on an admin token. There is deliberately no approve tool, so an agent cannot release
-its own work, and no credential, account, token, grant, or policy tool, so it cannot widen its own
-reach.</p>
+starts only for an agent token, one minted with <code>switchtender token new --user &lt;account&gt; --agent</code>.
+Any other token is refused, and so is a server with no accounts, where nothing can be held, and no
+flag turns that off. The refusal covers this command, and the server cannot tell a person from a
+program holding that person's token. There is deliberately no approve tool, so an agent cannot
+release its own work, and no credential, account, token, grant, or policy tool, so it cannot widen
+its own reach.</p>
 <table>
 <thead>
 <tr>
@@ -1590,11 +1618,6 @@ reach.</p>
 <td><code>--timeout</code></td>
 <td><code>1m0s</code></td>
 <td>Bounds one API call.</td>
-</tr>
-<tr>
-<td><code>--allow-admin-token</code></td>
-<td><code>false</code></td>
-<td>Start even when the token has admin rights. An agent should hold an operator-bound token, so this is a deliberate override.</td>
 </tr>
 </tbody>
 </table>

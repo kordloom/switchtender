@@ -25,7 +25,7 @@ func TestADestroyLimitReleasesNoOtherRun(t *testing.T) {
 		MaxDestroy: policy.DisabledMaxDestroy}
 	bash := []run.SubmitOption{run.WithTool(run.ToolBash), run.WithCommand("./deploy.sh")}
 	proposed := []run.SubmitOption{run.WithTool(run.ToolTerraform), run.WithCommand("infra"),
-		run.WithProposedFrom("run_plan")}
+		run.WithProposedFrom("run_plan"), run.WithPlanFile("sealed-plan")}
 	tests := []struct {
 		// Rules are the stored policies.
 		Rules []*policy.Policy

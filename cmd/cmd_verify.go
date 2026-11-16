@@ -35,6 +35,12 @@ var verifyWitnessPubkey string
 // GET /v1/installs/{key}/attestation. Empty holds the document to no statement.
 var verifyWitness string
 
+// verifyTSACerts are the SHA-256 certificate fingerprints of the timestamp authorities a relying
+// party pins. A timestamp token counts as an anchor only when its signer certificate, or one it
+// carries that directly signed the signer's, matches one, and with any given a token that matches
+// none fails. Empty names each token's signer and counts none.
+var verifyTSACerts []string
+
 // verifyCmd checks a run receipt offline.
 var verifyCmd = &cobra.Command{
 	Use:   "verify <receipt-file>",
@@ -50,6 +56,15 @@ Pass --pubkey with the fingerprint the producer published to tie the result to a
 of band. Without it the receipt is checked against the key it names, which proves it was not altered
 but not who signed it, and the verdict reads INTACT, BUT UNIDENTIFIED instead of VERIFIED. An empty
 --pubkey is refused, since that is what a failed key fetch leaves behind.
+
+A timestamp token an anchor carries is checked against the certificate the token itself carries,
+and anyone can make such a certificate. So each token's signer is printed by its certificate's
+subject and SHA-256 fingerprint, with the certificate the token carries that issued it, for you
+to hold against an authority you trust. Pass --tsa-cert with an authority's certificate
+fingerprint, as sha256:<hex>, bare hex, or the colon pairs openssl prints, once per authority you
+accept. A token counts as an anchor when its signer certificate or that issuer matches one, and a
+token that matches none fails the receipt. Without --tsa-cert each token reads UNPINNED, is not
+counted on the anchors line, and does not change the verdict. An empty --tsa-cert is refused.
 
 A countersignature an outside witness made over an entry is verified and counted on the witness
 line. Pass --witness-pubkey with the key the witness publishes, either the sha256 key id or the raw
@@ -74,6 +89,9 @@ func init() {
 			"countersignatures and its statement count.")
 	verifyCmd.Flags().StringVar(&verifyWitness, "witness", "",
 		"Witness statement file, from GET /v1/installs/<key id>/attestation, to hold the receipt to.")
+	verifyCmd.Flags().StringArrayVar(&verifyTSACerts, "tsa-cert", nil,
+		"Timestamp authority certificate SHA-256 fingerprint to pin, repeatable. Only a token "+
+			"signed by that certificate, or one it carries that directly signed the signer's, counts.")
 	rootCmd.AddCommand(verifyCmd)
 }
 
@@ -84,6 +102,14 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	}
 	if err := refuseEmptyPin(cmd, "witness-pubkey", verifyWitnessPubkey); err != nil {
 		return err
+	}
+	for _, pin := range verifyTSACerts {
+		if err := refuseEmptyPin(cmd, "tsa-cert", pin); err != nil {
+			return err
+		}
+		if _, err := audit.AuthorityPinFingerprint(pin); err != nil {
+			return err
+		}
 	}
 	var witnessPin string
 	if strings.TrimSpace(verifyWitnessPubkey) != "" {
@@ -101,7 +127,7 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("read receipt: %w", err)
 	}
-	rep, err := audit.VerifyBundle(signed, verifyPubkey)
+	rep, err := audit.VerifyBundle(signed, verifyPubkey, audit.WithAuthorityPins(verifyTSACerts...))
 	if err != nil {
 		return err
 	}
@@ -120,7 +146,11 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintf(out, "subject      %s %s\n", rep.Subject.Type, rep.Subject.ID)
 	fmt.Fprintf(out, "signed by    %s\n", rep.KeyID)
-	fmt.Fprintf(out, "signature    %s\n", mark(rep.SignatureOK))
+	if rep.SignatureProblem != "" {
+		fmt.Fprintf(out, "signature    %s (%s)\n", mark(rep.SignatureOK), printable(rep.SignatureProblem))
+	} else {
+		fmt.Fprintf(out, "signature    %s\n", mark(rep.SignatureOK))
+	}
 	// Whether a key was pinned decides what the verdict can claim, so it gets its own line rather
 	// than being left for a reader to infer from a flag they may not have typed. The wording is the
 	// browser verifier's, so the two never drift in a reader's memory.
@@ -135,33 +165,7 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Fprintf(out, "chain        FAILED (%s)\n", chainProblem(rep))
 	}
-	if rep.AnchorCount > 0 {
-		// The count of anchors was the whole line, which said nothing about the one part of an anchor
-		// that does not come from the producer: the authority's own token. A reader has to be able to
-		// tell an anchor this tool actually read from one it merely counted.
-		detail := fmt.Sprintf("%d", rep.AnchorCount)
-		switch {
-		case rep.TimestampsVerified > 0:
-			detail += fmt.Sprintf(", %d with a timestamp token that fixes this chain",
-				rep.TimestampsVerified)
-		case len(rep.TimestampProblems) == 0:
-			detail += ", none carrying a timestamp token, so their positions rest on where they " +
-				"were published"
-		}
-		fmt.Fprintf(out, "anchors      %s (%s)\n", mark(rep.AnchorsOK), detail)
-		// What was checked is that the token commits to this chain's link. Whether the authority that
-		// issued it is worth believing is a trust decision this tool cannot make for a reader, and a
-		// count with nothing said about it invites reading it as one we did make. It goes on its own
-		// line beside the problems, rather than as a second parenthetical inside the first.
-		if rep.TimestampsVerified > 0 {
-			fmt.Fprintln(out, "  the issuing authority's signature is yours to check")
-		}
-		for _, p := range rep.TimestampProblems {
-			fmt.Fprintf(out, "  %s\n", p)
-		}
-	} else {
-		fmt.Fprintln(out, "anchors      none (nothing outside this install fixes its position)")
-	}
+	printAnchors(out, rep)
 	printWitness(out, rep, held, witnessPin, noun)
 	// A caption states what the result means, so it has to follow the result. The parenthetical
 	// used to assert the passing case beside a FAILED, which read as a verifier contradicting
@@ -196,6 +200,11 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	}
 	if rep.SpecPresent || rep.DecisionsPresent > 0 {
 		fmt.Fprintf(out, "spec         %s (%s)\n", mark(rep.SpecConsistent), specVerdict(rep))
+		// A tree receipt discloses nothing beside its leaves and prints no disclosed line, so what
+		// the mask took out of its spec is said here instead.
+		if len(rep.Disclosed) == 0 && rep.SpecMasked > 0 {
+			fmt.Fprintf(out, "  masked     %s\n", maskedSpec(rep))
+		}
 	}
 	// A release says which step a decision released and with what spec, so each verified one is
 	// named with the decisions it derives from. Whether it was held to the steps the outcome says
@@ -213,6 +222,10 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	// counts them, so a verdict never stands for more than was checked.
 	if len(rep.Disclosed) > 0 {
 		checked, unchecked, redacted := disclosedCounts(rep.Disclosed)
+		// A secret masked out of the disclosed spec is a redaction too. The spec still checks,
+		// since its digest was taken over the masked text, and a count of no redaction beside it
+		// would tell a reader they held the whole command when the mask had taken part of it.
+		redacted += rep.SpecMasked
 		fmt.Fprintf(out, "disclosed    %d checked, %d unchecked, %d redacted\n", checked, unchecked,
 			redacted)
 		if line := checkedMembers(rep.Disclosed); line != "" {
@@ -223,6 +236,9 @@ func runVerify(cmd *cobra.Command, args []string) error {
 				fmt.Fprintf(out, "  redacted   claim %d %s: %s\n", m.Claim, printable(m.Member),
 					printable(m.Detail))
 			}
+		}
+		if rep.SpecMasked > 0 {
+			fmt.Fprintf(out, "  redacted   %s\n", maskedSpec(rep))
 		}
 	}
 	// A record under the unkeyed form verifies, and a reader should still know its digest confirms
@@ -287,6 +303,95 @@ func readWitnessStatement(cmd *cobra.Command) (*witness.Statement, error) {
 		return nil, fmt.Errorf("parse witness statement: %w", err)
 	}
 	return &st, nil
+}
+
+// printAnchors writes the anchors line, then the certificate that signed each timestamp token the
+// document carries.
+//
+// A token is checked against the certificate it carries, so one signed by a certificate made on the
+// spot verifies as well as one from a real authority. Counting it as an anchor that fixes the chain
+// with no signer named would leave a reader nothing to hold it against. So each signer is named by
+// subject and fingerprint, with the carried certificate that issued it, and a token counts only
+// when one of the two matches a pinned authority. With no pin a token reads UNPINNED, is not
+// counted, and the verdict does not change. The status word is UNPINNED only when the anchors
+// otherwise hold, so it never hides a FAILED.
+func printAnchors(out io.Writer, rep *audit.BundleReport) {
+	if rep.AnchorCount == 0 {
+		fmt.Fprintln(out, "anchors      none (nothing outside this install fixes its position)")
+		return
+	}
+	unpinned := 0
+	for _, s := range rep.TimestampSigners {
+		if s.PinnedBy == "" {
+			unpinned++
+		}
+	}
+	status := "OK"
+	if !rep.AnchorsOK {
+		status = "FAILED"
+	}
+	detail := fmt.Sprintf("%d of %d counted", rep.AnchorsCounted, rep.AnchorCount)
+	switch {
+	case unpinned > 0 && rep.AuthorityPins == 0:
+		if rep.AnchorsOK {
+			status = "UNPINNED"
+		}
+		detail += fmt.Sprintf(": no timestamp authority was pinned, so nothing ties the %s below "+
+			"to one you trust", util.Plural(unpinned, "signer", "signers"))
+	case unpinned > 0:
+		detail += fmt.Sprintf(": %d %s by no timestamp authority you pinned", unpinned,
+			util.Plural(unpinned, "token is signed", "tokens are signed"))
+	case rep.TimestampsVerified == 0 && len(rep.TimestampProblems) == 0:
+		detail = fmt.Sprintf("%d, none carrying a timestamp token, so their positions rest on "+
+			"where they were published", rep.AnchorCount)
+	}
+	fmt.Fprintf(out, "anchors      %s (%s)\n", status, detail)
+	for _, s := range rep.TimestampSigners {
+		fmt.Fprintf(out, "  token at seq %d, %s\n", s.Seq, tokenState(s, rep.AuthorityPins))
+		fmt.Fprintf(out, "    signer       %s\n", valueOr(printable(s.Subject), "no subject named"))
+		fmt.Fprintf(out, "    fingerprint  %s\n", s.Fingerprint)
+		if s.IssuerFingerprint != "" {
+			fmt.Fprintf(out, "    issued by    %s\n",
+				valueOr(printable(s.IssuerSubject), "no subject named"))
+			fmt.Fprintf(out, "    fingerprint  %s\n", s.IssuerFingerprint)
+		}
+	}
+	for _, p := range rep.TimestampProblems {
+		fmt.Fprintf(out, "  %s\n", printable(p))
+	}
+	for _, p := range rep.PinProblems {
+		fmt.Fprintf(out, "  %s\n", printable(p))
+	}
+}
+
+// maskedSpec says how many secret values the mask took out of the disclosed spec, and what that
+// leaves the spec digest covering.
+func maskedSpec(rep *audit.BundleReport) string {
+	where := "the disclosed spec"
+	for _, m := range rep.Disclosed {
+		if m.Member == "spec_body" {
+			where = fmt.Sprintf("claim %d spec_body", m.Claim)
+			break
+		}
+	}
+	return fmt.Sprintf("%s: %d %s masked, so the spec digest covers the masked text, not what "+
+		"the mask hid", where, rep.SpecMasked,
+		util.Plural(rep.SpecMasked, "secret value", "secret values"))
+}
+
+// tokenState says what one timestamp token counts for: pinned by its signer or its issuer and
+// counted, signed by no authority the reader pinned, or unpinned because none was pinned.
+func tokenState(s audit.TimestampSigner, pins int) string {
+	switch {
+	case s.PinnedBy == audit.PinnedBySigner:
+		return "signer pinned, counted"
+	case s.PinnedBy == audit.PinnedByIssuer:
+		return "issuer pinned, counted"
+	case pins > 0:
+		return "matches no timestamp authority you pinned, FAILED"
+	default:
+		return "UNPINNED, not counted"
+	}
 }
 
 // printWitness writes the witness line: OK with what the counted witness countersigned, FAILED with
@@ -513,7 +618,10 @@ func matchWord(ok bool) string {
 func failedChecks(rep *audit.BundleReport) string {
 	noun := documentNoun(rep.Subject)
 	var failed []string
-	if !rep.SignatureOK {
+	switch {
+	case !rep.SignatureOK && rep.SignatureProblem != "":
+		failed = append(failed, printable(rep.SignatureProblem))
+	case !rep.SignatureOK:
 		failed = append(failed, "the signature does not cover these bytes")
 	}
 	if !rep.ChainOK {
@@ -526,7 +634,11 @@ func failedChecks(rep *audit.BundleReport) string {
 	if !rep.AnchorsOK && rep.AnchorCount > 0 {
 		if len(rep.TimestampProblems) > 0 {
 			failed = append(failed, "a timestamp token does not fix the link its anchor names")
-		} else {
+		}
+		if len(rep.PinProblems) > 0 {
+			failed = append(failed, "a timestamp token is signed by no timestamp authority you pinned")
+		}
+		if len(rep.TimestampProblems) == 0 && len(rep.PinProblems) == 0 {
 			failed = append(failed, "an anchor names a position this "+noun+" does not prove")
 		}
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -493,12 +494,16 @@ func TestCallbackGoesThroughTheGate(t *testing.T) {
 		io.Writer) (roundhouse.Result, error) {
 		return roundhouse.Result{}, nil
 	})
+	// The callback's run is held, so the template draws its playbook from a project.
+	p := dispatchtest.LocalProject(t, map[string]string{"boot.yml": dispatchtest.HeldPlaybook})
 	d := dispatch.New(store, runner, zap.NewNop(), dispatch.WithPolicies(policies),
-		dispatch.WithInventories(inventories), dispatch.WithNoJanitor())
+		dispatch.WithInventories(inventories), dispatch.WithNoJanitor(),
+		dispatch.WithProjects(p.Store, p.Syncer))
 	t.Cleanup(d.Close)
 	templates := template.NewMemStore()
 	if err := templates.Save(ctx, &template.Template{ID: "tpl_cb", Name: "boot", Playbook: "boot.yml",
-		InventoryID: "inv_1", AllowCallbacks: true, CreatedAt: time.Now()}); err != nil {
+		ProjectID: p.ID, InventoryID: "inv_1", AllowCallbacks: true,
+		CreatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	handler := New(store, d, zap.NewNop(), WithTemplates(templates), WithInventories(inventories),

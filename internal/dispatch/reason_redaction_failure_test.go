@@ -66,6 +66,8 @@ func apprRedactionEntries(t *testing.T, audits audit.Store, id string) []string 
 
 // apprApprovedWithReason holds a run created under a recorded request, approves it with
 // apprReasonText, waits for it to finish, and returns it with its decision record.
+//
+// The run comes from the project heldFrom serves, which d is built with.
 func apprApprovedWithReason(t *testing.T, d *Dispatcher, store run.Store,
 	audits audit.Store) (*run.Run, *decision.Record) {
 	t.Helper()
@@ -76,7 +78,7 @@ func apprApprovedWithReason(t *testing.T, d *Dispatcher, store run.Store,
 	}
 	ctx := run.WithAuditReceipt(context.Background(), audit.Receipt(creation))
 	held, err := d.Submit(ctx, "play.yml", "inv", run.WithRequireApproval(true),
-		run.WithActor("requester"))
+		run.WithActor("requester"), run.WithProject(dispatchtest.LocalProjectID))
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -107,8 +109,9 @@ func TestReasonRedactionThatFailsLeavesTheChainAndTheRecordAgreeing(t *testing.T
 	store := run.NewMemStore()
 	audits := audit.NewMemStore()
 	records := &apprFlakyRedactions{Store: decision.NewMemStore()}
+	projects, _ := heldFrom(t, "play.yml")
 	d := New(store, &commandRecorder{}, nil, WithNoJanitor(), WithAudits(audits),
-		WithDecisions(records))
+		WithDecisions(records), projects)
 	defer d.Close()
 	held, rec := apprApprovedWithReason(t, d, store, audits)
 	privacy := outcome.Decider{Name: "privacy-officer", Type: "session"}
@@ -165,11 +168,12 @@ func TestReasonRedactionsRacingLeaveOneRedactionOnTheChain(t *testing.T) {
 	audits := audit.NewMemStore()
 	records := decision.NewMemStore()
 	gated := apprNewGatedAudits(audits, "/reason_redacted/"+decision.CategorySecret)
+	projects, _ := heldFrom(t, "play.yml")
 	replicaA := New(store, &commandRecorder{}, nil, WithNoJanitor(), WithAudits(gated),
-		WithDecisions(records), WithOwner("replica-a"))
+		WithDecisions(records), WithOwner("replica-a"), projects)
 	defer replicaA.Close()
 	replicaB := New(store, &commandRecorder{}, nil, WithNoJanitor(), WithAudits(audits),
-		WithDecisions(records), WithOwner("replica-b"))
+		WithDecisions(records), WithOwner("replica-b"), projects)
 	defer replicaB.Close()
 	held, rec := apprApprovedWithReason(t, replicaB, store, audits)
 

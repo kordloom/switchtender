@@ -602,7 +602,7 @@ archive over that size imports from the CLI alone.</p>
 </tr>
 <tr>
 <td>Semaphore template</td>
-<td>Template, with survey variables mapped and run by the tool Semaphore ran it with. A Bash, Python, or PowerShell template runs its script from the project checkout with its arguments. A Terraform or OpenTofu template imports as a plan, since a run here applies without asking, and the workspace its inventory picked is reported. A template for a tool with no equivalent here, such as Pulumi, is refused and named. Its vault keys arrive as vault passwords it unlocks.</td>
+<td>Template, with survey variables mapped and run by the tool Semaphore ran it with. A Bash, Python, or PowerShell template runs its script from the project checkout with its arguments. A Terraform or OpenTofu template imports as a plan, since a run here applies without asking, and the workspace its inventory picked is reported. A template for a tool with no equivalent here, such as Pulumi, is refused and named. Its vault keys arrive as vault passwords it unlocks. A template whose repository did not come across is refused and named, whatever it runs, and the schedules that fire it are not imported either, since with no project its playbook, script, or folder would resolve against this server's own directory.</td>
 </tr>
 <tr>
 <td>Semaphore key</td>

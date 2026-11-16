@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -47,7 +48,7 @@ func newAdoptRunner() *adoptRunner {
 func (a *adoptRunner) Run(ctx context.Context, spec roundhouse.Spec, w io.Writer) (roundhouse.Result,
 	error) {
 	a.mu.Lock()
-	a.ran[spec.Playbook]++
+	a.ran[filepath.Base(spec.Playbook)]++
 	a.mu.Unlock()
 	return a.publishRunner.Run(ctx, spec, w)
 }
@@ -72,6 +73,10 @@ type adoptInstall struct {
 	key *binding.Key
 	// old is the binary before the upgrade, nil once it has stopped.
 	old *Dispatcher
+	// projects wires the project every held run here comes from into each binary.
+	projects Option
+	// from names that project on a submission.
+	from run.SubmitOption
 }
 
 // newAdoptInstall starts the binary before the upgrade over store, serving the default queue.
@@ -79,8 +84,9 @@ func newAdoptInstall(t *testing.T, store run.Store) *adoptInstall {
 	t.Helper()
 	in := &adoptInstall{store: store, chain: &claimChain{Store: audit.NewMemStore()},
 		runner: newAdoptRunner(), key: bndKey(t)}
+	in.projects, in.from = heldFrom(t, "site.yml", "build.yml", "deploy.yml", "notify.yml")
 	in.old = New(store, in.runner, nil, WithNoJanitor(), WithAudits(in.chain),
-		WithClaimInterval(5*time.Millisecond))
+		WithClaimInterval(5*time.Millisecond), in.projects)
 	t.Cleanup(in.stopOld)
 	return in
 }
@@ -103,7 +109,7 @@ func (in *adoptInstall) keyed(t *testing.T) *Dispatcher {
 	t.Helper()
 	d := New(in.store, in.runner, nil, WithNoJanitor(), WithAudits(in.chain),
 		WithBindingKey(in.key), WithClaimInterval(5*time.Millisecond),
-		WithQueues([]string{"", "work"}))
+		WithQueues([]string{"", "work"}), in.projects)
 	t.Cleanup(d.Close)
 	return d
 }
@@ -127,7 +133,7 @@ func (in *adoptInstall) get(t *testing.T, id string) *run.Run {
 func (in *adoptInstall) held(t *testing.T, opts ...run.SubmitOption) *run.Run {
 	t.Helper()
 	r, err := in.old.Submit(context.Background(), "site.yml", "inv",
-		append([]run.SubmitOption{run.WithRequireApproval(true)}, opts...)...)
+		append([]run.SubmitOption{run.WithRequireApproval(true), in.from}, opts...)...)
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -157,7 +163,8 @@ func (in *adoptInstall) stuck(t *testing.T, decide func() error) {
 // approval step once it is parked there, build having succeeded.
 func (in *adoptInstall) parked(t *testing.T) (*run.Run, *run.Run) {
 	t.Helper()
-	parent, err := in.old.SubmitPipeline(context.Background(), "release", "inv", adoptGated())
+	parent, err := in.old.SubmitPipeline(context.Background(), "release", "inv", adoptGated(),
+		in.from)
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
@@ -364,7 +371,7 @@ func TestAdoptSealsWhatAnOldBinaryLeft(t *testing.T) {
 		Name: "shard",
 		Leave: func(t *testing.T, in *adoptInstall) adoptCase {
 			parent, err := in.old.SubmitSplit(ctx, "site.yml", "inv", 2,
-				run.WithRequireApproval(true))
+				run.WithRequireApproval(true), in.from)
 			if err != nil {
 				t.Fatalf("SubmitSplit() error = %v", err)
 			}
@@ -459,7 +466,7 @@ func TestAdoptSealsWhatAnOldBinaryLeft(t *testing.T) {
 		Leave: func(t *testing.T, in *adoptInstall) adoptCase {
 			parent, err := in.old.SubmitPipeline(ctx, "release", "inv",
 				[]run.PipelineStep{{Name: "deploy", Playbook: "deploy.yml"}},
-				run.WithRequireApproval(true), run.WithQueue("work"))
+				run.WithRequireApproval(true), run.WithQueue("work"), in.from)
 			if err != nil {
 				t.Fatalf("SubmitPipeline() error = %v", err)
 			}
@@ -1003,7 +1010,7 @@ func TestAdoptionIsRecordedOnce(t *testing.T) {
 		Run: func(t *testing.T, in *adoptInstall) (onceResult, error) {
 			a := &adoptRecorded{in: in}
 			if _, err := in.keyed(t).Submit(ctx, "site.yml", "inv",
-				run.WithRequireApproval(true)); err != nil {
+				run.WithRequireApproval(true), in.from); err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
 			unsealed := in.held(t)

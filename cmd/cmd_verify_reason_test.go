@@ -26,6 +26,12 @@ import (
 // the disclosed text, re-signing as a producer editing its own export would.
 func writeReasonedReceipt(t *testing.T, redact bool, alter func(*audit.Bundle)) string {
 	t.Helper()
+	return writeReceiptFor(t, "deploy", redact, alter)
+}
+
+// writeReceiptFor is writeReasonedReceipt for an agent's run of command.
+func writeReceiptFor(t *testing.T, command string, redact bool, alter func(*audit.Bundle)) string {
+	t.Helper()
 	ctx := context.Background()
 	runs, audits, decisions := run.NewMemStore(), audit.NewMemStore(), decision.NewMemStore()
 	t.Setenv("SWITCHTENDER_AUDIT_KEY", "")
@@ -51,7 +57,7 @@ func writeReasonedReceipt(t *testing.T, redact bool, alter func(*audit.Bundle)) 
 		t.Fatalf("Append() error = %v", err)
 	}
 	held, err := d.Submit(run.WithAuditReceipt(ctx, fmt.Sprintf("%d:%s", creation.Seq, creation.Hash)),
-		"", "", run.WithTool(run.ToolBash), run.WithCommand("deploy"), run.WithActor("deploy-bot"),
+		"", "", run.WithTool(run.ToolBash), run.WithCommand(command), run.WithActor("deploy-bot"),
 		run.WithActorType("agent"), run.WithActorAccount("user_dev"), run.WithRequireApproval(true),
 		run.WithInitiator(&run.Initiator{InitiatedBy: "deploy-bot", BoundTo: "dev-lead",
 			ProvisionedBy: "org-admin", ProvisionedByType: "session"}))
@@ -191,6 +197,57 @@ func TestVerifyShowsTheReasonAndTheAgentBehindARun(t *testing.T) {
 			case test.WantErr != "" && (err == nil || !strings.Contains(err.Error(), test.WantErr)):
 				t.Fatalf("%s: runVerify() error = %v, want %q\n%s", test.Name, err, test.WantErr, got)
 			}
+			for _, want := range test.WantLines {
+				if !strings.Contains(got, want) {
+					t.Errorf("%s: output is missing %q:\n%s", test.Name, want, got)
+				}
+			}
+			for _, deny := range test.DenyLines {
+				if strings.Contains(got, deny) {
+					t.Errorf("%s: output says %q:\n%s", test.Name, deny, got)
+				}
+			}
+		})
+	}
+}
+
+// TestVerifyCountsTheValuesMaskedOutOfTheSpec pins the redacted count beside a masked spec. A
+// secret in an agent's command is masked before the spec is disclosed, and the spec digest is taken
+// over the masked text, so the spec checks and the receipt verifies. Counting no redaction beside
+// it would tell a reader they held the whole command when the mask had taken part of it.
+func TestVerifyCountsTheValuesMaskedOutOfTheSpec(t *testing.T) {
+	tests := []struct {
+		// Name says what the case proves.
+		Name string
+		// Command is the agent's command.
+		Command string
+		// WantLines must all appear in the output.
+		WantLines []string
+		// DenyLines must not.
+		DenyLines []string
+	}{{ // Test 0: A command with no secret masks nothing.
+		Name: "no secret", Command: "deploy",
+		WantLines: []string{", 0 unchecked, 0 redacted\n"},
+		DenyLines: []string{"masked"},
+	}, { // Test 1: A secret in the command is counted and said, and never shown.
+		Name: "secret", Command: "echo password: hunter2 > proof.txt",
+		WantLines: []string{", 0 unchecked, 1 redacted\n",
+			"spec_body: 1 secret value masked, so the spec digest covers the masked text, not " +
+				"what the mask hid\n",
+			"INTACT, BUT UNIDENTIFIED: nothing has been altered"},
+		DenyLines: []string{" 0 redacted", "hunter2"},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			path := writeReceiptFor(t, test.Command, false, nil)
+			setString(t, &verifyPubkey, "")
+			var buf bytes.Buffer
+			c := testCommand()
+			c.SetOut(&buf)
+			if err := runVerify(c, []string{path}); err != nil {
+				t.Fatalf("%s: runVerify() error = %v\n%s", test.Name, err, buf.String())
+			}
+			got := buf.String()
 			for _, want := range test.WantLines {
 				if !strings.Contains(got, want) {
 					t.Errorf("%s: output is missing %q:\n%s", test.Name, want, got)

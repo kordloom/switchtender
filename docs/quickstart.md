@@ -95,6 +95,10 @@ is submitted, accepted, and then fails with "the playbook: site.yml could not be
       -H "Authorization: Bearer $ST_TOKEN" \
       -d '{"playbook": "site.yml", "inventory": "hosts.ini"}'
 
+A run held for approval, by a rule or because an agent asked for it, must come from a project. One
+that names its playbook by a path on the server is refused, since an approval cannot bind what a
+file holds when the run is released.
+
 The response carries a run id. Fetch its status, its structured events, or its log:
 
     curl -H "Authorization: Bearer $ST_TOKEN" localhost:8080/v1/runs/<id>
@@ -255,11 +259,16 @@ carry anything the chart has no key for, such as a secret source's token or a CA
 
 ## Try the demo
 
-To look around without setting anything up, run the seeded demo. It fills a fresh database with
-sample projects, templates, inventories, and real runs, including a flaky host, a split, and a
-pipeline, then serves it read-only so it is safe to expose:
+To look around on your own machine, run the seeded demo. It runs real playbooks, so it needs
+Ansible on the host, or one `switchtender ansible install` first, and it takes about two and a half
+minutes to seed before it answers. It fills a fresh database with sample projects, templates,
+inventories, and real runs, including a flaky host, a split, and a pipeline, then serves it
+read-only so it is safe to expose:
 
     switchtender demo --addr :8080
+
+By default the demo asks freetsa.org, a public timestamp authority, to anchor the seeded chain, and
+sends it hashes only. `--anchor-tsa ""` skips that.
 
 Or with Docker, from a checkout: `docker compose --profile demo up --build`, which serves on port
 8081 so it can run beside the stack. `SWITCHTENDER_DEMO_PORT` moves it.

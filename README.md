@@ -162,8 +162,8 @@ guessed from traffic:
   names that rule instead.
 
 The MCP server (`switchtender mcp`) is how an agent talks to the gate: it can list templates,
-propose runs, and read results, and it deliberately has no approve tool, no credential access, and
-by default refuses to start on an admin token. The full walkthrough is in
+propose runs, and read results, it deliberately has no approve tool and no credential access, and
+it starts only for an agent token. The full walkthrough is in
 [Run an AI agent through the gate](docs/agents.md).
 
 ## Proven against a real cluster on every push
@@ -324,6 +324,10 @@ relative to the server's working directory unless the run names a project:
       -H "Authorization: Bearer $ST_TOKEN" \
       -d '{"playbook": "site.yml", "inventory": "hosts.ini"}'
 
+A run held for approval, by a rule or because an agent asked for it, must come from a project. One
+that names its playbook by a path on the server is refused, since an approval cannot bind what a
+file holds when the run is released.
+
 Add `"shards": 4` to split it across four slices of the inventory.
 
 Open http://localhost:8080 for the web UI and sign in with the same token.
@@ -357,8 +361,10 @@ Coming from [AWX](https://switchtender.com/awx-alternative),
 [Rundeck](https://switchtender.com/rundeck-alternative), or
 [Jenkins](https://switchtender.com/jenkins-alternative).
 
-To see it without any setup, run the seeded read-only demo. It fills a fresh database with sample
-projects, templates, and real runs, then serves it with every change blocked:
+To see it on your own machine, run the seeded read-only demo. It runs real playbooks, so it needs
+Ansible on the host, or one `./switchtender ansible install` first, and it takes about two and a
+half minutes to seed before it answers. It fills a fresh database with sample projects, templates,
+and real runs, then serves it with every change blocked:
 
     ./switchtender demo --addr :8080         # or: docker compose --profile demo up --build, on :8081
 

@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +15,7 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/mcp"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -59,11 +58,8 @@ func TestAnAgentDryRunThatForcesRealTasksIsHeld(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
-			dir := t.TempDir()
-			playbook := filepath.Join(dir, "site.yml")
-			if err := os.WriteFile(playbook, []byte(test.Playbook), 0o600); err != nil {
-				t.Fatalf("write playbook: %v", err)
-			}
+			// The agent's dry run is held, so its playbook comes from a project.
+			p := dispatchtest.LocalProject(t, map[string]string{"site.yml": test.Playbook})
 
 			rules := policy.NewMemStore()
 			if err := rules.Save(ctx, &policy.Policy{
@@ -79,7 +75,7 @@ func TestAnAgentDryRunThatForcesRealTasksIsHeld(t *testing.T) {
 					return roundhouse.Result{ExitCode: 0}, nil
 				})
 			d := dispatch.New(store, runner, zap.NewNop(), dispatch.WithPolicies(rules),
-				dispatch.WithNoJanitor())
+				dispatch.WithNoJanitor(), dispatch.WithProjects(p.Store, p.Syncer))
 			t.Cleanup(d.Close)
 
 			tokens, users := auth.NewMemStore(), user.NewMemStore()
@@ -114,7 +110,7 @@ func TestAnAgentDryRunThatForcesRealTasksIsHeld(t *testing.T) {
 				}
 			}
 			args, err := json.Marshal(map[string]any{
-				"tool": "ansible", "playbook": playbook, "dry_run": true,
+				"tool": "ansible", "playbook": "site.yml", "project_id": p.ID, "dry_run": true,
 				"reason": "check the web tier before the change window",
 			})
 			if err != nil {

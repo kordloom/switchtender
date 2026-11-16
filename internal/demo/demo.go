@@ -131,6 +131,10 @@ type Deps struct {
 	// InstallID names the install whose chain the anchor fixes. Required when AnchorTSA is set,
 	// and it is what makes the tree anchor's root recomputable at all.
 	InstallID string
+	// Repos is the folder holding the demo's git repositories, one per seeded project, each a working
+	// copy with its history in .git. Empty means the folder materialize writes, which is where Seed
+	// puts them. The seeded projects name these folders as their remotes.
+	Repos string
 	// Clock parks the timestamps of seeded runs in the recent past and steps forward between them, so
 	// the run history spreads across the last several hours the way a live fleet's would rather than
 	// piling into the seed instant. Nil seeds every run at the real wall clock. It must be the same
@@ -173,6 +177,25 @@ const (
 	// resolvable, including on an install with no timezone database, so naming it can never be the
 	// reason a seeded schedule is refused.
 	seedScheduleZone = "UTC"
+)
+
+// The seeded projects and what the demo's held runs name inside them. A run an approval stands in
+// front of must come from a project, since a playbook or a Terraform root named by a path binds
+// nothing, so the governance showcase, the waiting release, and the agent's restart and apply are
+// each drawn from one of these by name.
+const (
+	// webProject is the project holding the web tier's playbooks and the estate's inventory.
+	webProject = "web-platform"
+	// dbProject is the project holding the database playbooks and the Terraform roots.
+	dbProject = "database-ops"
+	// projectPlaybook is the web tier's deploy playbook inside webProject.
+	projectPlaybook = "site.yml"
+	// projectRestart is the playbook the agent's restart runs inside webProject.
+	projectRestart = "restart-app.yml"
+	// projectInventory is the estate's inventory inside webProject, the same hosts as assets/inv.ini.
+	projectInventory = "inv.ini"
+	// projectNetwork is the network root the agent's apply plans inside dbProject.
+	projectNetwork = "infra/network"
 )
 
 // SeedClock is the demo's stand-in for the wall clock. Its cursor opens in the past and advances by
@@ -283,6 +306,9 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	// dropped, so a plan there destroys them and the plan gate has a real destroy to hold.
 	legacyDir := filepath.Join(dir, "repos", "database-ops", "infra", "legacy-network")
 
+	// The projects publish the working copies materialize just committed, so a held run drawn from
+	// one syncs and pins a commit this server holds.
+	d.Repos = filepath.Join(dir, "repos")
 	ids := seedConfig(ctx, d, log)
 
 	// Two weeks of the nightly audit, fired the way its schedule fires it, before the run window.
@@ -405,7 +431,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 		return err
 	}
 
-	seedGovernance(ctx, d, playbook, inv, ids, log)
+	seedGovernance(ctx, d, projectPlaybook, projectInventory, ids, log)
 	// Like every terraform run here it needs terraform on the host, and seedMultiTool has already
 	// said once, naming terraform, what a visitor will not see when it is missing.
 	if have("terraform") {
@@ -414,8 +440,8 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 
 	// A person's release waiting at its approval step, and then the agent, last, so what the agent
 	// asked for and what the gate did about it sit at the top of the runs list.
-	seedWaitingWorkflow(ctx, d, playbook, inv, log)
-	seedAgent(ctx, d, playbook, inv, tfDir, log)
+	seedWaitingWorkflow(ctx, d, ids.id(ids.Projects, webProject, ""), log)
+	seedAgent(ctx, d, ids, log)
 
 	normalizeClaimStamps(ctx, d, log)
 
@@ -486,7 +512,8 @@ func seedAnchors(ctx context.Context, d Deps, log *zap.Logger) {
 
 // seedGovernance seeds the run that shows the policy gate carried all the way through: held by a
 // rule, decided on by a second person, and only then executed. The change the gate is still holding
-// is seedHeldDestroy's.
+// is seedHeldDestroy's. It is held, so it runs playbook and inv from the web-platform project, as
+// the Deploy web template it is attributed to does, pinned to the commit the project held.
 //
 // Every other seeded run goes straight from submit to execution, so the demo showed the engine and it
 // showed the evidence but never the gate between them. A visitor reading that this is the boundary
@@ -501,7 +528,8 @@ func seedGovernance(ctx context.Context, d Deps, playbook, inv string, ids seede
 	// decision and the digest of the exact spec that decision released.
 	opts := seedOpts(ctx, d, "template", ids.id(ids.Templates, "Deploy web", "tpl_deploy_web"), "deploy-bot",
 		map[string]string{"env": "prod", "ticket": "OPS-512"},
-		run.WithRequireApproval(true), run.WithHeldByPolicy("any production run"))
+		run.WithRequireApproval(true), run.WithHeldByPolicy("any production run"),
+		run.WithProject(ids.id(ids.Projects, webProject, "")))
 	r, err := d.Submitter.Submit(ctx, playbook, inv, opts...)
 	if err != nil {
 		log.Warn("demo: seed approved run: " + err.Error())
@@ -915,9 +943,9 @@ func writeFleetState(dir string) error {
 }
 
 // initDemoRepos turns each materialized repos/ subtree into a real git repository with one commit
-// on main. The seeded projects publish a remote rather than this path, so nothing on the demo
-// clones from here. What it leaves behind is a checked-out working copy an operator can point a
-// writable install at, holding the Terraform root the seeded runs plan from.
+// on main. The seeded projects name these working copies as their remotes, and every run the demo
+// holds is drawn from one of them and pinned to that commit, since a held run must come from a
+// project. They sync in process, so the demo needs no git binary.
 func initDemoRepos(dir string) error {
 	entries, err := os.ReadDir(filepath.Join(dir, "repos"))
 	if err != nil {
@@ -964,6 +992,8 @@ type seededIDs struct {
 	Templates map[string]string
 	// Schedules maps a schedule's name to the id it was stored under.
 	Schedules map[string]string
+	// Projects maps a project's name to the id it was stored under.
+	Projects map[string]string
 }
 
 // id returns the stored identifier for name, or the fallback when nothing by that name was seeded,
@@ -1014,7 +1044,8 @@ func linkScheduleLastRuns(ctx context.Context, d Deps, log *zap.Logger) {
 // and Go presets even on a host that lacks a given tool's binary. It is best effort: a store error is
 // logged and skipped so the runs still seed.
 func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
-	ids := seededIDs{Templates: map[string]string{}, Schedules: map[string]string{}}
+	ids := seededIDs{Templates: map[string]string{}, Schedules: map[string]string{},
+		Projects: map[string]string{}}
 	now := time.Now()
 	ago := func(h int) time.Time { return now.Add(-time.Duration(h) * time.Hour) }
 	// made dates a configuration object before the nightly history and the run window, so nothing
@@ -1022,26 +1053,24 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
 	// weeks of audits, and a template does not have a history older than itself.
 	made := func(h int) time.Time { return ago(h + seedHistoryBackshiftHours) }
 
-	// The remotes name the demo fleet's own git host, on the reserved example.com domain the rest
-	// of this project's sample data uses, so the projects page reads as somebody's estate.
-	//
-	// It used to publish the materialized asset path, which is where the working copies still are.
-	// That put "file:///tmp/switchtender-demo-assets/repos/web-platform" in the one column a
-	// visitor reads to learn where the demo's playbooks come from, and a scratch path under /tmp is
-	// what a half-finished install looks like. Nothing seeded clones a project, and the demo serves
-	// read-only, so the path bought nothing at the point where it cost the most.
+	// The remotes are the working copies materialize commits on this server, and the projects page
+	// shows them as they are. They used to name a git host on example.com that nothing served, which
+	// was harmless while nothing seeded cloned a project. Every run the demo holds now comes from one
+	// of these and is pinned to the commit its sync read, so a remote that never served that commit
+	// would put a source in the evidence that the code never came from. A git folder on the server is
+	// a project like any other, which is how a migrating team's playbooks on disk become one.
 	projects := []*project.Project{
-		{ID: project.NewID(), Name: "web-platform",
-			RepoURL: "https://git.example.com/platform/web-platform.git",
-			Branch:  "main", CreatedAt: made(72)},
-		{ID: project.NewID(), Name: "database-ops",
-			RepoURL: "https://git.example.com/platform/database-ops.git",
-			Branch:  "main", CreatedAt: made(48)},
+		{ID: project.NewID(), Name: webProject, RepoURL: demoRepoURL(d, webProject),
+			Branch: "main", CreatedAt: made(72)},
+		{ID: project.NewID(), Name: dbProject, RepoURL: demoRepoURL(d, dbProject),
+			Branch: "main", CreatedAt: made(48)},
 	}
 	for _, p := range projects {
 		if err := d.Projects.Save(ctx, p); err != nil {
 			log.Warn("demo: seed project: " + err.Error())
+			continue
 		}
+		ids.Projects[p.Name] = p.ID
 	}
 
 	// One static inventory, and it is the estate every seeded run, fact, drift row, and fleet entry
@@ -1283,6 +1312,16 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
 		}
 	}
 	return ids
+}
+
+// demoRepoURL returns the remote of the seeded project name: a file URL naming its working copy in
+// d.Repos, or in the folder materialize writes when d names none.
+func demoRepoURL(d Deps, name string) string {
+	repos := d.Repos
+	if repos == "" {
+		repos = filepath.Join(AssetsDir(), "repos")
+	}
+	return "file://" + filepath.ToSlash(filepath.Join(repos, name))
 }
 
 // scriptLogRotate is the Bash job for the standalone bash run and the Rotate logs template. It runs

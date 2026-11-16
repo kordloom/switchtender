@@ -268,26 +268,45 @@ func TestSemaphoreKeyKindsAndTheirWarnings(t *testing.T) {
 	}
 }
 
-// TestSemaphoreUnresolvedReferencesAreReported pins that a template naming a repository or inventory
-// this export does not hold still imports, with the missing reference named. A template silently
-// wired to nothing is one that fails at launch with no clue why.
+// TestSemaphoreUnresolvedReferencesAreReported pins what a template naming a repository or an
+// inventory this export does not hold becomes. A missing inventory is named and the template still
+// imports, since a stored inventory can be attached later. A missing repository refuses the
+// template, whatever it runs: its playbook, script, or folder names a file in that repository, and
+// with no project it would resolve against the server's own directory on every run. The schedule
+// that fires a refused template is not imported either and says why, and one naming a template the
+// export never held is named as unknown.
 func TestSemaphoreUnresolvedReferencesAreReported(t *testing.T) {
 	t.Parallel()
 	const doc = `{"meta": {"name": "ops"},
-      "templates": [{"name": "site", "playbook": "site.yml", "repository": "gone",
-        "inventory": "also gone"}],
-      "schedules": [{"name": "nightly", "cron_format": "0 2 * * *", "template": "missing"}]
+      "repositories": [{"name": "infra", "git_url": "https://git.example/i.git"}],
+      "templates": [
+        {"name": "site", "playbook": "site.yml", "repository": "gone"},
+        {"name": "rotate", "app": "bash", "playbook": "rotate.sh", "repository": "gone"},
+        {"name": "web", "playbook": "web.yml", "repository": "infra", "inventory": "also gone"}],
+      "schedules": [
+        {"name": "nightly", "cron_format": "0 2 * * *", "template": "site"},
+        {"name": "orphan", "cron_format": "0 3 * * *", "template": "missing"}]
     }`
 	plan, err := FromSemaphore([]byte(doc), importNow)
 	if err != nil {
 		t.Fatalf("FromSemaphore() error = %v", err)
 	}
-	tpl := plan.Templates[0]
-	if tpl.ProjectID != "" || tpl.InventoryID != "" {
-		t.Errorf("template wired to %q/%q, want neither resolved", tpl.ProjectID, tpl.InventoryID)
+	if len(plan.Templates) != 1 || plan.Templates[0].Name != "web" {
+		t.Fatalf("templates = %v, want only web: a template whose repository did not come "+
+			"across must not be created", templateNames(plan))
 	}
-	for _, want := range []string{`unknown repository "gone"`, `unknown inventory "also gone"`,
-		`unknown template "missing"`} {
+	if tpl := plan.Templates[0]; tpl.ProjectID == "" || tpl.InventoryID != "" {
+		t.Errorf("web wired to %q/%q, want its project and no inventory", tpl.ProjectID,
+			tpl.InventoryID)
+	}
+	for _, want := range []string{
+		`template "site" was not imported: it runs from repository "gone", which did not come across`,
+		`template "rotate" was not imported: it runs from repository "gone"`,
+		`unknown inventory "also gone"`,
+		`schedule "nightly" in project "ops" fires template "site", which did not import, so it ` +
+			`was not imported either`,
+		`unknown template "missing"`,
+	} {
 		if _, ok := warningContaining(t, plan.Warnings, want); !ok {
 			t.Errorf("missing %q.\nwarnings: %v", want, plan.Warnings)
 		}
@@ -295,6 +314,9 @@ func TestSemaphoreUnresolvedReferencesAreReported(t *testing.T) {
 	if len(plan.Schedules) != 0 {
 		t.Errorf("schedules = %d, want 0: a schedule with no template must not be created",
 			len(plan.Schedules))
+	}
+	if plan.refused != 3 {
+		t.Errorf("refused = %d, want the two templates and the schedule that fires one", plan.refused)
 	}
 }
 

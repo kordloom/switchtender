@@ -189,6 +189,9 @@ than started twice. A schedule disabled since the claim does not fire, and its l
 A deleted schedule takes its mark with it. While an occurrence is marked, the schedule's next
 occurrence is not claimed, so it fires late rather than leaving the earlier one unaccounted for.
 
+A schedule whose run a rule holds must fire a template from a project. A held fire by path starts
+no run, and the schedule's last error names the rule and says to put the playbook in a project.
+
 A tick that runs late on the night the clocks go back, after a restart, a database failover, or with
 a `--schedule-interval` longer than a minute, still fires a time that happens twice only once.
 

@@ -1,12 +1,17 @@
 package audit_test
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kordloom/loomseal/seal"
 
 	"github.com/kordloom/switchtender/internal/audit"
 )
@@ -444,5 +449,59 @@ func TestInstallBindingIsInTheLinkPreimage(t *testing.T) {
 	alsoUnbound := *unbound
 	if got := audit.EntryHash(&alsoUnbound); got != unbound.Hash {
 		t.Error("an entry naming no install hashed differently from itself")
+	}
+}
+
+// TestVerifyRefusesTheEditedSignatures holds the verifier to the two signature edits the reference
+// verifier refuses. Both edit only the signatures array, which sits outside the signed bytes, so
+// the producer's own signature still verifies over the rest. One names an algorithm this verifier
+// does not implement, which is refused as unsupported before any signature is judged. The other
+// adds an entry under a key the producer block does not hold, a rider nothing vouches for, which
+// fails the signature. Skipping either would read VERIFIED here on bytes the reference refuses. The
+// unedited fixture is the control.
+func TestVerifyRefusesTheEditedSignatures(t *testing.T) {
+	t.Parallel()
+	keyID := seal.KeyID(releaseKey().Public().(ed25519.PublicKey))
+	tests := []struct {
+		WantProblem string
+		Name        string
+		Fixture     string
+		WantErr     string
+		WantOK      bool
+	}{{ // Test 0: The unedited receipt verifies.
+		Name: "unedited", Fixture: releaseApproved, WantOK: true,
+	}, { // Test 1: The producer's entry names alg none.
+		Name: "alg none", Fixture: "signature-alg-none.loomseal.json",
+		WantErr: `signature 0 alg "none", this verifier implements ed25519`,
+	}, { // Test 2: A second entry under a key the producer block does not hold.
+		Name: "foreign key", Fixture: "signature-foreign-key.loomseal.json",
+		WantProblem: "signature 1 names a key the producer block does not hold",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			signed, err := os.ReadFile(filepath.Join("testdata", test.Fixture))
+			if err != nil {
+				t.Fatalf("%s: read fixture: %v", test.Name, err)
+			}
+			rep, err := audit.VerifyBundle(signed, keyID)
+			if test.WantErr != "" {
+				if !errors.Is(err, audit.ErrVerify) || !strings.Contains(err.Error(), test.WantErr) {
+					t.Fatalf("%s: VerifyBundle() error = %v, want %q", test.Name, err, test.WantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("%s: VerifyBundle() error = %v", test.Name, err)
+			}
+			if rep.OK() != test.WantOK || rep.SignatureOK != test.WantOK {
+				t.Errorf("%s: OK = %t, SignatureOK = %t, want %t", test.Name, rep.OK(),
+					rep.SignatureOK, test.WantOK)
+			}
+			if rep.SignatureProblem != test.WantProblem {
+				t.Errorf("%s: SignatureProblem = %q, want %q", test.Name, rep.SignatureProblem,
+					test.WantProblem)
+			}
+		})
 	}
 }

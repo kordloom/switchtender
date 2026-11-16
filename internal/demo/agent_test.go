@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -11,12 +12,14 @@ import (
 	"testing"
 	"time"
 
+	git "github.com/go-git/go-git/v5"
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -36,10 +39,48 @@ type agentSeed struct {
 	stores *seedStores
 	// tokens holds the agent's token.
 	tokens auth.Store
+	// ids are what the configuration seed stored, by name.
+	ids seededIDs
+	// heads maps each seeded project's name to the commit its repository holds.
+	heads map[string]string
 }
 
-// seedTheAgent seeds the configuration, the person's waiting release, and the agent's requests,
-// and returns what they wrote.
+// demoRepos writes the embedded demo repositories into a folder of the test's own and commits each
+// the way materialize does, and returns the folder holding them. materialize writes one fixed path
+// per process, which parallel tests would share.
+func demoRepos(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	tree, err := fs.Sub(assets, "assets/repos")
+	if err != nil {
+		t.Fatalf("fs.Sub() error = %v", err)
+	}
+	if err := os.CopyFS(filepath.Join(dir, "repos"), tree); err != nil {
+		t.Fatalf("CopyFS() error = %v", err)
+	}
+	if err := initDemoRepos(dir); err != nil {
+		t.Fatalf("initDemoRepos() error = %v", err)
+	}
+	return filepath.Join(dir, "repos")
+}
+
+// repoHead returns the commit the repository in dir holds.
+func repoHead(t *testing.T, dir string) string {
+	t.Helper()
+	repo, err := git.PlainOpen(dir)
+	if err != nil {
+		t.Fatalf("PlainOpen(%s) error = %v", dir, err)
+	}
+	head, err := repo.Head()
+	if err != nil {
+		t.Fatalf("Head() error = %v", err)
+	}
+	return head.Hash().String()
+}
+
+// seedTheAgent seeds the configuration over the demo's real repositories, the governance run, the
+// person's waiting release, and the agent's requests, and returns what they wrote. The dispatcher
+// syncs the seeded projects the way the demo's does, so every held run comes from one.
 func seedTheAgent(t *testing.T) *agentSeed {
 	t.Helper()
 	ctx := context.Background()
@@ -50,23 +91,26 @@ func seedTheAgent(t *testing.T) *agentSeed {
 		io.Writer) (roundhouse.Result, error) {
 		return roundhouse.Result{ExitCode: 0}, nil
 	})
+	syncer, err := project.NewSyncer(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewSyncer() error = %v", err)
+	}
 	disp := dispatch.New(stores.Runs, runner, zap.NewNop(), dispatch.WithPolicies(stores.Policies),
-		dispatch.WithAudits(stores.Audit), dispatch.WithNoJanitor(), dispatch.WithClock(clock.Now))
+		dispatch.WithAudits(stores.Audit), dispatch.WithNoJanitor(), dispatch.WithClock(clock.Now),
+		dispatch.WithProjects(stores.Projects, syncer))
 	t.Cleanup(disp.Close)
 	deps := stores.deps()
 	deps.Tokens, deps.Submitter, deps.Approver, deps.Clock = tokens, disp, disp, clock
-	seedConfig(ctx, deps, zap.NewNop())
-	dir := t.TempDir()
-	for name, body := range map[string]string{"site.yml": "- hosts: all\n  tasks: []\n",
-		"restart-app.yml": "- hosts: web\n  tasks: []\n", "inv.ini": "[web]\nweb01\n"} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
-			t.Fatalf("write %s: %v", name, err)
-		}
+	deps.Repos = demoRepos(t)
+	ids := seedConfig(ctx, deps, zap.NewNop())
+	seedGovernance(ctx, deps, projectPlaybook, projectInventory, ids, zap.NewNop())
+	seedWaitingWorkflow(ctx, deps, ids.id(ids.Projects, webProject, ""), zap.NewNop())
+	seedAgent(ctx, deps, ids, zap.NewNop())
+	heads := map[string]string{}
+	for _, name := range []string{webProject, dbProject} {
+		heads[name] = repoHead(t, filepath.Join(deps.Repos, name))
 	}
-	playbook, inv := filepath.Join(dir, "site.yml"), filepath.Join(dir, "inv.ini")
-	seedWaitingWorkflow(ctx, deps, playbook, inv, zap.NewNop())
-	seedAgent(ctx, deps, playbook, inv, dir, zap.NewNop())
-	return &agentSeed{stores: stores, tokens: tokens}
+	return &agentSeed{stores: stores, tokens: tokens, ids: ids, heads: heads}
 }
 
 // agentRuns returns the top-level runs the agent asked for, by tool.
@@ -139,6 +183,8 @@ func TestSeedAgentShowsTheGate(t *testing.T) {
 		WantNote: `requested by an agent bound to account "ops-lead", exempt from the default ` +
 			`hold by policy "remediation-agent smoke tests"`,
 	}}
+	// The held restart and apply each come from the project that holds them, pinned to its commit.
+	wantFrom := map[string]string{run.ToolAnsible: webProject, run.ToolTerraform: dbProject}
 	for testNum, test := range tests {
 		r := runs[test.Tool]
 		if r == nil {
@@ -155,6 +201,11 @@ func TestSeedAgentShowsTheGate(t *testing.T) {
 		if test.WantReason != "" && !strings.Contains(r.HoldNote, test.WantReason) {
 			t.Errorf("test %d: hold note = %q, want it to say %q", testNum, r.HoldNote,
 				test.WantReason)
+		}
+		if name := wantFrom[test.Tool]; name != "" &&
+			(r.ProjectID != s.ids.Projects[name] || r.PinnedCommit != s.heads[name]) {
+			t.Errorf("test %d: %s run is from project %q pinned to %q, want %s pinned to %q",
+				testNum, test.Tool, r.ProjectID, r.PinnedCommit, name, s.heads[name])
 		}
 		// The identity a real agent token gives every run it asks for.
 		if r.ActorType != policy.ActorKindAgent || r.Account != agentAccount ||
@@ -225,6 +276,13 @@ func TestSeedWaitingWorkflowPausesAtItsStep(t *testing.T) {
 		t.Errorf("the person's release carries an agent's identity: %s %+v", release.ActorType,
 			release.Initiator)
 	}
+	// An approval stands in front of its deploy, so it comes from the project, pinned, and it is
+	// not held as a whole: the build runs first.
+	if release.ProjectID != s.ids.Projects[webProject] ||
+		release.PinnedCommit != s.heads[webProject] {
+		t.Errorf("the release is from project %q pinned to %q, want %s pinned to %q",
+			release.ProjectID, release.PinnedCommit, webProject, s.heads[webProject])
+	}
 	pending, err := run.PendingApprovalSteps(ctx, s.stores.Runs, release.ID)
 	if err != nil || len(pending) != 1 || pending[0].StepName != "approve-release" {
 		t.Fatalf("pending steps = %v (%v), want the release waiting at approve-release", pending,
@@ -240,6 +298,59 @@ func TestSeedWaitingWorkflowPausesAtItsStep(t *testing.T) {
 	}
 	if ran["build"] != run.StatusSucceeded || ran["deploy"] != "" {
 		t.Errorf("steps = %v, want the build succeeded and the deploy not started", ran)
+	}
+}
+
+// TestSeedGovernanceRunsItsHeldRunFromTheProject drives the governance showcase through the real
+// dispatcher. The run a rule holds comes from the web-platform project, as the Deploy web template
+// it is attributed to does, is pinned to the commit the project held, and runs once a second person
+// approves it.
+func TestSeedGovernanceRunsItsHeldRunFromTheProject(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := seedTheAgent(t)
+	runs, err := s.stores.Runs.List(ctx)
+	if err != nil {
+		t.Fatalf("Runs.List() error = %v", err)
+	}
+	var governed *run.Run
+	for _, r := range runs {
+		if r.Labels["ticket"] == "OPS-512" {
+			governed = r
+		}
+	}
+	if governed == nil {
+		t.Fatal("no governance run was seeded, so the demo shows no decision")
+	}
+	if governed.ProjectID != s.ids.Projects[webProject] ||
+		governed.PinnedCommit != s.heads[webProject] || governed.Playbook != projectPlaybook {
+		t.Errorf("the governance run is %s from project %q pinned to %q, want %s from %s pinned "+
+			"to %q", governed.Playbook, governed.ProjectID, governed.PinnedCommit, projectPlaybook,
+			webProject, s.heads[webProject])
+	}
+	// The seed waits for it to end before it moves on.
+	if governed.Status != run.StatusSucceeded {
+		t.Errorf("the approved governance run ended %s (%s), want succeeded", governed.Status,
+			governed.Error)
+	}
+}
+
+// TestTheWebProjectCarriesTheEstatesInventory pins the copy of the estate's inventory the
+// web-platform project commits to the one every other seeded run and the stored inventory read, so
+// a held run from the project targets the hosts the rest of the demo shows.
+func TestTheWebProjectCarriesTheEstatesInventory(t *testing.T) {
+	t.Parallel()
+	estate, err := assets.ReadFile("assets/inv.ini")
+	if err != nil {
+		t.Fatalf("read assets/inv.ini: %v", err)
+	}
+	committed, err := assets.ReadFile("assets/repos/" + webProject + "/" + projectInventory)
+	if err != nil {
+		t.Fatalf("read the project's inventory: %v", err)
+	}
+	if string(committed) != string(estate) {
+		t.Errorf("the project's inventory differs from assets/inv.ini:\n%s\nwant:\n%s", committed,
+			estate)
 	}
 }
 

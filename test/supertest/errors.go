@@ -27,6 +27,10 @@ var (
 	// ErrNothingRead is returned when a property was asked of nothing: no view answered, no row
 	// came back, no receipt was written. The claim would otherwise hold over an empty set.
 	ErrNothingRead = errors.New("nothing was read, so the property was never asked")
+	// ErrSameCapture is returned when two screenshots hold the same bytes. Each capture is of a
+	// different page, so two that match are one picture under two names, which is what a
+	// signed-out browser leaves behind: the sign-in form, once for every page it was sent to.
+	ErrSameCapture = errors.New("two captures are the same picture")
 )
 
 // The failures below refuse a run before it starts, because the build it would test cannot pass the

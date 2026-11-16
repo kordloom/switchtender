@@ -383,10 +383,13 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 		return nil, err
 	}
 	recordHold(parent, holdRequested)
-	// Pinned while it is held, like every other submit path. Each step copies the parent's pin, so
-	// without it an approved pipeline ran whatever the branch held when its steps started, which is
-	// code the approver never read.
-	d.pinHeldRunCommit(parent)
+	// Bound while it is held, like every other submit path, and so is a workflow with an approval
+	// step, which nothing holds at its start. Each step copies the parent's pin, so without it an
+	// approved pipeline ran whatever the branch held when its steps started, which is code the
+	// approver never read, and a workflow naming a playbook by path is refused here.
+	if err := d.bindHeldRun(parent); err != nil {
+		return nil, err
+	}
 	created, dup, err := d.idempotentSave(ctx, parent)
 	if err != nil {
 		return nil, err

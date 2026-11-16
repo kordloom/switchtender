@@ -3,7 +3,6 @@ package dispatch
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -80,25 +79,26 @@ func TestAPlanThatRunsAProgramIsHeld(t *testing.T) {
 	}, { // Test 6: A working directory that is not there is unread, never change free.
 		Tool: run.ToolTerraform, Files: map[string]string{"main.tf": dispatchtest.CleanConfig}, Dir: "absent",
 		WantHeld: true, WantClass: run.DryRunIncomplete,
-		WantEntry:  "(not on this server)",
+		WantEntry:  "(not in the project)",
 		WantFixTxt: "drop exclude_dry_run",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
-			dir := t.TempDir()
-			dispatchtest.WriteFiles(t, dir, test.Files)
+			// A plan the gate holds comes from a project, so the configuration is committed to one.
+			p := dispatchtest.LocalProject(t, test.Files)
 			store := run.NewMemStore()
 			d := New(store, dispatchtest.OKRunner(), zap.NewNop(),
-				WithPolicies(dispatchtest.RulesHolding(t, excludePlans(test.Tool))), WithNoJanitor())
+				WithPolicies(dispatchtest.RulesHolding(t, excludePlans(test.Tool))), WithNoJanitor(),
+				WithProjects(p.Store, p.Syncer))
 			t.Cleanup(d.Close)
-			workdir := dir
+			workdir := "."
 			if test.Dir != "" {
-				workdir = filepath.Join(dir, test.Dir)
+				workdir = test.Dir
 			}
 			got, err := d.Submit(ctx, "", "", run.WithTool(test.Tool), run.WithCommand(workdir),
-				run.WithDryRun(true))
+				run.WithDryRun(true), run.WithProject(p.ID))
 			if err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
@@ -158,15 +158,17 @@ func TestAPlanThatRunsAProgramIsHeld(t *testing.T) {
 func TestARuleHoldingEveryPlanNamesNoFix(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	dir := t.TempDir()
-	dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": dispatchtest.ExternalConfig})
+	p := dispatchtest.LocalProject(t, map[string]string{"main.tf": dispatchtest.ExternalConfig})
+	// The rule reads no configuration, so nothing fetches the checkout before the gate reads it:
+	// it stands as the project's last sync left it.
+	p.Fetch(t)
 	every := excludePlans(run.ToolTerraform)
 	every.ExcludeDryRun = false
 	d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(), WithPolicies(dispatchtest.RulesHolding(t, every)),
-		WithNoJanitor())
+		WithNoJanitor(), WithProjects(p.Store, p.Syncer))
 	t.Cleanup(d.Close)
-	got, err := d.Submit(ctx, "", "", run.WithTool(run.ToolTerraform), run.WithCommand(dir),
-		run.WithDryRun(true))
+	got, err := d.Submit(ctx, "", "", run.WithTool(run.ToolTerraform), run.WithCommand("."),
+		run.WithDryRun(true), run.WithProject(p.ID))
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -235,14 +237,14 @@ func TestAProjectPlanIsReadAtTheCommitItRuns(t *testing.T) {
 func TestAPipelinePlanStepThatRunsAProgramHoldsThePipeline(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	dir := t.TempDir()
-	dispatchtest.WriteFiles(t, dir, map[string]string{"main.tf": dispatchtest.ExternalConfig})
+	p := dispatchtest.LocalProject(t, map[string]string{"main.tf": dispatchtest.ExternalConfig})
 	d := New(run.NewMemStore(), dispatchtest.OKRunner(), zap.NewNop(),
-		WithPolicies(dispatchtest.RulesHolding(t, excludePlans(run.ToolTerraform))), WithNoJanitor())
+		WithPolicies(dispatchtest.RulesHolding(t, excludePlans(run.ToolTerraform))), WithNoJanitor(),
+		WithProjects(p.Store, p.Syncer))
 	t.Cleanup(d.Close)
 	got, err := d.SubmitPipeline(ctx, "nightly", "", []run.PipelineStep{{
-		Name: "plan", Tool: run.ToolTerraform, Command: dir, DryRun: true,
-	}}, run.WithDryRun(true))
+		Name: "plan", Tool: run.ToolTerraform, Command: ".", DryRun: true,
+	}}, run.WithDryRun(true), run.WithProject(p.ID))
 	if err != nil {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}

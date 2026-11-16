@@ -571,6 +571,15 @@ func ValidateRepoURL(raw string) error {
 	return checkRepoHost(host)
 }
 
+// IsLocalRepoURL reports whether raw names a repository on the server's own filesystem, a file://
+// URL or a bare path. It reads raw the way ValidateRepoURL does, so whatever the validator would
+// clone over the file transport is local here. It does not validate raw: a value the reading
+// cannot classify is not local, and ValidateRepoURL refuses it anyway.
+func IsLocalRepoURL(raw string) bool {
+	_, scheme, err := repoURLParts(raw)
+	return err == nil && scheme == "file"
+}
+
 // dangerousSchemes are URI schemes that must never be read as an scp-shorthand hostname. Each is a
 // scheme a browser or a viewer may act on, and a repository URL is stored and rendered, so one
 // accepted here becomes an active link somewhere later.

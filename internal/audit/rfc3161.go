@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/safedial"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // timestampLimit caps how much of a timestamp authority's reply is read, so a hostile or broken
@@ -209,42 +210,117 @@ func Timestamp(ctx context.Context, client *http.Client, tsaURL, link string) (s
 // believing: that trust decision belongs to the relying party, who has the token and can hold it
 // against the roots their own tooling trusts. Saying so is the point; claiming a check we do not
 // perform is what the finding was about, and for a while the unperformed check was the signature.
+func VerifyTimestampProof(link, proof string) error {
+	_, err := ReadTimestampProof(link, proof)
+	return err
+}
+
 // VerifyTimestampProofTime is VerifyTimestampProof, additionally returning the token's genTime
 // so the caller can apply the backdate rule: an attestation cannot precede the entry it covers.
 func VerifyTimestampProofTime(link, proof string) (time.Time, error) {
-	err := VerifyTimestampProof(link, proof)
+	att, err := ReadTimestampProof(link, proof)
 	if err != nil {
 		return time.Time{}, err
 	}
-	token, derr := base64.StdEncoding.DecodeString(proof)
-	if derr != nil {
-		return time.Time{}, derr
-	}
-	if t, ok := proofGenTime(token); ok {
-		return t, nil
-	}
-	return time.Time{}, nil
+	return att.GenTime, nil
 }
 
-func VerifyTimestampProof(link, proof string) error {
+// TimestampAttestation is what a stored timestamp token attests once it verifies: when its
+// authority says it signed, and the certificate the signature verified under.
+type TimestampAttestation struct {
+	// GenTime is the time the token says it was generated, zero when it could not be read.
+	GenTime time.Time
+	// Signer is the certificate the token's signature verified under. The token carries it, so a
+	// token anyone made verifies under a certificate they made, and only a reader who holds its
+	// fingerprint against an authority they trust learns whose token it is.
+	Signer *x509.Certificate
+	// Carried is every certificate the token carries, the signer among them.
+	Carried []*x509.Certificate
+}
+
+// ReadTimestampProof is VerifyTimestampProof, returning what the token attests when it verifies,
+// so a reader can be told which certificate signed it and not only that one did.
+func ReadTimestampProof(link, proof string) (*TimestampAttestation, error) {
 	if proof == "" {
-		return fmt.Errorf("this anchor carries no embedded proof, so there is nothing to verify offline")
+		return nil, fmt.Errorf("this anchor carries no embedded proof, so there is nothing to verify " +
+			"offline")
 	}
 	token, err := base64.StdEncoding.DecodeString(proof)
 	if err != nil {
-		return fmt.Errorf("anchor proof is not base64: %w", err)
+		return nil, fmt.Errorf("anchor proof is not base64: %w", err)
 	}
 	raw, err := hex.DecodeString(link)
 	if err != nil {
-		return fmt.Errorf("anchor link is not hex: %w", err)
+		return nil, fmt.Errorf("anchor link is not hex: %w", err)
 	}
 	sum := sha256.Sum256(raw)
 	// The nonce is not checked here. It bound one live request to one reply; a stored token is read
 	// long afterward, by someone who never made that request.
-	if err := checkTimestampToken(token, sum[:], nil); err != nil {
-		return fmt.Errorf("anchor proof does not fix this link: %w", err)
+	signer, carried, err := tokenSigner(token, sum[:], nil)
+	if err != nil {
+		return nil, fmt.Errorf("anchor proof does not fix this link: %w", err)
 	}
-	return nil
+	att := &TimestampAttestation{Signer: signer, Carried: carried}
+	if t, ok := proofGenTime(token); ok {
+		att.GenTime = t
+	}
+	return att, nil
+}
+
+// certFingerprint returns the SHA-256 of a certificate's DER encoding as "sha256:" and lowercase
+// hex, the form this tool writes every key fingerprint in.
+func certFingerprint(cert *x509.Certificate) string {
+	sum := sha256.Sum256(cert.Raw)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// AuthorityPinFingerprint reads a timestamp authority pin, the SHA-256 fingerprint of a
+// certificate, and returns it as "sha256:" and lowercase hex. It accepts that form, bare hex, and
+// the colon separated pairs openssl prints, in either case. Anything else is refused rather than
+// read as no pin, since a pin that silently matched nothing would leave every token unpinned and
+// the verdict unchanged, which is the check the caller asked for not happening.
+func AuthorityPinFingerprint(pin string) (string, error) {
+	value := strings.ToLower(strings.TrimSpace(pin))
+	value = strings.TrimPrefix(value, "sha256:")
+	if strings.Contains(value, ":") {
+		pairs := strings.Split(value, ":")
+		for _, p := range pairs {
+			if len(p) != 2 {
+				pairs = nil
+				break
+			}
+		}
+		value = strings.Join(pairs, "")
+	}
+	raw, err := hex.DecodeString(value)
+	if err != nil || len(raw) != sha256.Size {
+		return "", fmt.Errorf("%w: timestamp authority pin %q is not a SHA-256 certificate "+
+			"fingerprint: give 64 hex digits, with or without a sha256: prefix or colons between "+
+			"pairs", ErrVerify, util.Clip(pin, 80))
+	}
+	return "sha256:" + value, nil
+}
+
+// directIssuer returns a certificate the token carries that directly signed signer, preferring one
+// whose fingerprint is pinned, or nil when none did. One step only: the issuer's own issuer is not
+// sought, no root store is read, and no validity period is judged, so a pin on an authority's
+// long-lived certificate survives that authority reissuing its signing certificate without this
+// becoming chain building. The issuer must be marked as one that signs certificates, which
+// CheckSignatureFrom enforces.
+func directIssuer(signer *x509.Certificate, carried []*x509.Certificate, pins map[string]bool) *x509.Certificate {
+	var first *x509.Certificate
+	for _, c := range carried {
+		if c.Equal(signer) || signer.CheckSignatureFrom(c) != nil {
+			continue
+		}
+		if pins[certFingerprint(c)] {
+			return c
+		}
+		if first == nil {
+			first = c
+		}
+	}
+	return first
 }
 
 // tsaContentInfo is the CMS wrapper a timestamp token arrives in.
@@ -322,40 +398,54 @@ type tsaTSTInfo struct {
 // Whether a given authority is worth believing remains the relying party's call, made against the
 // certificate that travels in the bundle.
 func checkTimestampToken(token, want []byte, nonce *big.Int) error {
+	_, _, err := tokenSigner(token, want, nonce)
+	return err
+}
+
+// tokenSigner runs the checks checkTimestampToken describes and returns the certificate the
+// token's signature verified under, with every certificate the token carries.
+func tokenSigner(token, want []byte, nonce *big.Int) (*x509.Certificate, []*x509.Certificate, error) {
 	var ci tsaContentInfo
 	if _, err := asn1.Unmarshal(token, &ci); err != nil {
-		return fmt.Errorf("decode token: %w", err)
+		return nil, nil, fmt.Errorf("decode token: %w", err)
 	}
 	if !ci.ContentType.Equal(signedDataOID) {
-		return fmt.Errorf("token wraps %v, want SignedData", ci.ContentType)
+		return nil, nil, fmt.Errorf("token wraps %v, want SignedData", ci.ContentType)
 	}
 	var sd tsaSignedData
 	if _, err := asn1.Unmarshal(ci.Content.Bytes, &sd); err != nil {
-		return fmt.Errorf("decode signed data: %w", err)
+		return nil, nil, fmt.Errorf("decode signed data: %w", err)
 	}
 	if !sd.EncapContentInfo.EContentType.Equal(tstInfoOID) {
-		return fmt.Errorf("token payload is %v, want TSTInfo", sd.EncapContentInfo.EContentType)
+		return nil, nil, fmt.Errorf("token payload is %v, want TSTInfo",
+			sd.EncapContentInfo.EContentType)
 	}
 	var info tsaTSTInfo
 	if _, err := asn1.Unmarshal(sd.EncapContentInfo.EContent, &info); err != nil {
-		return fmt.Errorf("decode TSTInfo: %w", err)
+		return nil, nil, fmt.Errorf("decode TSTInfo: %w", err)
 	}
 	if !info.MessageImprint.Algorithm.Algorithm.Equal(sha256OID) {
-		return fmt.Errorf("token imprint uses %v, want SHA-256",
+		return nil, nil, fmt.Errorf("token imprint uses %v, want SHA-256",
 			info.MessageImprint.Algorithm.Algorithm)
 	}
 	if !bytes.Equal(info.MessageImprint.Digest, want) {
-		return fmt.Errorf("token attests to a different value than the one sent, so it says " +
-			"nothing about this chain")
+		return nil, nil, fmt.Errorf("token attests to a different value than the one sent, so it " +
+			"says nothing about this chain")
 	}
 	if got, ok := tokenNonce(sd.EncapContentInfo.EContent); ok && nonce != nil && got.Cmp(nonce) != 0 {
-		return fmt.Errorf("token echoes a different nonce than the one sent, so it answers some " +
-			"other request and says nothing about when this chain reached here")
+		return nil, nil, fmt.Errorf("token echoes a different nonce than the one sent, so it " +
+			"answers some other request and says nothing about when this chain reached here")
 	}
-	if err := verifyTokenSignature(sd); err != nil {
-		return fmt.Errorf("token signature: %w", err)
+	signer, err := verifyTokenSignature(sd)
+	if err != nil {
+		return nil, nil, fmt.Errorf("token signature: %w", err)
 	}
-	return nil
+	// The signature check parsed these already and refused a token whose set does not parse.
+	carried, err := tokenCertificates(sd)
+	if err != nil {
+		return nil, nil, err
+	}
+	return signer, carried, nil
 }
 
 // proofGenTime unwraps a raw token to its TSTInfo and reads the generation time, best effort:
@@ -526,59 +616,62 @@ type cmsAttribute struct {
 // judged, because a token is routinely read long after the certificate that signed it expired.
 // What is checked is that the signature verifies under the certificate the token carries, and that
 // the signature covers this payload: without that, a token is a value anybody can type, and an
-// operator could truncate their own chain and mint an anchor over the new head.
-func verifyTokenSignature(sd tsaSignedData) error {
+// operator could truncate their own chain and mint an anchor over the new head. It returns the
+// certificate the signature verified under, which names the token's signer for a reader to judge.
+func verifyTokenSignature(sd tsaSignedData) (*x509.Certificate, error) {
 	var infos []tsaSignerInfo
 	if _, err := asn1.UnmarshalWithParams(fullSet(sd.SignerInfos), &infos, "set"); err != nil {
-		return fmt.Errorf("decode signer infos: %w", err)
+		return nil, fmt.Errorf("decode signer infos: %w", err)
 	}
 	if len(infos) == 0 {
-		return fmt.Errorf("the token carries no signature, so nothing vouches for it")
+		return nil, fmt.Errorf("the token carries no signature, so nothing vouches for it")
 	}
 	// Exactly one, matching the reference verifier. Accepting the first of several that verifies
 	// would let a forger attach their own signer beside the authority's and have the token pass on
 	// whichever one happens to check out, which is a different token from the one the authority
 	// issued.
 	if len(infos) != 1 {
-		return fmt.Errorf("the token carries %d signatures, and a timestamp token has one",
+		return nil, fmt.Errorf("the token carries %d signatures, and a timestamp token has one",
 			len(infos))
 	}
 	certs, err := tokenCertificates(sd)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(certs) == 0 {
-		return fmt.Errorf("the token carries no certificate, so its signature cannot be checked " +
-			"offline. Request the token with the certificate included")
+		return nil, fmt.Errorf("the token carries no certificate, so its signature cannot be " +
+			"checked offline. Request the token with the certificate included")
 	}
 	// One verified signer is what the format needs: a token is signed by one authority, and any
 	// signer that does verify is a signer who saw this payload.
 	var problems []string
 	for _, info := range infos {
-		if err := verifyOneSigner(info, sd, certs); err != nil {
+		cert, err := verifyOneSigner(info, sd, certs)
+		if err != nil {
 			problems = append(problems, err.Error())
 			continue
 		}
-		return nil
+		return cert, nil
 	}
-	return fmt.Errorf("no signer on the token verifies: %s", strings.Join(problems, "; "))
+	return nil, fmt.Errorf("no signer on the token verifies: %s", strings.Join(problems, "; "))
 }
 
-// verifyOneSigner checks a single SignerInfo against the certificates the token carries.
-func verifyOneSigner(info tsaSignerInfo, sd tsaSignedData, certs []*x509.Certificate) error {
+// verifyOneSigner checks a single SignerInfo against the certificates the token carries, and
+// returns the certificate its signature verified under.
+func verifyOneSigner(info tsaSignerInfo, sd tsaSignedData, certs []*x509.Certificate) (*x509.Certificate, error) {
 	cert := findSigner(info.SID, certs)
 	if cert == nil {
-		return fmt.Errorf("the token names a signer whose certificate it does not carry")
+		return nil, fmt.Errorf("the token names a signer whose certificate it does not carry")
 	}
 	// RFC 3161 requires signed attributes, and they are what makes the signature specific to this
 	// payload. Signing the content directly is permitted by CMS in general but not here, and
 	// accepting it would let a signature taken over some other TSTInfo be presented with this one.
 	if len(info.SignedAttrs.Bytes) == 0 {
-		return fmt.Errorf("the token's signature covers no signed attributes, so it does not bind " +
-			"the payload it travels with")
+		return nil, fmt.Errorf("the token's signature covers no signed attributes, so it does not " +
+			"bind the payload it travels with")
 	}
 	if err := checkSignedAttrs(info, sd); err != nil {
-		return err
+		return nil, err
 	}
 	// The authority has to have been able to issue it when it says it did. A token whose genTime
 	// falls outside its signer's validity window was either issued by a certificate that had expired
@@ -587,18 +680,21 @@ func verifyOneSigner(info tsaSignerInfo, sd tsaSignedData, certs []*x509.Certifi
 	// signer's certificate lapsed, and that says nothing about when it was issued.
 	if genTime, ok := tokenGenTime(sd.EncapContentInfo.EContent); ok {
 		if genTime.Before(cert.NotBefore) || genTime.After(cert.NotAfter) {
-			return fmt.Errorf("the token says it was issued at %s, which is outside its signer's "+
-				"validity from %s to %s", genTime.UTC().Format(time.RFC3339),
+			return nil, fmt.Errorf("the token says it was issued at %s, which is outside its "+
+				"signer's validity from %s to %s", genTime.UTC().Format(time.RFC3339),
 				cert.NotBefore.UTC().Format(time.RFC3339), cert.NotAfter.UTC().Format(time.RFC3339))
 		}
 	}
 	algo, err := signatureAlgorithm(info)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// The signature is taken over the attributes re-tagged as a SET, which is how CMS says to
 	// serialize them for signing even though they travel under an implicit [0].
-	return cert.CheckSignature(algo, fullSet(info.SignedAttrs), info.Signature)
+	if err := cert.CheckSignature(algo, fullSet(info.SignedAttrs), info.Signature); err != nil {
+		return nil, err
+	}
+	return cert, nil
 }
 
 // checkSignedAttrs confirms the signed attributes name this payload: the content type the token

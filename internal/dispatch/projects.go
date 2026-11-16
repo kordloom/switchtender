@@ -3,7 +3,6 @@ package dispatch
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"go.uber.org/zap"
 
@@ -115,53 +114,132 @@ func (d *Dispatcher) resolveProject(ctx context.Context, r *run.Run, spec *round
 	return cleanup, nil
 }
 
+// bindHeldRun binds a run an approval stands in front of to what that approval is shown. A run that
+// names its playbook or its Terraform configuration by a path on the server is refused, and a run
+// drawn from a project is pinned to the commit the project holds now. Every submit path that can
+// hold a run calls it once the hold is decided and before anything is saved, so a refused run is
+// never stored, whoever or whatever asked for it.
+func (d *Dispatcher) bindHeldRun(r *run.Run) error {
+	if err := refuseHeldPath(r); err != nil {
+		return err
+	}
+	return d.pinHeldRunCommit(r)
+}
+
+// awaitsApproval reports whether a person's approval stands between r and some of what it runs: r
+// is held, or r is a workflow with an approval step.
+//
+// A workflow's approval step counts here, for the pin and the path rule, and nowhere else. The
+// workflow itself is not held: it starts at once, runs the steps ahead of the approval, and is
+// graded by the rules like any other, so its status and policy pass do not change. Counting the
+// step as a hold would make every workflow with an approval node wait for two approvals. Not
+// counting it left the steps after the approval unpinned, so the person deciding the step released
+// whatever the branch or the path held by the time it ran.
+func awaitsApproval(r *run.Run) bool {
+	return r.Status == run.StatusPendingApproval || run.HasApproval(r.Steps)
+}
+
+// refuseHeldPath refuses a run an approval stands in front of when it names its program by a path
+// on the server rather than from a project.
+//
+// An approval binds the run's spec and, for a run drawn from a project, the commit it is pinned to.
+// A playbook or a Terraform root named by path is read from disk when the run is claimed, so
+// whatever the file holds then is what runs, and anyone who can write the file between the yes and
+// the claim decides what the approval released. There is no exemption by source: a schedule, a
+// trigger, and a drift reconcile are refused the same way a person and an agent are, and a schedule
+// or trigger records the refusal as its last error.
+//
+// An Ansible playbook is covered, and so is a Terraform or OpenTofu configuration, which plans with
+// provider and data source code when the run is released, unless the run carries a sealed plan: the
+// plan file holds the configuration under the digest the approval binds. A script tool is not
+// covered, since its program is the command text the spec seals and the approver reads whole.
+func refuseHeldPath(r *run.Run) error {
+	if !awaitsApproval(r) || r.ProjectID != "" {
+		return nil
+	}
+	what := pathProgram(r.Tool, r.Playbook, r.Command, r.PlanSHA256)
+	if r.Kind == run.KindPipeline {
+		what = ""
+		for _, s := range r.Steps {
+			if s.IsApproval() {
+				continue
+			}
+			if step := pathProgram(s.Tool, s.Playbook, s.Command, ""); step != "" {
+				what = fmt.Sprintf("%s in workflow step %q", step, s.Name)
+				break
+			}
+		}
+	}
+	if what == "" {
+		return nil
+	}
+	return fmt.Errorf("%w: %s is named by a path on this server, and an approval cannot bind what "+
+		"a path holds when the run is released: put it in a project and run it from there",
+		ErrHeldByPath, what)
+}
+
+// pathProgram describes the program a run of tool reads from a path on the server when it executes,
+// or returns empty when the program is sealed in the spec or carried by a sealed plan.
+func pathProgram(tool, playbook, command, planSHA string) string {
+	switch run.NormalizeTool(tool) {
+	case run.ToolAnsible:
+		return fmt.Sprintf("the playbook %q", playbook)
+	case run.ToolTerraform, run.ToolOpenTofu:
+		if planSHA != "" {
+			return ""
+		}
+		return fmt.Sprintf("the configuration %q", command)
+	}
+	return ""
+}
+
 // pinHeldRunCommit stamps the commit a held git-backed run is allowed to execute, at the moment it
-// is held.
+// is held, and refuses the run when that commit cannot be read.
 //
 // Approval binds the spec digest, but for a run drawn from a git project the spec names a branch,
 // and the branch is a moving pointer: between the approver's yes and the worker's claim, HEAD can
 // advance, so the release executed code nobody judged. The plan gate already pins its proposals;
 // blanket holds did not. Pinning at hold time makes the approver's decision mean the commit that
 // was current when the request was made, and execution already refuses a pin that no longer
-// matches. A sync failure downgrades to an unpinned hold, which is exactly the old behavior, but
-// says so on the run so the approver can see the guarantee is absent rather than assume it.
+// matches.
+//
+// A run whose commit cannot be pinned is refused rather than held. Held unpinned, its approval
+// would release whatever the branch holds at execution time, which is code nobody was shown. The
+// caller saves nothing and the submitter is told to try again, which succeeds once the project's
+// repository can be fetched.
 //
 // The pin only moves the project's checkout and reads the commit. It installs none of the
 // project's dependencies, since the run is held and nothing is installed for it before a person
 // approves: the sync at claim installs them for the commit pinned here.
-func (d *Dispatcher) pinHeldRunCommit(r *run.Run) {
-	if r.Status != run.StatusPendingApproval || r.ProjectID == "" || r.PinnedCommit != "" ||
-		r.GitRef != "" {
-		return
+func (d *Dispatcher) pinHeldRunCommit(r *run.Run) error {
+	if !awaitsApproval(r) || r.ProjectID == "" || r.PinnedCommit != "" || r.GitRef != "" {
+		return nil
 	}
 	if d.projects == nil || d.syncer == nil {
-		return
+		return fmt.Errorf("%w: projects are not enabled on this server: %w", ErrCommitUnpinned,
+			project.ErrNotFound)
 	}
-	fail := func(err error) {
-		d.log.Warn("dispatch: pin held run commit: " + err.Error())
-		r.Warning = strings.TrimSpace(r.Warning + " The commit could not be pinned when this run " +
-			"was held, so approval releases whatever the branch holds at execution time.")
+	fail := func(err error) error {
+		return fmt.Errorf("%w: try again: project %s: %w", ErrCommitUnpinned, r.ProjectID, err)
 	}
 	p, err := d.projects.Get(context.Background(), r.ProjectID)
 	if err != nil {
-		fail(err)
-		return
+		return fail(err)
 	}
 	// Resolved and unlocked the same way the sync during execution does. Pinning the commit runs the
-	// identical git operation, so a credential that works for one and not the other would hold a run
-	// at approval time for a reason that disappears by execution.
+	// identical git operation, so a credential that works for one and not the other would refuse a
+	// run at hold time for a reason that disappears by execution.
 	sshKey, release, err := d.projectKey(context.Background(), p)
 	defer release()
 	if err != nil {
-		fail(err)
-		return
+		return fail(err)
 	}
 	sha, err := d.syncer.Fetch(p, sshKey)
 	if err != nil {
-		fail(err)
-		return
+		return fail(err)
 	}
 	r.PinnedCommit = sha
+	return nil
 }
 
 // projectKey returns the SSH key the project's syncs authenticate with, empty for a remote that
