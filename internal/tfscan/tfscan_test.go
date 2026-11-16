@@ -1,7 +1,11 @@
 package tfscan
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -489,5 +493,183 @@ func TestScanIgnoresACommittedModuleManifest(t *testing.T) {
 		t.Errorf("a committed manifest was trusted: classification = %q, want incomplete so the "+
 			"module goes through the gate's own download (findings %q, unread %q)",
 			got.Classification, got.Findings, got.Unread)
+	}
+}
+
+// Configurations the provider set cases below build on.
+const (
+	// awsRequired requires the AWS provider at a version constraint.
+	awsRequired = "terraform {\n  required_providers {\n    aws = {\n" +
+		"      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n"
+	// awsConfigured configures the AWS provider.
+	awsConfigured = "provider \"aws\" {\n  region = \"us-east-1\"\n}\n"
+	// awsInstance declares one AWS resource.
+	awsInstance = "resource \"aws_instance\" \"web\" {\n  ami = \"ami-1\"\n}\n"
+)
+
+// vpcModule returns a configuration calling the registry VPC module at version constraint.
+func vpcModule(constraint string) string {
+	return "module \"vpc\" {\n  source  = \"terraform-aws-modules/vpc/aws\"\n  version = \"" +
+		constraint + "\"\n}\n"
+}
+
+// lockEntry returns the entry a lock file holding content adds to a provider set.
+func lockEntry(content string) string {
+	sum := sha256.Sum256([]byte(content))
+	return "lock file sha256 " + hex.EncodeToString(sum[:])
+}
+
+// TestProvidersReadsTheProviderSet covers the provider set a configuration installs: every place a
+// provider is required, implied, configured, or pinned, read through local modules, and a set that
+// cannot be known before init reported as unknown rather than guessed at.
+//
+//nolint:funlen // Test function.
+func TestProvidersReadsTheProviderSet(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Files       map[string]string
+		Dir         string
+		WantEntries []string
+		Want        error
+	}{{ // Test 0: A required provider, its configuration, and a resource of its type.
+		Files: map[string]string{"main.tf": awsRequired + awsConfigured + awsInstance},
+		WantEntries: []string{"local name aws", "provider aws",
+			`required_providers aws source "hashicorp/aws" version "~> 5.0"`},
+	}, { // Test 1: The older bare version string is read as the constraint.
+		Files: map[string]string{"versions.tf": "terraform {\n  required_providers {\n" +
+			"    aws = \"~> 3.0\"\n  }\n}\n"},
+		WantEntries: []string{`required_providers aws source "" version "~> 3.0"`},
+	}, { // Test 2: An aliased provider block and a provider meta-argument are both read.
+		Files: map[string]string{"main.tf": "provider \"aws\" {\n  alias = \"west\"\n}\n" +
+			"resource \"random_id\" \"x\" {\n  provider = google-beta\n}\n"},
+		WantEntries: []string{"local name google-beta", "local name random",
+			`provider aws alias "west"`},
+	}, { // Test 3: A data source in a check block and a local module's types are read.
+		Files: map[string]string{
+			"main.tf": "module \"net\" {\n  source = \"./modules/net\"\n}\n" +
+				"check \"c\" {\n  data \"dns_a_record_set\" \"y\" {\n    host = \"x\"\n  }\n}\n",
+			"modules/net/main.tf": "data \"http\" \"x\" {\n  url = \"https://example.com\"\n}\n",
+		},
+		WantEntries: []string{"local name dns", "local name http"},
+	}, { // Test 4: The lock file beside the root module is part of the set.
+		Files:       map[string]string{"main.tf": awsInstance, ".terraform.lock.hcl": "pinned\n"},
+		WantEntries: []string{"local name aws", lockEntry("pinned\n")},
+	}, { // Test 5: JSON configuration is read the same way.
+		Files: map[string]string{"main.tf.json": `{"terraform":{"required_providers":{"aws":` +
+			`{"source":"hashicorp/aws","version":"5.1.0"}}},"resource":{"aws_s3_bucket":{"b":{}}}}`},
+		WantEntries: []string{"local name aws",
+			`required_providers aws source "hashicorp/aws" version "5.1.0"`},
+	}, { // Test 6: The working directory is read inside the tree.
+		Files: map[string]string{"infra/main.tf": awsInstance,
+			"main.tf": "resource \"x_y\" \"z\" {}\n"},
+		Dir:         "infra",
+		WantEntries: []string{"local name aws"},
+	}, { // Test 7: A configuration with no providers has an empty set.
+		Files: map[string]string{"main.tf": plainOutput},
+	}, { // Test 8: A registry module call is an entry by its source and version constraint.
+		Files: map[string]string{"main.tf": vpcModule("~> 5.0")},
+		WantEntries: []string{
+			`module source "terraform-aws-modules/vpc/aws" version "~> 5.0"`},
+	}, { // Test 9: A remote module call with no version is an entry by its source.
+		Files: map[string]string{"main.tf": "module \"m\" {\n  source = " +
+			"\"git::https://example.com/m.git\"\n}\n"},
+		WantEntries: []string{`module source "git::https://example.com/m.git" version ""`},
+	}, { // Test 10: A registry module version only known when the run plans leaves the set unknown.
+		Files: map[string]string{"main.tf": "module \"vpc\" {\n  source = " +
+			"\"terraform-aws-modules/vpc/aws\"\n  version = var.v\n}\n"},
+		Want: ErrProvidersUnknown,
+	}, { // Test 11: A module source only known when the run plans cannot be followed.
+		Files: map[string]string{"main.tf": "module \"m\" {\n  source = var.where\n}\n"},
+		Want:  ErrProvidersUnknown,
+	}, { // Test 12: A file that does not parse leaves the set unknown.
+		Files: map[string]string{"main.tf": "resource \"aws_instance\" {{{\n"},
+		Want:  ErrProvidersUnknown,
+	}, { // Test 13: A required provider whose source is not a literal leaves the set unknown.
+		Files: map[string]string{"main.tf": "terraform {\n  required_providers {\n" +
+			"    aws = { source = local.src }\n  }\n}\n"},
+		Want: ErrProvidersUnknown,
+	}, { // Test 14: A working directory that is not in the tree leaves the set unknown.
+		Files: map[string]string{"main.tf": awsInstance},
+		Dir:   "missing",
+		Want:  ErrProvidersUnknown,
+	}, { // Test 15: A local module that is not in the tree leaves the set unknown.
+		Files: map[string]string{"main.tf": "module \"m\" {\n  source = \"./gone\"\n}\n"},
+		Want:  ErrProvidersUnknown,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			dir := test.Dir
+			if dir == "" {
+				dir = "."
+			}
+			got, err := Providers(mapFS(test.Files), dir)
+			if !errors.Is(err, test.Want) {
+				t.Fatalf("Providers() error = %v, want %v", err, test.Want)
+			}
+			if diff := cmp.Diff(test.WantEntries, got, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("entries mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// treeOf returns a configuration tree of main.tf holding main, net.tf holding net, and a lock file
+// holding lock.
+func treeOf(main, net, lock string) map[string]string {
+	return map[string]string{"main.tf": main, "net.tf": net, ".terraform.lock.hcl": lock}
+}
+
+// TestProvidersTellsAChangedHead compares a pull request's head against the commit the template
+// runs today, the way the review does: a head whose provider set differs, or cannot be known,
+// counts as changed, and one that only changes a resource's arguments, or keeps the same module
+// call, does not.
+func TestProvidersTellsAChangedHead(t *testing.T) {
+	t.Parallel()
+	const lock = "aws 5.0.0\n"
+	main := awsRequired + awsConfigured + awsInstance
+	net := vpcModule("~> 5.0")
+	tests := []struct {
+		Head        map[string]string
+		WantChanged bool
+	}{{ // Test 0: The head adds a required_providers entry.
+		Head: treeOf(strings.Replace(main, "    aws = {",
+			"    tls = {\n      source = \"hashicorp/tls\"\n    }\n    aws = {", 1), net, lock),
+		WantChanged: true,
+	}, { // Test 1: The head adds a resource of a new provider type with no required_providers change.
+		Head:        treeOf(main+"resource \"google_compute_instance\" \"vm\" {}\n", net, lock),
+		WantChanged: true,
+	}, { // Test 2: The head changes the lock file.
+		Head:        treeOf(main, net, "aws 5.9.9\n"),
+		WantChanged: true,
+	}, { // Test 3: The head adds a registry module.
+		Head: treeOf(main+"module \"dns\" {\n  source = \"terraform-aws-modules/route53/aws\"\n}\n",
+			net, lock),
+		WantChanged: true,
+	}, { // Test 4: The head changes a registry module's version constraint.
+		Head:        treeOf(main, vpcModule("~> 6.0"), lock),
+		WantChanged: true,
+	}, { // Test 5: The head calls a module whose source is only known when the run plans.
+		Head:        treeOf(main+"module \"m\" {\n  source = var.where\n}\n", net, lock),
+		WantChanged: true,
+	}, { // Test 6: The head changes only a resource's arguments.
+		Head: treeOf(strings.Replace(main, "ami-1", "ami-2", 1), net, lock),
+	}, { // Test 7: The head keeps the same registry module call.
+		Head: treeOf(main, net, lock),
+	}}
+	want, err := Providers(mapFS(treeOf(main, net, lock)), ".")
+	if err != nil {
+		t.Fatalf("Providers(base) error = %v", err)
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			got, err := Providers(mapFS(test.Head), ".")
+			changed := err != nil || !slices.Equal(want, got)
+			if diff := cmp.Diff(test.WantChanged, changed); diff != "" {
+				t.Errorf("changed mismatch (-want +got):\n%s\nbase %q, head %q, error %v", diff,
+					want, got, err)
+			}
+		})
 	}
 }

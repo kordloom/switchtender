@@ -6,7 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
+	"path"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +25,7 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
+	"github.com/kordloom/switchtender/internal/tfscan"
 	"github.com/kordloom/switchtender/internal/trigger"
 	"github.com/kordloom/switchtender/internal/user"
 )
@@ -97,16 +102,23 @@ type reviewHookDeps struct {
 	hooks *hookFlights
 	// comments acts on /switchtender commands in pull request comments, nil when nothing does.
 	comments *commentCommands
+	// checkouts reads the template's project at a pull request's head and at the commit the
+	// template runs today, nil when this server keeps no checkouts.
+	checkouts dispatch.CheckoutReader
+	// providers holds a Terraform or OpenTofu plan to the provider set the template runs today. Only
+	// a pull request event sets it, so a plan a person asks for with a comment is not held to it.
+	providers bool
 	// log records failures.
 	log *zap.Logger
 }
 
 // serveReviewHook handles a webhook for a pull request review trigger: it verifies the delivery,
 // reads the pull request event, refuses one from a fork unless the trigger allows forks, refuses
-// one whose sender is not a person linked to a SwitchTender account that may plan the template, and
-// launches the trigger's template as a plan of the pull request's head commit, as that account. The plan is a dry
-// run pinned to that commit and fetched from the ref the base repository publishes it under, so it
-// can change nothing and can run nothing but the code the pull request proposes. Its result is
+// one whose sender is not a person linked to a SwitchTender account that may plan the template,
+// refuses a Terraform or OpenTofu head that changes the template's providers, and launches the
+// trigger's template as a plan of the pull request's head commit, as that account. The plan is a
+// dry run pinned to that commit and fetched from the ref the base repository publishes it under, so
+// it can change nothing and can run nothing but the code the pull request proposes. Its result is
 // reported back to the pull request in the background.
 //
 // Applying is not reachable from here. The plan is a dry run, which the run carries in its spec and
@@ -173,6 +185,7 @@ func serveReviewHook(w http.ResponseWriter, r *http.Request, tg *trigger.Trigger
 	if !ok {
 		return
 	}
+	d.providers = true
 	launchReviewPlan(w, r.WithContext(ctx), tg, d, ev, t, body,
 		run.WithActor(u.Username), run.WithActorAccount(u.ID), run.WithAccount(u.Username),
 		run.WithActorType(actorTypePullRequest))
@@ -329,6 +342,9 @@ func planReview(ctx context.Context, d reviewHookDeps, tg *trigger.Trigger, ev *
 	if a, refused := precheckRefusal(ctx, d, tg, ev, reviewProbe(t, opts), hookPath); refused {
 		return a
 	}
+	if a, refused := providerRefusal(ctx, d, tg, ev, t, hookPath); refused {
+		return a
+	}
 	receipt, err := appendHookEntry(ctx, d.audits, tg, hookPath+"/planned")
 	if err != nil {
 		d.log.Error("server: record review webhook: " + err.Error())
@@ -381,6 +397,99 @@ func planReview(ctx context.Context, d reviewHookDeps, tg *trigger.Trigger, ev *
 	d.reviews.Watch(tg, ev.Number, created.ID)
 	return hookAnswer{status: http.StatusAccepted, receipt: receipt, body: map[string]string{
 		"trigger": tg.ID, "run": created.ID, "pull_request": strconv.Itoa(ev.Number)}}
+}
+
+// providersReply is what a pull request is told, once, when its event starts no plan because its
+// head changes the providers the template runs.
+const providersReply = "This pull request's head changes the Terraform or OpenTofu providers the " +
+	"template runs, or a registry or remote module call that can bring new ones, so SwitchTender " +
+	"did not plan it on its own: a provider is a program that runs with the template's " +
+	"credentials while it plans. A linked person who may plan it can start the plan by " +
+	"commenting `/switchtender plan`."
+
+// providerRefusal refuses a pull request event's plan of a Terraform or OpenTofu template whose
+// head changes the template's provider set, and reports whether it did, with what the forge is
+// told when it does. A provider is a binary that runs during init and plan with the template's
+// credentials, so a head that brings a new one is planned only when a person asks with a comment.
+// The refusal is recorded on the chain and the pull request is told once. A commit that cannot
+// be read at all fails closed with an error answer and no plan. Ansible templates, and a plan a
+// comment asked for, are not held to it.
+func providerRefusal(ctx context.Context, d reviewHookDeps, tg *trigger.Trigger, ev *review.Event,
+	t *template.Template, hookPath string) (hookAnswer, bool) {
+	if !d.providers {
+		return hookAnswer{}, false
+	}
+	switch run.NormalizeTool(t.Tool) {
+	case run.ToolTerraform, run.ToolOpenTofu:
+	default:
+		return hookAnswer{}, false
+	}
+	changed, err := providersChanged(d.checkouts, t, ev.HeadSHA)
+	if err != nil {
+		d.log.Error("server: read a pull request's providers: "+err.Error(),
+			zap.String("trigger_id", tg.ID))
+		return hookAnswer{status: http.StatusInternalServerError,
+			message: "could not read the providers the pull request's head runs"}, true
+	}
+	if !changed {
+		return hookAnswer{}, false
+	}
+	receipt, err := appendHookEntry(ctx, d.audits, tg, hookPath+"/refused")
+	if err != nil {
+		d.log.Error("server: record review webhook: " + err.Error())
+		return hookAnswer{status: http.StatusServiceUnavailable,
+			message: "refused: the webhook could not be recorded in the audit trail"}, true
+	}
+	d.reviews.ReplyRefusal(tg, &review.CommentEvent{Provider: ev.Provider,
+		Repository: ev.Repository, Number: ev.Number}, "providers", providersReply)
+	return hookAnswer{status: http.StatusAccepted, receipt: receipt, body: map[string]string{
+		"trigger": tg.ID, "pull_request": strconv.Itoa(ev.Number),
+		"refused": "the head changes the providers the template runs"}}, true
+}
+
+// providersChanged reports whether the provider set of template t's configuration at commit head
+// differs from its set at the commit the template runs today. A set that cannot be known before
+// init counts as changed. It returns an error when there are no checkouts or either commit could
+// not be read.
+func providersChanged(checkouts dispatch.CheckoutReader, t *template.Template, head string) (bool, error) {
+	if checkouts == nil {
+		return false, errors.New("this server keeps no project checkouts")
+	}
+	dir := reviewConfigDir(t.Command)
+	read := func(commit string) ([]string, bool, error) {
+		var set []string
+		known, seen := false, false
+		err := checkouts.ReadCommit(t.ProjectID, commit, func(fsys fs.FS, _ string) error {
+			var perr error
+			set, perr = tfscan.Providers(fsys, dir)
+			known, seen = perr == nil, true
+			return nil
+		})
+		if err == nil && !seen {
+			err = errors.New("the checkout was not read")
+		}
+		return set, known, err
+	}
+	current, currentKnown, err := read("")
+	if err != nil {
+		return false, fmt.Errorf("read the template's commit: %w", err)
+	}
+	proposed, headKnown, err := read(head)
+	if err != nil {
+		return false, fmt.Errorf("read the pull request's head: %w", err)
+	}
+	return !currentKnown || !headKnown || !slices.Equal(current, proposed), nil
+}
+
+// reviewConfigDir returns a Terraform or OpenTofu template's working directory as a path inside
+// its project, the way the gate joins it to the checkout: a leading slash names the checkout's
+// root rather than the machine's.
+func reviewConfigDir(command string) string {
+	dir := strings.TrimPrefix(filepath.ToSlash(filepath.Join("/", command)), "/")
+	if dir == "" {
+		return "."
+	}
+	return path.Clean(dir)
 }
 
 // reviewPlanOptions builds the submit options for a pull request's plan: the template's own spec,

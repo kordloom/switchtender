@@ -228,6 +228,8 @@ type reviewSetup struct {
 	Runner roundhouse.Runner
 	// PRFiles replaces the files the pull request's head carries.
 	PRFiles map[string]string
+	// MainFiles replaces the files main carries, the commit the template runs today.
+	MainFiles map[string]string
 	// Playbook makes the template an Ansible template running this playbook of the project.
 	Playbook string
 	// SubmitErr, when set, is what every plan submission answers instead of launching.
@@ -301,7 +303,11 @@ func newReviewServer(t *testing.T, setup reviewSetup) *reviewServer {
 	if prFiles == nil {
 		prFiles = map[string]string{"infra/plan.txt": setup.Plan}
 	}
-	origin, head := newPROrigin(t, ref, map[string]string{"infra/plan.txt": "main\n"}, prFiles)
+	mainFiles := setup.MainFiles
+	if mainFiles == nil {
+		mainFiles = map[string]string{"infra/plan.txt": "main\n"}
+	}
+	origin, head := newPROrigin(t, ref, mainFiles, prFiles)
 
 	sealer := sharedSealer("pass", "salt")
 	creds := credential.NewMemStore()
@@ -381,7 +387,7 @@ func newReviewServer(t *testing.T, setup reviewSetup) *reviewServer {
 		WithTriggers(trigger.NewMemStore(), sealer), WithTemplates(templates),
 		WithCredentials(creds, sealer), WithProjects(projects), WithPolicies(policies), WithAudit(audits),
 		WithReviewReporting("https://st.example.com", forge.Client(), 5*time.Millisecond),
-		WithShutdown(ctx), WithHookAnswerWithin(within),
+		WithShutdown(ctx), WithHookAnswerWithin(within), WithProjectFiles(syncer),
 	}
 	if setup.Approvals {
 		opts = append(opts, WithApprover(disp), WithDecisions(decisions))
@@ -1022,8 +1028,9 @@ func TestReviewPlanNeverApplies(t *testing.T) {
 	mainTF := fmt.Sprintf("resource \"terraform_data\" \"proof\" {\n"+
 		"  provisioner \"local-exec\" {\n    command = \"touch %s\"\n  }\n}\n", marker)
 	rs := newReviewServer(t, reviewSetup{
-		Runner:  roundhouse.NewAnsibleRunner(),
-		PRFiles: map[string]string{"infra/main.tf": mainTF},
+		Runner:    roundhouse.NewAnsibleRunner(),
+		PRFiles:   map[string]string{"infra/main.tf": mainTF},
+		MainFiles: map[string]string{"infra/main.tf": "resource \"terraform_data\" \"proof\" {}\n"},
 	})
 	rec := rs.fire(t, rs.eventName(), rs.payload(rs.opened(), rs.headSHA, ""), "")
 	if rec.Code != http.StatusAccepted {
@@ -1280,4 +1287,188 @@ func TestReviewHookPlansOnlyForALinkedPerson(t *testing.T) {
 			}
 		})
 	}
+}
+
+// manifestRunner plans with the fake plan runner and stands in for the gate's module download by
+// writing the manifest and module copy an init of the registry VPC module at 5.1.2 leaves, so a
+// configuration calling it reads in full without a registry.
+type manifestRunner struct {
+	// Runner is the fake plan runner.
+	roundhouse.Runner
+}
+
+// FetchModules writes the installed VPC module into the working directory spec names.
+func (manifestRunner) FetchModules(_ context.Context, spec roundhouse.Spec,
+	_ io.Writer) (roundhouse.Result, error) {
+	modules := filepath.Join(spec.Dir, filepath.FromSlash(spec.Command), ".terraform", "modules")
+	if err := os.MkdirAll(filepath.Join(modules, "vpc"), 0o750); err != nil {
+		return roundhouse.Result{ExitCode: 1}, err
+	}
+	manifest := `{"Modules":[{"Key":"","Source":"","Dir":"."},{"Key":"vpc",` +
+		`"Source":"registry.terraform.io/terraform-aws-modules/vpc/aws","Version":"5.1.2",` +
+		`"Dir":".terraform/modules/vpc"}]}`
+	if err := os.WriteFile(filepath.Join(modules, "modules.json"), []byte(manifest),
+		0o600); err != nil {
+		return roundhouse.Result{ExitCode: 1}, err
+	}
+	err := os.WriteFile(filepath.Join(modules, "vpc", "main.tf"), []byte("output \"o\" {\n"+
+		"  value = 1\n}\n"), 0o600)
+	if err != nil {
+		return roundhouse.Result{ExitCode: 1}, err
+	}
+	return roundhouse.Result{ExitCode: 0}, nil
+}
+
+// Configuration the provider cases below build the template's project from.
+const (
+	// providersMain requires the AWS provider and declares one AWS resource.
+	providersMain = "terraform {\n  required_providers {\n    aws = {\n" +
+		"      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n" +
+		"resource \"aws_instance\" \"web\" {\n  ami = \"ami-1\"\n}\n"
+	// providersLock is the lock file main carries.
+	providersLock = "provider \"registry.terraform.io/hashicorp/aws\" {\n  version = \"5.0.0\"\n}\n"
+	// providersPlan is the plan text every head carries.
+	providersPlan = "  + aws_instance.web\nPlan: 1 to add, 0 to change, 0 to destroy.\n"
+)
+
+// providersTree returns the template's project files: main.tf holding main, the lock file holding
+// lock, and net.tf holding net when it is not empty.
+func providersTree(main, lock, net string) map[string]string {
+	files := map[string]string{"infra/plan.txt": providersPlan, "infra/main.tf": main,
+		"infra/.terraform.lock.hcl": lock}
+	if net != "" {
+		files["infra/net.tf"] = net
+	}
+	return files
+}
+
+// providersVPC returns a call of the registry VPC module at version constraint.
+func providersVPC(constraint string) string {
+	return "module \"vpc\" {\n  source  = \"terraform-aws-modules/vpc/aws\"\n  version = \"" +
+		constraint + "\"\n}\n"
+}
+
+// TestReviewHookRefusesAHeadThatChangesProviders proves a pull request event plans a Terraform
+// head on its own only when the head runs the providers the template runs today. A provider is a
+// program that runs with the template's credentials while the configuration plans, so a head that
+// adds a required provider, a resource of a new provider type, a changed lock file, or a new or
+// changed registry module call starts no run: the refusal is recorded, and the pull request is told
+// once, however often it is pushed, that a linked person can plan it with a comment. A head that
+// changes only a resource's arguments plans as before.
+//
+//nolint:funlen // Test function.
+func TestReviewHookRefusesAHeadThatChangesProviders(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		MainFiles   map[string]string
+		PRFiles     map[string]string
+		WantRefused bool
+	}{{ // Test 0: The head adds a required_providers entry.
+		MainFiles: providersTree(providersMain, providersLock, ""),
+		PRFiles: providersTree(strings.Replace(providersMain, "    aws = {",
+			"    tls = {\n      source = \"hashicorp/tls\"\n    }\n    aws = {", 1), providersLock, ""),
+		WantRefused: true,
+	}, { // Test 1: The head adds a resource of a new provider type, with no required_providers change.
+		MainFiles: providersTree(providersMain, providersLock, ""),
+		PRFiles: providersTree(providersMain+"resource \"google_compute_instance\" \"vm\" {}\n",
+			providersLock, ""),
+		WantRefused: true,
+	}, { // Test 2: The head changes the lock file.
+		MainFiles: providersTree(providersMain, providersLock, ""),
+		PRFiles: providersTree(providersMain, strings.Replace(providersLock, "5.0.0", "5.99.0", 1),
+			""),
+		WantRefused: true,
+	}, { // Test 3: The head adds a registry module.
+		MainFiles:   providersTree(providersMain, providersLock, ""),
+		PRFiles:     providersTree(providersMain, providersLock, providersVPC("~> 5.0")),
+		WantRefused: true,
+	}, { // Test 4: The head changes a registry module's version constraint.
+		MainFiles:   providersTree(providersMain, providersLock, providersVPC("~> 5.0")),
+		PRFiles:     providersTree(providersMain, providersLock, providersVPC("~> 5.1")),
+		WantRefused: true,
+	}, { // Test 5: The head changes only a resource's arguments, and plans.
+		MainFiles: providersTree(providersMain, providersLock, ""),
+		PRFiles: providersTree(strings.Replace(providersMain, "ami-1", "ami-2", 1), providersLock,
+			""),
+	}, { // Test 6: The head keeps main's registry module call and changes an argument, and plans.
+		MainFiles: providersTree(providersMain, providersLock, providersVPC("~> 5.0")),
+		PRFiles: providersTree(strings.Replace(providersMain, "ami-1", "ami-2", 1), providersLock,
+			providersVPC("~> 5.0")),
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			executed := &specLog{}
+			rs := newReviewServer(t, reviewSetup{Runner: manifestRunner{Runner: planRunner(executed)},
+				MainFiles: test.MainFiles, PRFiles: test.PRFiles})
+			rec := rs.fire(t, rs.eventName(), rs.payload(rs.opened(), rs.headSHA, ""), "")
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("webhook = %d %s, want 202", rec.Code, rec.Body.String())
+			}
+			if !test.WantRefused {
+				if r := rs.planRun(t, rec); !r.DryRun {
+					t.Error("the plan is not a dry run")
+				}
+				rs.waitStatus(t, rs.headSHA, successState)
+				return
+			}
+			var body map[string]string
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode %s: %v", rec.Body.String(), err)
+			}
+			if diff := cmp.Diff("the head changes the providers the template runs",
+				body["refused"]); diff != "" {
+				t.Errorf("refusal mismatch (-want +got):\n%s", diff)
+			}
+			// The pull request is pushed again with the same change, which is refused again and
+			// told nothing new.
+			second := rs.origin.Push(t, map[string]string{"infra/plan.txt": "again\n"})
+			rec = rs.fire(t, rs.eventName(), rs.payload(rs.pushed(), second, ""), "")
+			if rec.Code != http.StatusAccepted || !strings.Contains(rec.Body.String(),
+				"the head changes the providers") {
+				t.Fatalf("second webhook = %d %s, want 202 refused", rec.Code, rec.Body.String())
+			}
+			rs.srv.reviews.Wait()
+			list, err := rs.runs.List(ctx)
+			if err != nil {
+				t.Fatalf("List() error = %v", err)
+			}
+			if len(list) != 0 || len(executed.all()) != 0 {
+				t.Errorf("a head that changes providers launched %d runs", len(list))
+			}
+			c := rs.forge.Comments(7)
+			if len(c) != 1 || !strings.Contains(c[0].Body, "changes the Terraform or OpenTofu "+
+				"providers") || !strings.Contains(c[0].Body, "`/switchtender plan`") {
+				t.Errorf("comments = %+v, want one reply naming the providers and /switchtender plan",
+					c)
+			}
+			if !chainHasPath(t, rs.audits, "/hooks/"+rs.triggerID+"/review/7/refused") {
+				t.Error("the refusal is not on the chain")
+			}
+		})
+	}
+}
+
+// TestReviewCommentPlansAHeadThatChangesProviders proves the provider check holds only the plans a
+// pull request event starts on its own: a linked person who comments /switchtender plan has read
+// the change and asked for it, so the same head that an event may not plan is planned.
+func TestReviewCommentPlansAHeadThatChangesProviders(t *testing.T) {
+	t.Parallel()
+	cs := newCommentServerFrom(t, reviewSetup{
+		MainFiles: providersTree(providersMain, providersLock, ""),
+		PRFiles: providersTree(providersMain+"resource \"google_compute_instance\" \"vm\" {}\n",
+			providersLock, ""),
+	})
+	rec := cs.fire(t, cs.eventName(), cs.payload(cs.opened(), cs.headSHA, ""), "")
+	if rec.Code != http.StatusAccepted || !strings.Contains(rec.Body.String(),
+		"the head changes the providers") {
+		t.Fatalf("event answered %d %s, want the providers refusal (control)", rec.Code,
+			rec.Body.String())
+	}
+	rec, out := cs.post(t, 88, forgeOperator, "/switchtender plan")
+	if rec.Code != http.StatusAccepted || out["run"] == "" {
+		t.Fatalf("plan comment answered %d %s, want a plan", rec.Code, rec.Body.String())
+	}
+	cs.waitStatus(t, cs.headSHA, successState)
 }
