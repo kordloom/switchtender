@@ -42,13 +42,15 @@ transparency log.
 
 **A release built any other way is not signed, and its assets carry no `SHA256SUMS.sigstore.json`,
 `SHA256SUMS.sig`, or `SHA256SUMS.pem`.** Check for those files before relying on the commands below:
-their absence means the release was assembled by hand and the signature chain described here does
-not apply to it. Verify such a release against the checksums alone, and treat the checksums as
-unattested. Every release published from this repository is signed. Releases before v1.101.0 were
-published from an earlier repository that is no longer public, and their assets went with it, so
-`switchtender version --verify` on a build older than v1.101.0 cannot find its manifest. Upgrade to
-verify. This product's claim is that you can check what it tells you, so the honest form of that
-claim includes saying when a check is not available.
+from v1.107.0 on, their absence means the release was assembled by hand and the signature chain
+described here does not apply to it. Verify such a release against the checksums alone, and treat
+the checksums as unattested. Every release published from this repository is signed, and from
+v1.107.0 on its signature files are attached to it. Releases before v1.101.0 were published from an
+earlier repository that is no longer public, and their assets went with it. The binaries, packages,
+and manifests attached to v1.101.0 through v1.106.5 and every container image older than 1.107.0
+have since been removed, so `switchtender version --verify` on a build older than v1.107.0 cannot
+find its manifest. Upgrade to verify. This product's claim is that you can check what it tells you,
+so the honest form of that claim includes saying when a check is not available.
 
 Verify the signature over the checksums, then the archive against them. The sigstore bundle
 carries the signature, the signing certificate, and the transparency log entry in one file, and
@@ -75,10 +77,10 @@ The install script at https://switchtender.com/install.sh runs this signature ch
 cosign is on PATH, and says plainly when it is not, so a one-line install on a machine with cosign
 gets the same assurance as the commands above.
 
-### With cosign v2, or for a release without a bundle
+### With cosign v2
 
-Every release also publishes the detached signature and certificate, which every cosign v2 release
-verifies with the flags below. A release made before the bundle was added carries only this pair:
+Every release from v1.107.0 on also publishes the detached signature and certificate, which every
+cosign v2 release verifies with the flags below.
 
     cosign verify-blob SHA256SUMS \
       --signature SHA256SUMS.sig \
@@ -107,9 +109,9 @@ verified something online. Carry it across with the release assets and name it:
 The `deb`, `rpm`, and `apk` packages are not signed with a package manager key. Their integrity comes
 from the signed `SHA256SUMS` above, so verify the checksums first, then install:
 
-    sudo dpkg -i switchtender_1.101.0_linux_amd64.deb
-    sudo rpm -i switchtender_1.101.0_linux_amd64.rpm
-    apk add --allow-untrusted switchtender_1.101.0_linux_amd64.apk
+    sudo dpkg -i switchtender_1.109.0_linux_amd64.deb
+    sudo rpm -i switchtender_1.109.0_linux_amd64.rpm
+    apk add --allow-untrusted switchtender_1.109.0_linux_amd64.apk
 
 apk refuses a package with no trusted signature, and `--allow-untrusted` tells it to go ahead, which
 is why the checksum comes first.
@@ -119,14 +121,13 @@ is why the checksum comes first.
 The images on ghcr.io are signed by the same workflow, keylessly, and carry build provenance. Verify
 one from outside it:
 
-    cosign verify ghcr.io/kordloom/switchtender:1.101.0 \
+    cosign verify ghcr.io/kordloom/switchtender:1.109.0 \
       --certificate-identity-regexp '^https://github.com/kordloom/switchtender/\.github/workflows/release\.yml@refs/tags/v' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
 `switchtender version --verify` does not apply inside the image. The image compiles its binary from
 the tagged source rather than copying the release archive's file, so its bytes differ from the
-published hashes. The command says so inside an image and names the check above. An older image
-reports it as a hash that does not match instead.
+published hashes. The command says so inside an image and names the check above.
 
 ## Security posture
 
@@ -137,4 +138,4 @@ reports it as a hash that does not match instead.
 - Container execution environments run under memory, CPU, process, and network caps, refuse to mount
   sensitive host paths or the container socket, and are off by default.
 - govulncheck runs in CI on every change, the fuzz corpus runs on a weekly schedule, and each
-  release ships an SPDX software bill of materials.
+  release from v1.107.0 on ships an SPDX software bill of materials.

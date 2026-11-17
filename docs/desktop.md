@@ -17,14 +17,15 @@ ship one, so on Windows a Bash run needs a `bash` installed and on the PATH firs
 
 ## Download
 
-Every release attaches ready-to-run downloads on the
+Every release from v1.107.0 on attaches ready-to-run downloads on the
 [releases page](https://github.com/kordloom/switchtender/releases): a `windows_amd64.zip` holding
 `switchtender.exe`, `tar.gz` archives of the binary for macOS and Linux, and `deb`, `rpm`, and `apk`
 packages. A `SHA256SUMS` file lists the checksum of each one.
 
 There is no separate download for the desktop app. The binary is the app: `switchtender desktop`
 picks a loopback port, keeps its data in a per-user directory, and opens the UI. A macOS `.app`
-bundle and a `SwitchTender.dmg` are built by the release workflow and attached to every release.
+bundle and a `SwitchTender.dmg` are built by the release workflow and attached to every release from
+v1.107.0 on.
 
 What is signed differs by artifact, so here it is per download rather than as one sentence.
 

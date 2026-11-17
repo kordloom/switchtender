@@ -429,10 +429,12 @@ notices on upgrade is listed in [Upgrading](docs/upgrading.md), with what to do 
 ## History
 
 The commits before v1.101.0 each hold the code of an earlier release, v1.18.0 through v1.100.0,
-tagged `snapshot/vX.Y.Z`. Those releases were published from an earlier repository that is no
-longer public, and their release pages and downloads went with it, so `switchtender version
---verify` on a build older than v1.101.0 cannot find its manifest. Upgrade to verify. Every release
-from v1.101.0 on is built and signed from this repository.
+tagged `snapshot/vX.Y.Z`. Those releases were published from an earlier repository that is no longer
+public, and their release pages and downloads went with it. The binaries, packages, and checksum
+manifests attached to v1.101.0 through v1.106.5 have been removed as well, so `switchtender version
+--verify` on a build older than v1.107.0 cannot find its manifest. Upgrade to verify. Every release
+from v1.101.0 on is built and signed from this repository, and from v1.107.0 on its signed files are
+attached to the release.
 
 ## License
 
