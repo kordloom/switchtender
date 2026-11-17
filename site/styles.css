@@ -124,12 +124,12 @@ h1 {
 	background: linear-gradient(110deg, #eafff6 0%, var(--accent) 45%, var(--accent-2) 100%);
 	-webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
 }
-/* A headline with a shorter phone form carries both, and only one is ever displayed, so a screen
-   reader reads one as well. The full home page headline wraps to five lines on a phone. */
-.h1-short { display: none; }
+/* The home page headline is one text, so a crawler reads it once. On a phone it drops its tail
+   and breaks earlier, since the full headline wraps to five lines there. */
+.h1-phone-break { display: none; }
 @media (max-width: 560px) {
-	.h1-long { display: none; }
-	.h1-short { display: inline; }
+	.h1-tail { display: none; }
+	.h1-phone-break { display: inline; }
 }
 .lede { font-size: 19px; color: var(--muted); margin: 24px 0 32px; max-width: 560px; }
 .lede strong { color: var(--text); font-weight: 600; }
