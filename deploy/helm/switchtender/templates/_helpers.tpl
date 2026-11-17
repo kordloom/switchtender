@@ -66,7 +66,7 @@ pinned it chose the release.
 {{- if and .Values.database.dsn (not .Values.image.digest) -}}
 {{- $tag := .Values.image.tag | default .Chart.AppVersion | toString | trimPrefix "v" -}}
 {{- if and (regexMatch "^[0-9]+[.][0-9]+[.][0-9]+$" $tag) (semverCompare "<1.101.0" $tag) -}}
-{{- fail (printf "image.tag %s predates 1.101.0, the first release that reads its database from SWITCHTENDER_DB. Against PostgreSQL it would ignore database.dsn and run each pod on a SQLite file of its own. Use 1.101.0 or later, or leave image.tag empty to run the chart's own version." $tag) -}}
+{{- fail (printf "image.tag %s predates 1.101.0, the first release that reads its database from SWITCHTENDER_DB. Against PostgreSQL it would ignore database.dsn and run each pod on a SQLite file of its own. Use 1.107.0 or later, or leave image.tag empty to run the chart's own version." $tag) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

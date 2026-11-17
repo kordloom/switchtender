@@ -6,7 +6,7 @@
 #   curl -fsSL https://switchtender.com/install.sh | sh
 #
 # Override where it lands with PREFIX (default /usr/local/bin, falling back to ~/.local/bin when that
-# is not writable), or pin a version with VERSION=v1.101.0.
+# is not writable), or pin a version with VERSION=v1.109.0.
 #
 # Everything runs from main, called on the last line, so a connection that drops partway through
 # leaves the shell a function it never calls rather than a prefix of the script to run.

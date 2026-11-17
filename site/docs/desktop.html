@@ -73,13 +73,14 @@ the desktop app's data directory, as <a href="/docs/ansible-runtime#where-it-liv
 macOS and Linux ship <code>bash</code>, so a Bash run works there as soon as the binary does. Windows does not
 ship one, so on Windows a Bash run needs a <code>bash</code> installed and on the PATH first.</p>
 <h2 id="download">Download</h2>
-<p>Every release attaches ready-to-run downloads on the
+<p>Every release from v1.107.0 on attaches ready-to-run downloads on the
 <a href="https://github.com/kordloom/switchtender/releases">releases page</a>: a <code>windows_amd64.zip</code> holding
 <code>switchtender.exe</code>, <code>tar.gz</code> archives of the binary for macOS and Linux, and <code>deb</code>, <code>rpm</code>, and <code>apk</code>
 packages. A <code>SHA256SUMS</code> file lists the checksum of each one.</p>
 <p>There is no separate download for the desktop app. The binary is the app: <code>switchtender desktop</code>
 picks a loopback port, keeps its data in a per-user directory, and opens the UI. A macOS <code>.app</code>
-bundle and a <code>SwitchTender.dmg</code> are built by the release workflow and attached to every release.</p>
+bundle and a <code>SwitchTender.dmg</code> are built by the release workflow and attached to every release from
+v1.107.0 on.</p>
 <p>What is signed differs by artifact, so here it is per download rather than as one sentence.</p>
 <p>The macOS app inside the <code>.dmg</code> is signed with a Developer ID certificate issued to KordLoom LLC
 (team KD99L7BFM2) and notarized by Apple, so Gatekeeper accepts it and it opens with no warning.
