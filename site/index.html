@@ -558,10 +558,16 @@ open http://localhost:8080/ui/</code></pre>
 				<h2>Every run, <span class="grad">readable at a glance.</span></h2>
 				<p>Structured data end to end: what fired each run, who asked for it, which hosts it touched, and where it broke. Every column sorts and filters.</p>
 			</div>
-			<a class="window demo-frame" href="https://demo.switchtender.com/ui/held?who=agent">
-				<div class="window-bar"><span></span><span></span><span></span><em>runs, with origin and labels</em></div>
-				<img src="/assets/screenshot-runs.png?v=2" alt="The runs list with status, type, origin, playbook, and label columns, all sortable" loading="lazy">
-			</a>
+			<div class="duo">
+				<a class="window demo-frame" href="https://demo.switchtender.com/ui/held?who=agent">
+					<div class="window-bar"><span></span><span></span><span></span><em>runs, with origin and labels</em></div>
+					<img src="/assets/screenshot-runs.png?v=2" alt="The runs list with status, type, origin, playbook, and label columns, all sortable" loading="lazy">
+				</a>
+				<a class="window demo-frame" href="https://demo.switchtender.com/ui/fleet">
+					<div class="window-bar"><span></span><span></span><span></span><em>fleet health</em></div>
+					<img src="/assets/screenshot-fleet.png?v=2" width="916" height="508" alt="Fleet health ranking each host by recent failures, with a flaky badge, a bar of recent outcomes, and the last outcome" loading="lazy">
+				</a>
+			</div>
 		</section>
 
 		<section class="section wrap" id="behind">
