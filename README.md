@@ -259,7 +259,7 @@ fails on the broken database host while the other lands clean, and the timeline 
 Fleet health after a few runs: failure counts, flaky-host detection, and outcome sparklines per
 host, remembered across every run:
 
-<img src="assets/screenshot-fleet.png" alt="Fleet health with flaky detection and sparklines" width="100%">
+<img src="site/assets/screenshot-fleet.png" alt="Fleet health with flaky detection and sparklines" width="100%">
 
 ## Requirements
 
