@@ -99,7 +99,7 @@
 		<section class="hero wrap">
 			<span class="eyebrow reveal">The self-hosted automation server</span>
 			<div class="hero-copy reveal">
-				<h1><span class="h1-long">Approve <span class="grad">exactly what runs</span>.<br>Prove it to anyone.</span><span class="h1-short">Approve <span class="grad">exactly<br>what runs</span>.<br>Prove it.</span></h1>
+				<h1>Approve <span class="grad">exactly<br class="h1-phone-break"> what runs</span>.<br>Prove it<span class="h1-tail"> to anyone</span>.</h1>
 				<p class="lede" style="margin-bottom:14px">
 					SwitchTender runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, with
 					pipelines, drift detection, and a live host-by-task matrix.
@@ -313,7 +313,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 					<article class="card">
 						<div class="ic ic-gate"></div>
 						<h3>Enforced approvals</h3>
-						<p>Hold risky runs for sign-off, gated by policy on tool, command, or target, and an agent token's runs are held with no policy written. Operators request, admins release. No skipping the gate. An approval binds what will run: a static, smart, or constructed inventory as snapshotted at submission, the container image by the digest its registry serves, or by its tag, said plainly, when the registry does not answer, and for a Terraform or OpenTofu apply the saved plan the apply carries out, however it came to be held. Community holds plain rules of your own, as many as you need: require-approval policies and exemptions. Deny rules and risk and reversibility floors are Pro. The full engine, with actor scoping and distinct-approver separation of duties, is Team.</p>
+						<p>Hold risky runs for sign-off, gated by policy on tool, command, or target, and an agent token's runs are held with no policy written. Operators request, admins release. No skipping the gate. An approval binds what will run: a static, smart, or constructed inventory as snapshotted at submission, the container image by the digest its registry serves (if the registry does not answer, the run is refused, unless the server was started with <code>--allow-unpinned-image</code>, which binds the tag and tells the approver so), and for a Terraform or OpenTofu apply the saved plan the apply carries out, however it came to be held. Community holds plain rules of your own, as many as you need: require-approval policies and exemptions. Deny rules and risk and reversibility floors are Pro. The full engine, with actor scoping and distinct-approver separation of duties, is Team.</p>
 					</article>
 					<article class="card">
 						<div class="ic ic-shards"></div>
