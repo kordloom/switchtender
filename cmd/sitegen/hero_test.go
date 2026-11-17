@@ -21,7 +21,7 @@ var (
 )
 
 // heroImg matches the home page hero's img element.
-var heroImg = regexp.MustCompile(`<img\s[^>]*src="/assets/screenshot-fleet\.png[^"]*"[^>]*>`)
+var heroImg = regexp.MustCompile(`<img\s[^>]*src="/assets/screenshot-held\.png[^"]*"[^>]*>`)
 
 // heroAttr matches one name="value" attribute inside an element.
 var heroAttr = regexp.MustCompile(`\s([a-z]+)="([^"]*)"`)
@@ -64,7 +64,7 @@ func TestHomeHeroImageFitsItsSlot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := os.Open(filepath.Join(site, "assets", "screenshot-fleet.png"))
+	f, err := os.Open(filepath.Join(site, "assets", "screenshot-held.png"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestHomeHeroImageFitsItsSlot(t *testing.T) {
 		t.Fatal(err)
 	}
 	tag := func(w, h int, loading string) []byte {
-		return fmt.Appendf(nil, `<img src="/assets/screenshot-fleet.png?v=1" width="%d" height="%d" loading="%s" `+
+		return fmt.Appendf(nil, `<img src="/assets/screenshot-held.png?v=1" width="%d" height="%d" loading="%s" `+
 			`fetchpriority="high">`, w, h, loading)
 	}
 	tests := []struct {
