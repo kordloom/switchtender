@@ -103,7 +103,7 @@ func TestSemaphoreSecretSurveyImportsAsSecret(t *testing.T) {
 //
 // The importer read only a `projects` wrapper, which Semaphore does not produce. A real backup
 // therefore matched nothing and was refused with "nothing in this document was recognized", so the
-// documented one-command migration failed on the only file a Semaphore operator can actually
+// documented migration failed on the only file a Semaphore operator can actually
 // produce. The fixture mirrors BackupFormat's top-level keys.
 func TestSemaphoreImportsAProjectBackup(t *testing.T) {
 	t.Parallel()

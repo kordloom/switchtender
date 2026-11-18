@@ -12,7 +12,7 @@ expiry, and no license key. It never requires KordLoom infrastructure to operate
 server, no online activation, no phone-home:
 
 - All execution engines: Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go.
-- One-command importers: AWX, AAP, Tower, Ascender, Semaphore, Chef, Puppet, Rundeck, Jenkins,
+- Importers: AWX, AAP, Tower, Ascender, Semaphore, Chef, Puppet, Rundeck, Jenkins,
   and crontabs.
 - Role-based access control, per-object grants, organizations, and teams, with local accounts.
   Directory sign-in, which is OIDC, SAML, LDAP, and JWT, is a Pro feature: the server refuses to

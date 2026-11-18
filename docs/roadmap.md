@@ -9,8 +9,8 @@ SwitchTender governs automation estates: approvals, drift, host history, and sea
 over the tools a fleet already runs.
 
 - **Ansible** is engine one, shipped, alongside Terraform, OpenTofu, Bash, PowerShell, Python,
-  and Go, with one-command imports from AWX, AAP, Tower, Ascender, Semaphore, Rundeck, Jenkins,
-  and crontabs.
+  and Go, with importers for AWX, AAP, Tower, Ascender, Semaphore, Rundeck, Jenkins, and
+  crontabs.
 - **Chef and Puppet fleets import today**, as inventories: every node, grouped by environment
   and, for Chef, by every role in its run list. Cookbooks and manifests do not convert and are
   not going to, because a partial translation of a program in another language would read like

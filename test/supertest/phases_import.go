@@ -31,7 +31,7 @@ var awxObjects = []struct {
 // checkAnAWXEstateMigrates proves the deployed install turns somebody else's export into objects of
 // its own that are readable by the names they had.
 //
-// The one-command import off AWX is the way into this product, and no deployed install had ever
+// The import off AWX is the way into this product, and no deployed install had ever
 // been asked to perform one. The importer is covered heavily in unit tests, which prove the
 // translation and cannot prove that the shipped binary, run inside the image, against the database
 // the install is actually serving, produces objects that install can then read.

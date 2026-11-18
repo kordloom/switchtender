@@ -4,7 +4,7 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>SwitchTender: approve exactly what runs</title>
-	<meta name="description" content="Approve exactly what runs. Prove it to anyone. SwitchTender is a self-hosted server that runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, with pipelines, drift detection, and a live host-by-task matrix. An approval binds the inventory, image, commit, and plan the approver saw, and a run that no longer matches is refused. AI agents wait for a person by default and can never approve. Every finished run leaves a signed receipt anyone can verify offline. Import from AWX, Ansible Automation Platform, Semaphore, Rundeck, or Jenkins in one command.">
+	<meta name="description" content="Approve exactly what runs. Prove it to anyone. SwitchTender is a self-hosted server that runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, with pipelines, drift detection, and a live host-by-task matrix. An approval binds the inventory, image, commit, and plan the approver saw, and a run that no longer matches is refused. AI agents wait for a person by default and can never approve. Every finished run leaves a signed receipt anyone can verify offline. Import from AWX, Ansible Automation Platform, Semaphore, Rundeck, or Jenkins, with a dry run first.">
 	<meta property="og:title" content="SwitchTender: approve exactly what runs">
 	<meta property="og:description" content="Prove it to anyone. A self-hosted server for Ansible, Terraform, OpenTofu, and scripts. AI agents wait for a person by default and can never approve, and every finished run leaves a signed receipt anyone can verify offline.">
 	<meta property="og:type" content="website">
@@ -31,7 +31,7 @@
   "Live host-by-task matrix and per-host history across runs",
   "Drift detection from a dry run",
   "One static Go binary and one SQLite file, with PostgreSQL optional",
-  "One-command import from AWX-format exports (AWX, Tower, and Automation Controller), Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab"
+  "Import from AWX-format exports (AWX, Tower, and Automation Controller), Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab, each with a dry run first"
  ],
  "license": "https://mariadb.com/bsl11/",
  "name": "SwitchTender",
@@ -114,7 +114,7 @@
 					<a class="btn big" href="https://demo.switchtender.com/ui/held?who=agent">Catch an AI agent in the act</a>
 					<a class="ghost big" href="/get-started">Install free</a>
 				</div>
-				<p class="hero-note">Free to self-host with no host or seat caps. One binary, one SQLite file, no Kubernetes. One-command import from AWX, AAP, Semaphore, Rundeck, and Jenkins. Source-available under BSL 1.1.</p>
+				<p class="hero-note">Free to self-host with no host or seat caps. One binary, one SQLite file, no Kubernetes. Imports from AWX, AAP, Semaphore, Rundeck, and Jenkins, with a dry run first. Source-available under BSL 1.1.</p>
 			</div>
 			<div class="hero-shot reveal">
 				<div class="glow" aria-hidden="true"></div>
@@ -126,7 +126,7 @@
 		</section>
 
 		<section class="onramp wrap reveal" aria-label="Coming from AWX">
-			<p class="onramp-item">Already on AWX? <a href="/assess">Drop your export here</a> and see what moves, what does not, and how many of your templates run today with nobody required to approve them. It is read in your browser and never uploaded. The same report comes from <code>switchtender assess awx export.json</code>, and <code>switchtender import awx</code> then brings projects, inventories, templates, surveys, and schedules over in one command.</p>
+			<p class="onramp-item">Already on AWX? <a href="/assess">Drop your export here</a> and see what moves, what does not, and how many of your templates run today with nobody required to approve them. It is read in your browser and never uploaded. The same report comes from <code>switchtender assess awx export.json</code>, and <code>switchtender import awx export.json</code> then previews the import and, run again with <code>--apply</code>, brings projects, inventories, templates, surveys, and schedules over.</p>
 			<p class="onramp-item">Worth knowing if that is where you are: AWX has not shipped a release in over two years, it carries an unpatched <a href="/awx-alternative">CVSS 9.6</a> whose fix ships only in the paid product, and the supported way off it is priced per managed node.</p>
 			<p class="onramp-item onramp-offer">Would rather not do it yourself? The <a href="/pricing#sprint">Migration Program</a> is a fixed-price cutover in four milestones over about six weeks, with the first year of Team at the 500-host band included. It covers the part that actually goes wrong: cutting over without a window where neither system is authoritative.</p>
 		</section>
@@ -515,7 +515,7 @@ func main() {
 						<tr><td data-label="Capability">Tamper-evident, signed audit</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="AWX"><span class="muted">activity log</span></td><td data-label="AAP / Tower"><span class="muted">activity stream; Red Hat directs copies to external providers</span></td><td data-label="Semaphore"><span class="muted">activity log; syslog over TLS and Splunk HEC webhook in paid tiers</span></td><td data-label="Rundeck"><span class="muted">activity log in all editions; audit trail commercial; nothing hashed or signed</span></td></tr>
 						<tr><td data-label="Capability">Secret values auto-masked in logs</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="AWX"><span class="muted">opt-in</span></td><td data-label="AAP / Tower"><span class="muted">opt-in</span></td><td data-label="Semaphore"><span class="muted">not documented</span></td><td data-label="Rundeck"><span class="muted">secure options</span></td></tr>
 						<tr><td data-label="Capability">Enforced approval policies</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="AWX"><span class="muted">basic</span></td><td data-label="AAP / Tower"><span class="muted">workflow node; orchestrator step with a 1-day default window; neither records a digest</span></td><td data-label="Semaphore"><span class="muted">workflow node, manual, binding not documented; docs say Pro, pricing lists every tier</span></td><td data-label="Rundeck"><span class="muted">no native step; ServiceNow change-state check</span></td></tr>
-						<tr><td data-label="Capability">One-command migration in</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="AWX"><i class="n"></i></td><td data-label="AAP / Tower"><i class="n"></i></td><td data-label="Semaphore"><i class="n"></i> <span class="muted">its own project export only</span></td><td data-label="Rundeck"><i class="n"></i></td></tr>
+						<tr><td data-label="Capability">Import from other tools</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="AWX"><i class="n"></i></td><td data-label="AAP / Tower"><i class="n"></i></td><td data-label="Semaphore"><i class="n"></i> <span class="muted">its own project export only</span></td><td data-label="Rundeck"><i class="n"></i></td></tr>
 						<tr><td data-label="Capability">Drift detection from a dry run</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="AWX"><i class="n"></i></td><td data-label="AAP / Tower"><i class="n"></i></td><td data-label="Semaphore"><i class="n"></i></td><td data-label="Rundeck"><i class="n"></i></td></tr>
 						<tr><td data-label="Capability">Drag-and-drop workflow editor</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="AWX"><i class="y"></i></td><td data-label="AAP / Tower"><i class="y"></i></td><td data-label="Semaphore"><i class="y"></i> <span class="muted">shipped in 2.19 as beta; docs say Pro, pricing lists every tier</span></td><td data-label="Rundeck"><span class="muted">linear steps</span></td></tr>
 						<tr><td data-label="Capability">AI that cannot execute: triage, answers, drafts, every draft held at the gate</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="AWX"><i class="n"></i></td><td data-label="AAP / Tower"><span class="muted">RAG assistant; task agents call tools through MCP</span></td><td data-label="Semaphore"><span class="muted">MCP server, reads and writes</span></td><td data-label="Rundeck"><span class="muted">MCP server creates jobs and calls the API under a scoped token; AI-generated runbooks commercial</span></td></tr>

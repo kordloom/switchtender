@@ -37,7 +37,8 @@ saw, and a run that no longer matches is refused. AI agents wait for a person by
 never approve. Every finished run leaves a signed receipt anyone can verify offline.
 
 Free to self-host with no host or seat caps. One binary, one SQLite file, no Kubernetes.
-One-command import from AWX, AAP, Semaphore, Rundeck, and Jenkins. Source-available under BSL 1.1.
+Imports from AWX, AAP, Semaphore, Rundeck, and Jenkins, with a dry run first.
+Source-available under BSL 1.1.
 
 ## Contents
 
@@ -230,9 +231,9 @@ AWX import is the on-ramp.
 Run `switchtender assess awx export.json` on an AWX export to see what moves, what does not, and how
 many of your templates run today with nobody required to approve them. The same report is on
 [switchtender.com/assess](https://switchtender.com/assess), read in your browser and never uploaded.
-`switchtender import awx` then brings the projects, inventories, credentials, templates, and
-schedules across. The [migration guide](docs/migration.md) says what an import moves and what takes a
-person.
+`switchtender import awx export.json` then previews the import, and the same command with `--apply`
+brings the projects, inventories, credential shells, templates, and schedules across. The
+[migration guide](docs/migration.md) says what an import moves and what takes a person.
 
 ## Free, with no caps
 
@@ -341,7 +342,8 @@ The desktop command binds loopback only and mints no token: it is the single-use
 from that machine and nowhere else. The token above belongs to `serve`, which is the shape that
 listens on a network.
 
-Migrating is one command. Point it at an export to see what it would create, then apply:
+Importing is a preview, then an apply. Point the import at an export to see what it would create,
+then apply:
 
     ./switchtender import awx awx-export.json            # dry-run report
     ./switchtender import awx awx-export.json --apply     # create the objects
@@ -422,9 +424,9 @@ required.
 ## Status
 
 Version 1.x. Source-available under the Business Source License 1.1. The execution engine, the
-control plane, and the one-command migration off AWX, Semaphore, Rundeck, Jenkins, and cron are
-complete. The HTTP API is served under a stable `/v1` base path. A change an existing install
-notices on upgrade is listed in [Upgrading](docs/upgrading.md), with what to do about it.
+control plane, and the importers for AWX, Semaphore, Rundeck, Jenkins, and cron are complete. The
+HTTP API is served under a stable `/v1` base path. A change an existing install notices on upgrade
+is listed in [Upgrading](docs/upgrading.md), with what to do about it.
 
 ## History
 

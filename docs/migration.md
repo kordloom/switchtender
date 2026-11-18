@@ -8,7 +8,7 @@
 # Migrate off AWX, Semaphore, Rundeck, Jenkins, Chef, Puppet, or cron
 
 SwitchTender imports an AWX, Semaphore, Rundeck, Jenkins, Chef, or Puppet export, or a plain crontab,
-and creates the equivalent objects, so moving over is one command rather than a rebuild.
+and creates the equivalent objects, so moving over is an import rather than a rebuild.
 
 ## The migration summary
 

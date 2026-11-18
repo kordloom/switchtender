@@ -89,7 +89,7 @@ test("a schedule with neither a template nor a target is refused with a reason",
 test("an imported pipeline schedule saves its cadence without inventing a target", async () => {
 	// Every schedule a crontab import creates is an inline pipeline: no template, no playbook,
 	// steps only. The dialog's target-required check refused Save for exactly that shape, so the
-	// headline one-command import produced hundreds of schedules nobody could edit, and typing a
+	// headline import produced hundreds of schedules nobody could edit, and typing a
 	// playbook to appease the check saved a value the scheduler ignores.
 	const page = loadPage("schedules", {
 		routes: { "/v1/schedules/sch_pipe": reply({ ok: true }) },
