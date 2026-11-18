@@ -13,7 +13,7 @@ import (
 
 // userColumns is the shared select list for user reads.
 const userColumns = `id, username, password_hash, role, created_at, full_name, email, phone,
-	title, links, notes, source`
+	title, links, notes, source, issuer, subject`
 
 // userStore is a user.Store backed by the shared SQLite database.
 type userStore struct {
@@ -29,16 +29,18 @@ func (s *userStore) Save(ctx context.Context, u *user.User) error {
 	}
 	const q = `
 INSERT INTO users (id, username, password_hash, role, created_at,
-	full_name, email, phone, title, links, notes, source)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+	full_name, email, phone, title, links, notes, source, issuer, subject)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 ON CONFLICT(id) DO UPDATE SET
 	username=excluded.username, password_hash=excluded.password_hash,
 	role=excluded.role, created_at=excluded.created_at, full_name=excluded.full_name,
 	email=excluded.email, phone=excluded.phone, title=excluded.title, links=excluded.links,
-	notes=excluded.notes, source=excluded.source`
+	notes=excluded.notes, source=excluded.source, issuer=excluded.issuer,
+	subject=excluded.subject`
 	if _, err := s.db.ExecContext(ctx, q,
 		u.ID, u.Username, u.PasswordHash, string(u.Role), sqlutil.FormatTime(u.CreatedAt),
-		u.FullName, u.Email, u.Phone, u.Title, links, u.Notes, u.Source); err != nil {
+		u.FullName, u.Email, u.Phone, u.Title, links, u.Notes, u.Source, u.Issuer,
+		u.Subject); err != nil {
 		return fmt.Errorf("save user: %w", err)
 	}
 	return nil
@@ -232,7 +234,8 @@ func scanUser(sc scanner) (*user.User, error) {
 		links   string
 	)
 	if err := sc.Scan(&u.ID, &u.Username, &u.PasswordHash, &role, &created,
-		&u.FullName, &u.Email, &u.Phone, &u.Title, &links, &u.Notes, &u.Source); err != nil {
+		&u.FullName, &u.Email, &u.Phone, &u.Title, &links, &u.Notes, &u.Source, &u.Issuer,
+		&u.Subject); err != nil {
 		return nil, err
 	}
 	u.Role = user.Role(role)

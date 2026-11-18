@@ -173,6 +173,18 @@ type User struct {
 	// takeover the moment an operator points the username claim at an email attribute against an
 	// issuer that lets a user assert their own address.
 	Source string `json:"source,omitempty"`
+	// Issuer is the issuer of the directory identity that created the account, empty for an account
+	// an administrator made or one made before the field existed.
+	//
+	// It and Subject exist because an address can be reassigned to another person and the pair
+	// cannot: an identity provider guarantees an issuer and subject name one identity for good. A
+	// returning sign-in is matched on the pair, so a provider that never vouches for an address still
+	// signs the same person in, and a different identity asserting the same name does not. Neither
+	// field serializes to JSON, so no response shows them and no request body sets them.
+	Issuer string `json:"-"`
+	// Subject is the subject of the directory identity that created the account, empty for an
+	// account an administrator made or one made before the field existed. See Issuer.
+	Subject string `json:"-"`
 	// CreatedAt is when the user was created.
 	CreatedAt time.Time `json:"created_at"`
 }

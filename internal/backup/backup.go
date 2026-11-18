@@ -303,11 +303,18 @@ type templateDTO struct {
 	HostConfigKey string `json:"host_config_key,omitempty"`
 }
 
-// userDTO carries a user with its password hash, which the entity hides from JSON.
+// userDTO carries a user with its password hash and sign-in identity, which the entity hides from
+// JSON.
 type userDTO struct {
 	user.User
 	// PasswordHash is the hashed password, restored onto the entity's hidden field.
 	PasswordHash string `json:"password_hash"`
+	// Issuer is the issuer of the directory identity that created the account, restored onto the
+	// entity's hidden field. A backup written before the field has none, and its accounts restore
+	// with no stored identity.
+	Issuer string `json:"issuer,omitempty"`
+	// Subject is the subject of that identity, restored onto the entity's hidden field.
+	Subject string `json:"subject,omitempty"`
 }
 
 // tokenDTO carries an API token with its hidden hash, restored onto the entity's hidden field. The
@@ -529,7 +536,8 @@ func gather(ctx context.Context, s Stores) (*payload, Summary, error) {
 		return nil, sum, fmt.Errorf("backup: list users: %w", err)
 	}
 	for _, u := range users {
-		p.Users = append(p.Users, userDTO{User: *u, PasswordHash: u.PasswordHash})
+		p.Users = append(p.Users, userDTO{User: *u, PasswordHash: u.PasswordHash,
+			Issuer: u.Issuer, Subject: u.Subject})
 	}
 	sum.Users = len(users)
 
@@ -715,6 +723,8 @@ func apply(ctx context.Context, s Stores, p *payload) (Summary, error) {
 	for _, u := range p.Users {
 		acct := u.User
 		acct.PasswordHash = u.PasswordHash
+		acct.Issuer = u.Issuer
+		acct.Subject = u.Subject
 		if err := s.Users.Save(ctx, &acct); err != nil {
 			return sum, fmt.Errorf("restore: save user %s: %w", acct.ID, err)
 		}
