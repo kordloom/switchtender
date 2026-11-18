@@ -95,7 +95,8 @@ func TestLicensingPromiseSaysWherePaidCodeLives(t *testing.T) {
 		"Paid features live in a private module, and the paid build that carries them is a separate download",
 		"mounted at internal/paid/impl as a git submodule that public clones do not fetch",
 		"A Community build refuses each paid feature by naming the tier it needs.",
-		"The paid engine is not there to patch a key out of.",
+		"From v1.107.0 on, the paid engine is not there to patch a key out of.",
+		"Versions before v1.107.0 carried the paid features they had in the public tree under the Business Source License 1.1",
 		"Team is what lets you write the rule.",
 		"PostgreSQL, including active-active high availability on it, is Community.",
 	} {

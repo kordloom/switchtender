@@ -7,7 +7,7 @@
 
 # Quickstart
 
-No install needed to look around. The [live demo](https://demo.switchtender.com/ui/held?who=agent) is a read-only instance of exactly what you get, seeded with real runs against a made-up fleet. It runs open on purpose: every page and every API read works without signing in, and every change is refused. An install you run never serves open on a network address. Only loopback and `--read-only` may, and it warns when it does.
+No install needed to look around. The [live demo](https://demo.switchtender.com/ui/held?who=agent) is a read-only instance of exactly what you get, seeded with real runs against a made-up fleet. It runs open on purpose: every Community page and API read works without signing in, every change is refused, and anything marked Pro or Team needs the paid build and a license. An install you run never serves open on a network address. Only loopback and `--read-only` may, and it warns when it does.
 
 ## Requirements
 

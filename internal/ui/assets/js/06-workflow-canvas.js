@@ -639,8 +639,9 @@ function readOnlyBanner() {
 	witness.href = "https://switchtender.com/#proof";
 	witness.textContent = "point a witness at it";
 	banner.append("Read-only demo of the Community build, the one you download, reset every night on purpose. " +
-		"It runs open on purpose, on made-up data: every page and every API read works without signing in, " +
-		"and every change is refused. An install you run never serves open on a network address. Start with ",
+		"It runs open on purpose, on made-up data: every Community page and API read works without signing in, " +
+		"every change is refused, and anything marked Pro or Team needs the paid build and a license. " +
+		"An install you run never serves open on a network address. Start with ",
 		held, ". Then ", witness, " today and again tomorrow, and watch it catch the rewrite.");
 	return banner;
 }

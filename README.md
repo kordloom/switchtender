@@ -99,10 +99,10 @@ and the spec digest, is committed to the chain by the process that observed it f
 the execution, the outcome, into one signed file. `switchtender verify` checks it with no database
 and no network: every chain link recomputes, the approver's decision provably binds the digest of
 the spec that executed, and, when anchoring is configured, external RFC 3161 timestamps fix the
-history in time. Once the chain is anchored, the check needs no trust in the server that produced
-it. The same bytes verify under the open [loomseal](https://loomseal.com) verifier, which KordLoom
-also publishes, and its separate Python reference implementation, both held to the same
-conformance vectors.
+history in time. Once the chain is anchored and the reader pins both the install's key and the
+timestamp authority, the check needs no trust in the server that produced it. The same bytes verify
+under the open [loomseal](https://loomseal.com) verifier, which KordLoom also publishes, and its
+separate Python reference implementation, both held to the same conformance vectors.
 
 The remaining three stages are load-bearing but not headline: identity resolves who is asking and
 caps what an agent may ever do, risk grades each operation from its command and its reach so
@@ -169,13 +169,14 @@ it starts only for an agent token. The full walkthrough is in
 
 ## Proven against a real cluster on every push
 
-Every push to main deploys this repository's own Helm chart into a fresh Kind cluster and proves
-the product against three real SSH machines: the free tier runs a playbook across the fleet, and
-the paid tier walks the whole governed arc, from a destructive playbook graded irreversible by its
-own text, through a hold an AI agent cannot release on its own request, to a real deletion
-verified over `kubectl exec` and a receipt verified offline by a binary that never spoke to the
-cluster. Altering one recorded byte makes verification refuse. Every claim and its evidence lands
-in the run's summary, with screenshots of the deployed UI in the artifacts.
+Every push to main deploys this repository's own Helm chart into a fresh Kind cluster and proves the
+Community build against three real SSH machines: a playbook runs across the fleet, the marker it
+wrote on each machine is read back over `kubectl exec`, and the receipt is verified offline by a
+binary that never spoke to the cluster. The governed arc, from a destructive playbook graded
+irreversible by its own text, through a hold an AI agent cannot release on its own request, to a
+real deletion verified over `kubectl exec`, runs in the paid build's own pipeline on each release
+tag. In that pipeline, rewriting one recorded name makes verification refuse. Every claim and its
+evidence lands in the run's summary, with screenshots of the deployed UI in the artifacts.
 
 [How to read a run, and what it has already caught](docs/supertest.md). Run it yourself:
 
@@ -452,9 +453,9 @@ which Team can also buy as an add-on. Every paid feature ships in the paid build
 download unlocked by a signed license file: no license server, no phone-home, flat per org. The paid
 code is kept in a private repository, mounted at internal/paid/impl as a git submodule that public
 clones do not fetch. A Community build refuses each paid feature by naming the tier it needs, and
-the paid engine is not there to patch a key out of. The one reserved right is offering SwitchTender
-to third parties as a hosted or managed service that provides its primary functionality. Each
-version of the public core converts to Apache-2.0 two years after its release.
+from v1.107.0 on the paid engine is not there to patch a key out of. The one reserved right is
+offering SwitchTender to third parties as a hosted or managed service that provides its primary
+functionality. Each version of the public core converts to Apache-2.0 two years after its release.
 
 See `LICENSE` for the exact terms and [`LICENSING.md`](LICENSING.md) for what self-hosting grants,
 how a commercial license works, and how to ask about support.

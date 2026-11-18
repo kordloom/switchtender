@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// phaseHA proves the sentence the Team tier sells: active-active HA. Two servers share one
+// phaseHA proves active-active HA, which every build carries. Two servers share one
 // PostgreSQL database and one signing identity; one of them is killed while a run is executing
 // and while the control plane is being used, and the product must not blink: the run completes
 // exactly once, the surviving replica serves authenticated reads and writes while its peer is
