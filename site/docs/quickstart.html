@@ -253,7 +253,7 @@ service user alone:</p>
 <pre><code>kubectl exec deploy/switchtender-server -- cat /data/initial-admin-token
 </code></pre>
 <p>Sign in with it, create named accounts and tokens, and delete it.</p>
-<p>Point <code>database.dsn</code> at PostgreSQL to run more than one server. Dedicated workers are Team, and
+<p>Point <code>database.dsn</code> at PostgreSQL to run more than one server. Distributed workers are Team, and
 they need the paid image as well as the license: the image on ghcr is the Community build, which has
 no worker in it, and the chart refuses <code>worker.enabled=true</code> on it. The paid download carries the
 paid image as an OCI archive per architecture. Load it into your own registry, then set
@@ -276,6 +276,28 @@ read-only so it is safe to expose:</p>
 sends it hashes only. <code>--anchor-tsa &quot;&quot;</code> skips that.</p>
 <p>Or with Docker, from a checkout: <code>docker compose --profile demo up --build</code>, which serves on port
 8081 so it can run beside the stack. <code>SWITCHTENDER_DEMO_PORT</code> moves it.</p>
+<h2 id="remove-it">Remove it</h2>
+<p>Stop the server, then delete what it wrote. Take a backup first if you might want the history back.</p>
+<ul>
+<li>The binary: <code>/usr/local/bin/switchtender</code>, or <code>~/.local/bin/switchtender</code> when the install
+script could not write there, or wherever <code>PREFIX</code> pointed it.</li>
+<li>The state directory, which is the directory of the database: <code>switchtender.db</code> with its <code>-wal</code> and
+<code>-shm</code> files, <code>producer-key.json</code>, and the managed Ansible runtime in <code>ansible/</code> if you installed
+one. The desktop app keeps all of this in the data directory <a href="/docs/desktop">Desktop</a> names.</li>
+<li>Project checkouts under the account's cache directory, in <code>switchtender/projects</code>:
+<code>~/Library/Caches</code> on macOS, <code>~/.cache</code> on Linux.</li>
+<li>Run files in <code>switchtender-runfiles-&lt;uid&gt;</code> under the system temporary directory, or in
+<code>switchtender-runfiles</code> under <code>$XDG_RUNTIME_DIR</code> when that is set. They stay after the server
+stops.</li>
+<li>The environment file <code>switchtender init</code> wrote (<code>switchtender.env</code> by default) and the systemd
+unit, if you asked for one, plus any witness files you created.</li>
+</ul>
+<pre><code class="language-sh">rm -f &quot;$(command -v switchtender)&quot;
+rm -rf ~/Library/Caches/switchtender ~/.cache/switchtender   # whichever exists
+rm -rf &quot;${TMPDIR:-/tmp}&quot;/switchtender-runfiles-*
+</code></pre>
+<p>Delete the state directory last, once you are sure, because the database and <code>producer-key.json</code>
+are the only copy of the audit chain and the identity that signs it.</p>
 
 		</main>
 	</div>

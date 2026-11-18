@@ -14,11 +14,11 @@ approving their own runs, and evidence a third party verifies offline. Where a v
 partial answer, the cell says so. Everything after those rows is controller work, where the field
 is often even.
 
-Every claim about another product was checked against that vendor's own documentation on
-2026-10-08, for AWX 24.6.1, Ansible Automation Platform 2.7-9 with automation orchestrator 2026.8,
-Semaphore 2.19.16, Ascender 25.6.2, and Rundeck 6.2.1. All of these ship, and a comparison decays
-the day it is written. Check a row against the current release before relying on it, and open an
-issue if one has gone stale.
+Every claim about another product was checked against that vendor's own documentation on 2026-11-11,
+for AWX 24.6.1, Semaphore 2.20.23, Ascender 25.6.3, and Rundeck 6.3.0, and on 2026-10-08 for Ansible
+Automation Platform 2.7-9 with automation orchestrator 2026.8. AWX is frozen at 24.6.1 and the
+others ship, and a comparison decays the day it is written. Check a row against the current release
+before relying on it, and open an issue if one has gone stale.
 
 ## The field, side by side
 
@@ -38,10 +38,10 @@ set rather than by not finding it.
 | Tools it executes | Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go | Ansible only [6] | Ansible playbooks and rulebooks; REST and AI agent steps in automation orchestrator, a separately installed component [7] | Ansible, Terraform, OpenTofu, Terragrunt, PowerShell, Bash, Python, plus any executable as a custom app [8] | Ansible only [9] | Ansible plus generic scripts, no Terraform step [10] |
 | Live per-host status | Host-by-task matrix | Host status bar, per-event drill-down [11] | Host status bar, per-event drill-down [12] | Timestamped log; per-host OK and failed counts for Ansible; execution summary is Pro [13] | Host status bar, per-event drill-down [14] | Per-node, per-step monitor [15] |
 | Tamper-evident audit | Hash-chained, signed, anchored | No [16] | No; Red Hat directs user activity logs to external providers for non-repudiation [17] | No; activity log with syslog and webhook export in paid tiers [18] | No; activity stream forwarded to log aggregators, Ledger change diffs exported as CSV or PDF [19] | No; activity log in all editions, audit trail commercial, nothing hashed or signed [20] |
-| RBAC in the free tier | Full, plus per-object grants | Yes, no paid tier exists [26] | Yes, subscription required for the product [27] | Four fixed project roles; custom roles are Enterprise [28] | Yes [29] | Yes, and finely grained; GUI editor is commercial [30] |
+| RBAC in the free tier | Full, plus per-object grants | Yes, no paid tier exists [26] | Yes, subscription required for the product [27] | Fixed project roles; custom roles are Enterprise, and 2.20 adds global roles on Pro [28] [44] | Yes [29] | Yes, and finely grained; GUI editor is commercial [30] |
 | Drift report and reconcile | Yes, from a scheduled dry run, with one-click reconcile on Team | Not documented | Not documented | Not documented | Ascender Pro through Ledger, described by the vendor as watching baselines between runs; no reconcile documented | Not documented |
-| Workflows | DAG with a drag-and-drop editor | Visual editor [31] | Visual editor [32] | DAG with conditional edges, approval, delay, and note nodes, graphical editor, shipped in 2.19 as beta [33] | Visual editor [34] | Engine yes; visualization is commercial [35] |
-| Minimum published footprint | One binary, one database | Not published as a single figure | 16 GB RAM, 4 CPU, 60 GB, 3000 IOPS; automation orchestrator needs OpenShift 4.14 or later [2] | 512 MB RAM, 1 CPU core [36] | 2 CPU, 4 GB RAM without Pro, 8 GB with, 20 GB [37] | 8 GB RAM, 2 CPU [5] |
+| Workflows | DAG with a drag-and-drop editor | Visual editor [31] | Visual editor [32] | DAG with conditional edges, approval, delay, and note nodes, graphical editor, added in 2.19 [33] | Visual editor [34] | Engine yes; visualization is commercial [35] |
+| Minimum published footprint | One binary, one database | Not published as a single figure | 16 GB RAM, 4 CPU, 60 GB, 3000 IOPS; automation orchestrator needs OpenShift 4.14 or later [2] | Not published as a single figure | 2 CPU, 4 GB RAM without Pro, 8 GB with, 20 GB [37] | 8 GB RAM, 2 CPU [5] |
 | License | BSL 1.1, converts to Apache 2.0 | Apache 2.0 [38] | Paid subscription [39] | MIT [40] | Apache 2.0 [41] | Apache 2.0, commercial tier separate [42] |
 
 ### Where the field is even or ahead
@@ -76,15 +76,15 @@ than "structured versus scrollback".
 | Run view | A structured host-by-task matrix with per-task drill-down, painted live over Server-Sent Events. | A host status bar with per-event drill-down, which is a summary rather than a matrix. | A timestamped log with per-host OK and failed counts for Ansible. |
 | Job splitting | Shards balanced by each host's measured past duration, with only the failed shards retried. | Job slicing, round-robin. | Not available. |
 | Pipelines | A dependency graph with parallel branches, per-step retries, and typed set_stats outputs passed to dependents. | Visual workflows. | A DAG of task templates with conditional edges. |
-| Visual workflow editor | A drag-and-drop canvas at Workflows builds the dependency graph in the browser: draft persistence, undo, keyboard editing, cycle refusal, and a pan, zoom, and fit-to-view viewport, on the same DAG engine the API uses. | A drag-and-drop editor. | A graphical editor, shipped in 2.19 as beta. |
+| Visual workflow editor | A drag-and-drop canvas at Workflows builds the dependency graph in the browser: draft persistence, undo, keyboard editing, cycle refusal, and a pan, zoom, and fit-to-view viewport, on the same DAG engine the API uses. | A drag-and-drop editor. | A graphical editor, added in 2.19. |
 | Fleet memory | Flaky-host detection, outcome sparklines, per-host history, and task duration trends across runs. | Per-host job summaries, with no flaky-host detection or duration trends. | Per-task output; inventory change history is on its roadmap for 2.22. |
 | Distributed workers | Store leasing, where the same single binary adds capacity, held together by leases and a janitor that requeues a crashed worker's runs. | A Receptor mesh. | Global runners are free; project-isolated runners and tag routing are Pro. |
 | Instance groups | A queue pins work at the run, template, or inventory level, most specific wins, so jobs land on the right worker group (Team). | Instance groups. | Runner tag routing, Pro. |
-| High availability | Active-active replicas on PostgreSQL behind any load balancer: store-claimed work, compare-and-set schedules and approvals, automatic failover through stale-lease reclaim, proven by a two-replica integration suite. | Via Kubernetes replicas. | With Redis [3]. |
+| High availability | Active-active replicas on PostgreSQL behind any load balancer: store-claimed work, compare-and-set schedules and approvals, automatic failover through stale-lease reclaim, proven by a two-replica integration suite. | Via Kubernetes replicas. | With Redis [3], listed as Enterprise on its pricing page [28]. |
 | Provable audit | A tamper-evident SHA-256 hash chain, exported as a signed LoomSeal bundle and verified offline by an open verifier. | An activity stream. | An activity log of acting user, affected object, action, IP, and user agent; syslog over TLS and Splunk HEC webhook in paid tiers; nothing hashed or signed. |
-| Migration in | One command imports an AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins export, a Rundeck project archive, or a plain crontab. AWX and Semaphore bring projects, inventories, and credential shells across with their templates, surveys, and schedules; Rundeck and Jenkins bring templates, surveys, and schedules against an inventory you name, and a Rundeck project archive brings one project as well when its source control configuration names a repository this can reach; a crontab brings schedules. Neither Rundeck artifact brings an inventory. See [what each source brings over](migration.md#what-each-source-brings-over). | Not applicable. | Not applicable. |
+| Migration in | An importer reads an AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins export, a Rundeck project archive, or a plain crontab, previews what it would create, and writes with `--apply`. AWX and Semaphore bring projects, inventories, and credential shells across with their templates, surveys, and schedules; Rundeck and Jenkins bring templates, surveys, and schedules against an inventory you name, and a Rundeck project archive brings one project as well when its source control configuration names a repository this can reach; a crontab brings schedules. Neither Rundeck artifact brings an inventory. See [what each source brings over](migration.md#what-each-source-brings-over). | Not applicable. | Not applicable. |
 | Drift detection | A dry run reports what has diverged from the desired state, across Ansible hosts and Terraform working directories, with a one-click approval-gated reconcile to fix it. | No. | No. |
-| Directory-driven roles | A directory or token group sets a user's role on every sign-in, over LDAP, SAML, or a bearer JWT, on Pro. OIDC provisions every account at one configurable default role instead. | Organization mapping, complex. | Group mapping is listed as Enterprise on its pricing page and targeted at 2.20 on its roadmap; its team docs say it is not currently supported. |
+| Directory-driven roles | A directory or token group sets a user's role on every sign-in, over LDAP, SAML, or a bearer JWT, on Pro. OIDC provisions every account at one configurable default role instead. | Organization mapping, complex. | Identity provider group to role mapping shipped in 2.20 and is listed as Enterprise [44]. |
 | Notification channels | Eleven server-wide: webhook, email, Slack, Mattermost, Rocket.Chat, Discord, Teams, ntfy, PagerDuty, Grafana, and Twilio. All eleven take a per-template target, so a team pages its own channel; a Twilio or email target names only a recipient and sends through the server-held account, so the account secret never lives in a template. A named target is defined once and attached to templates, schedules, projects, and organizations, the way AWX attaches a notification template. | A similar set plus IRC, without Discord or ntfy, attached to organizations, projects, job templates, workflows, and each inventory source. | Email, Slack, Teams, and others in Community. |
 
 ## Where they are even
@@ -101,7 +101,7 @@ than "structured versus scrollback".
 | Planning and applying from a pull request | SwitchTender plans a GitHub or GitLab pull request and comments the plan with the decision its apply would get. A person whose forge account is linked can comment `/switchtender apply` to approve and apply that plan, with the same role, grants, and separation of duties as the queue, the way Atlantis applies from a comment. A rule that requires the approver's reason still needs the decision made in SwitchTender, since a comment carries none. |
 | Metrics | SwitchTender exposes Prometheus metrics for scraping. |
 | Directory sign-in | SwitchTender, AWX, and Semaphore all sign in with LDAP and OpenID Connect. SwitchTender prices its Pro tier at $500 a year, flat per organization, with deny rules, risk and reversibility floors, and SSO. Semaphore Pro starts at $20 a month or $199 a year for 50 managed nodes and 500 managed resources, configurable by node count with an unlimited tier, and one license covers up to three instances. AWX ships SSO free inside a Kubernetes-sized install. |
-| Paid tiers | SwitchTender: Community free with plain rules, Pro $500 a year to 500 hosts (SSO, deny rules, risk and reversibility floors, and email support), Team $7,500 to $45,000 by fleet band (full policy engine, dedicated workers and named queues, and the relay that runs them inside networks the control node cannot reach, drift reconcile, change register), Enterprise from $50,000. AWX: free, no paid tier; the paid product is Ansible Automation Platform. Semaphore: Community free, Pro from $199 a year at 50 managed nodes, Enterprise by contract. Ascender: core free; Ascender Pro $100 per node per year Standard or $150 Premium, with no node minimum on the pricing page and no minimum after an initial 100-node purchase on the compare page, as of 2026-10-08. |
+| Paid tiers | SwitchTender: Community free with plain rules, Pro $500 a year to 500 hosts (SSO, deny rules, risk and reversibility floors, and email support), Team $7,500 to $45,000 by fleet band (full policy engine, distributed workers and named queues, and the relay that runs them inside networks the control node cannot reach, drift reconcile, change register), Enterprise from $50,000. AWX: free, no paid tier; the paid product is Ansible Automation Platform. Semaphore: Community free, Pro from $199 a year at 50 managed nodes, Enterprise by contract. Ascender: core free; Ascender Pro $100 per node per year Standard or $150 Premium, with no node minimum on the pricing page and no minimum after an initial 100-node purchase on the compare page, as of 2026-10-08. |
 
 ## Where SwitchTender is behind
 
@@ -115,12 +115,10 @@ than "structured versus scrollback".
 
 SwitchTender is the only product in this table whose approval is bound to a digest of the content
 that runs and whose evidence a third party verifies offline. Its AI agents cannot approve their own
-runs, which no other product in the table documents. Outside the table, Spacelift's confirmation
-accepts the plan generated in the planning phase for infrastructure-as-code runs; it does not cover
-an inventory snapshot or a container image. The controller work underneath, one binary, a live
-matrix, balanced splits, fleet memory, a visual DAG editor, and a one-command import from six
-tools, ships in Community. It is younger, and its integration catalog is smaller. Both gaps
-are being closed on purpose.
+runs, which no other product in the table documents. The controller work underneath, one binary, a
+live matrix, balanced splits, fleet memory, a visual DAG editor, and importers for six tools, ships
+in Community. It is younger, and its integration catalog is smaller. Both gaps are being closed on
+purpose.
 
 The [reliability](reliability.md) page details how runs execute under load: bounded workers, splits
 balanced by measured duration, coordinated pipeline failure, crash recovery through leases, and a
@@ -174,6 +172,7 @@ Fetched and read on 2026-10-08.
 41. Ascender license: <https://raw.githubusercontent.com/ctrliq/ascender/main/LICENSE>
 42. Rundeck license: <https://github.com/rundeck/rundeck>
 43. AI agent features and the limits each vendor documents. AAP orchestrator agentic steps and approvals: <https://docs.redhat.com/en/documentation/automation_orchestrator/2026.8/discover-agentic_steps_in_a_workflow>, <https://docs.redhat.com/en/documentation/automation_orchestrator/2026.8/develop-understand_workflow_approvals>. Semaphore MCP server: <https://semaphoreui.com/>, <https://semaphoreui.com/pricing>. Rundeck MCP best practices: <https://docs.rundeck.com/docs/mcp/best-practices.html>. Ascender product and compare pages, which describe no AI feature: <https://ciq.com/products/ascender>, <https://ciq.com/compare/ascender-pro-vs-ansible>
+44. Semaphore 2.20 release notes: <https://semaphoreui.com/releases/semaphore-v2_20>
 
 Every product here ships, so treat this as a snapshot taken on the date above rather than a standing
 claim. A row that has gone stale is a bug: open an issue and it gets corrected.

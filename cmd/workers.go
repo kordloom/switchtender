@@ -13,7 +13,7 @@ import (
 // started four of them and the operator had no way to tell from the outside. Whoever set it for
 // that reason got the opposite of it, silently, on the node they were trying to keep clean.
 //
-// Refusing is the honest answer while the server executes its own runs. Dedicated workers are
+// Refusing is the honest answer while the server executes its own runs. Distributed workers are
 // additive rather than a way to move execution off the server, so there is nothing to point a
 // zero at yet.
 func checkWorkers(n int, hint string) error {
@@ -29,7 +29,7 @@ func checkWorkers(n int, hint string) error {
 const (
 	// serveWorkersHint answers the operator trying to keep execution off the API node.
 	serveWorkersHint = "The server executes its own runs, so there is no setting that makes it " +
-		"execute none. Dedicated workers add capacity alongside it rather than taking execution off it."
+		"execute none. Distributed workers add capacity alongside it rather than taking execution off it."
 	// workerWorkersHint answers a worker asked to execute nothing, which would idle forever.
 	workerWorkersHint = "A worker with no slots leases nothing and would sit idle. Stop the worker " +
 		"instead, or give it the number of concurrent runs it should take."

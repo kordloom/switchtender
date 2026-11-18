@@ -184,7 +184,7 @@ func (q *queueRecorder) queues() [][]string {
 
 // TestWithQueuesReachesTheClaim pins the wiring between the option and the claim it governs. A worker
 // given named queues must ask for exactly those: asking for the default pool instead would have a
-// dedicated worker quietly execute the whole fleet's ungated work, which is the opposite of what
+// distributed worker quietly execute the whole fleet's ungated work, which is the opposite of what
 // naming a queue is for.
 func TestWithQueuesReachesTheClaim(t *testing.T) {
 	t.Parallel()

@@ -161,7 +161,7 @@ func TestPuppetReadsNodesFactsAndAPlainList(t *testing.T) {
 		Doc: `[{"certname":"b.prod","name":"ipaddress","value":"10.0.0.2"},
 		       {"certname":"b.prod","name":"osfamily","value":"RedHat"}]`,
 		WantHost: "b.prod", WantVar: "ansible_host=10.0.0.2",
-	}, { // Test 2: The plain certname list `puppet node list` prints.
+	}, { // Test 2: A plain certname list, one name per line.
 		Doc:      "c.prod\nd.prod\n\n# a comment\n",
 		WantHost: "c.prod",
 	}}

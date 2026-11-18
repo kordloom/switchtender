@@ -244,7 +244,7 @@ service user alone:
 
 Sign in with it, create named accounts and tokens, and delete it.
 
-Point `database.dsn` at PostgreSQL to run more than one server. Dedicated workers are Team, and
+Point `database.dsn` at PostgreSQL to run more than one server. Distributed workers are Team, and
 they need the paid image as well as the license: the image on ghcr is the Community build, which has
 no worker in it, and the chart refuses `worker.enabled=true` on it. The paid download carries the
 paid image as an OCI archive per architecture. Load it into your own registry, then set
@@ -272,3 +272,29 @@ sends it hashes only. `--anchor-tsa ""` skips that.
 
 Or with Docker, from a checkout: `docker compose --profile demo up --build`, which serves on port
 8081 so it can run beside the stack. `SWITCHTENDER_DEMO_PORT` moves it.
+
+## Remove it
+
+Stop the server, then delete what it wrote. Take a backup first if you might want the history back.
+
+- The binary: `/usr/local/bin/switchtender`, or `~/.local/bin/switchtender` when the install
+  script could not write there, or wherever `PREFIX` pointed it.
+- The state directory, which is the directory of the database: `switchtender.db` with its `-wal` and
+  `-shm` files, `producer-key.json`, and the managed Ansible runtime in `ansible/` if you installed
+  one. The desktop app keeps all of this in the data directory [Desktop](desktop.md) names.
+- Project checkouts under the account's cache directory, in `switchtender/projects`:
+  `~/Library/Caches` on macOS, `~/.cache` on Linux.
+- Run files in `switchtender-runfiles-<uid>` under the system temporary directory, or in
+  `switchtender-runfiles` under `$XDG_RUNTIME_DIR` when that is set. They stay after the server
+  stops.
+- The environment file `switchtender init` wrote (`switchtender.env` by default) and the systemd
+  unit, if you asked for one, plus any witness files you created.
+
+```sh
+rm -f "$(command -v switchtender)"
+rm -rf ~/Library/Caches/switchtender ~/.cache/switchtender   # whichever exists
+rm -rf "${TMPDIR:-/tmp}"/switchtender-runfiles-*
+```
+
+Delete the state directory last, once you are sure, because the database and `producer-key.json`
+are the only copy of the audit chain and the identity that signs it.

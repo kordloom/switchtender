@@ -37,7 +37,8 @@ saw, and a run that no longer matches is refused. AI agents wait for a person by
 never approve. Every finished run leaves a signed receipt anyone can verify offline.
 
 Free to self-host with no host or seat caps. One binary, one SQLite file, no Kubernetes.
-One-command import from AWX, AAP, Semaphore, Rundeck, and Jenkins. Source-available under BSL 1.1.
+Imports from AWX, AAP, Semaphore, Rundeck, and Jenkins, with a dry run first.
+Source-available under BSL 1.1.
 
 ## Contents
 
@@ -197,8 +198,8 @@ templates nobody currently has to approve, without writing a thing.
 
 AWX asks for a cluster before it runs a playbook. A Kubernetes operator,
 Postgres, Redis, and a mesh to reach your hosts, all standing before the first task does. Then a run
-finishes and hands you a text log to scroll, and across runs nothing flags a flaky host or trends a
-task's duration.
+finishes as a streamed log with a host status bar, and across runs nothing flags a flaky host or
+trends a task's duration.
 
 SwitchTender runs those same playbooks from one binary and treats every run as structured data you
 can read, split, and remember. One process, one database, and a live host-by-task matrix instead
@@ -207,17 +208,16 @@ of scrollback.
 |                                      | SwitchTender                                                                        | AWX                                             | Semaphore                |
 |--------------------------------------|-----------------------------------------------------------------------------------|-------------------------------------------------|--------------------------|
 | Deploy                               | One binary and one SQLite file, running in seconds.                               | A Kubernetes operator, Postgres, Redis, and Receptor first. | One binary.              |
-| Every&nbsp;run                       | A live host-by-task matrix you read like a dashboard, with per-task drill-down.   | A host status bar over a streamed log, with per-event host drill-down. | A status and a streamed log. |
+| Every&nbsp;run                       | A live host-by-task matrix you read like a dashboard, with per-task drill-down.   | A host status bar over a streamed log, with per-event host drill-down. | A streamed log with per-host OK and failed counts for Ansible. |
 | Big&nbsp;jobs                        | Sharded across hosts, balanced by their measured duration, only failed shards retried. | Sliced round-robin, with no balancing.     | No splitting at all.     |
 | Memory&nbsp;across&nbsp;runs         | Flaky hosts flagged, durations trended, every host's history kept.               | Job history and per-host summaries, no flaky-host flag or trend. | Each task's log, no host tracked across runs. |
-| Pipelines                            | A dependency graph with a drag-and-drop editor, passing Ansible `set_stats` outputs from one step to the next. | A visual workflow builder.       | Basic chaining.          |
+| Pipelines                            | A dependency graph with a drag-and-drop editor, passing Ansible `set_stats` outputs from one step to the next. | A visual workflow builder.       | A workflow graph with approval nodes and a visual editor, listed as Pro in its docs. |
 | Leaving&nbsp;your&nbsp;old&nbsp;tool | Importers read AWX, Semaphore, Chef, Puppet, Rundeck, Jenkins, and crontabs. AWX and Semaphore bring projects, inventories, credential shells, templates, surveys, and schedules; Rundeck and Jenkins bring templates, surveys, and schedules, against an inventory you name, and a Rundeck project archive brings one project as well when its source control configuration names a repository this can reach; a crontab brings schedules; Chef and Puppet are desired-state systems rather than control planes, so they bring the fleet as an inventory, grouped by environment and, for Chef, by run-list role. [What each source brings over](docs/migration.md#what-each-source-brings-over). | Not applicable.                     | Not applicable.          |
 
 The full head-to-head, including where SwitchTender is behind, is in the
 [comparison](docs/comparison.md).
 
-Checked against vendor documentation on 2026-08-10, for AWX 24.6.1 and Semaphore 2.19.7. Release
-state re-verified 2026-11-02 (AWX still 24.6.1, Semaphore at 2.19.18). These
+Checked against vendor documentation on 2026-11-11, for AWX 24.6.1 and Semaphore 2.20.23. These
 products ship, and a table like this decays. If a row is out of date, open an issue and it gets
 corrected.
 
@@ -230,9 +230,9 @@ AWX import is the on-ramp.
 Run `switchtender assess awx export.json` on an AWX export to see what moves, what does not, and how
 many of your templates run today with nobody required to approve them. The same report is on
 [switchtender.com/assess](https://switchtender.com/assess), read in your browser and never uploaded.
-`switchtender import awx` then brings the projects, inventories, credentials, templates, and
-schedules across. The [migration guide](docs/migration.md) says what an import moves and what takes a
-person.
+`switchtender import awx export.json` then previews the import, and the same command with `--apply`
+brings the projects, inventories, credential shells, templates, and schedules across. The
+[migration guide](docs/migration.md) says what an import moves and what takes a person.
 
 ## Free, with no caps
 
@@ -341,7 +341,8 @@ The desktop command binds loopback only and mints no token: it is the single-use
 from that machine and nowhere else. The token above belongs to `serve`, which is the shape that
 listens on a network.
 
-Migrating is one command. Point it at an export to see what it would create, then apply:
+Importing is a preview, then an apply. Point the import at an export to see what it would create,
+then apply:
 
     ./switchtender import awx awx-export.json            # dry-run report
     ./switchtender import awx awx-export.json --apply     # create the objects
@@ -415,16 +416,14 @@ required.
 
 ## Roadmap
 
-- A hosted option.
-- Signed desktop packages for Windows, and a signed macOS tarball.
-- Group-driven roles for OIDC sign-in, which LDAP, SAML, and JWT already have.
+What comes next, engines and near-term work alike, is in [docs/roadmap.md](docs/roadmap.md).
 
 ## Status
 
 Version 1.x. Source-available under the Business Source License 1.1. The execution engine, the
-control plane, and the one-command migration off AWX, Semaphore, Rundeck, Jenkins, and cron are
-complete. The HTTP API is served under a stable `/v1` base path. A change an existing install
-notices on upgrade is listed in [Upgrading](docs/upgrading.md), with what to do about it.
+control plane, and the importers for AWX, Semaphore, Rundeck, Jenkins, and cron are complete. The
+HTTP API is served under a stable `/v1` base path. A change an existing install notices on upgrade
+is listed in [Upgrading](docs/upgrading.md), with what to do about it.
 
 ## History
 
@@ -444,18 +443,18 @@ the agent gate, which holds an agent token's runs for a person with no rule writ
 your own, require-approval policies and exemptions, approvals bound to the exact content released,
 and the whole evidence engine with signed receipts and offline verification. Pro adds directory
 sign-in (OIDC, SAML, LDAP, JWT), deny rules, and risk and reversibility floors at $500 a year for up
-to 500 hosts. Team, from $7,500 a year by fleet band, adds the full policy engine, dedicated workers
-and named queues, and the relay that runs them inside networks the control node cannot reach, the
-change register, and one-click drift reconcile. PostgreSQL, including active-active HA on it, is
-Community. Enterprise, from $50,000 a year, adds the services that come from outside your install:
-custody of your evidence, evidence work on your audit calendar, and the hosted witness, which Team
-can also buy as an add-on. Every paid feature ships in the paid build, a separate download unlocked
-by a signed license file: no license server, no phone-home, flat per org. The paid code is kept in a
-private repository, mounted at internal/paid/impl as a git submodule that public clones do not
-fetch. A Community build refuses each paid feature by naming the tier it needs, and the paid engine
-is not there to patch a key out of. The one reserved right is offering SwitchTender to third parties
-as a hosted or managed service that provides its primary functionality. Each version of the public core converts to
-Apache-2.0 two years after its release.
+to 500 hosts. Team, from $7,500 a year by fleet band, adds the full policy engine, distributed
+workers and named queues, and the relay that runs them inside networks the control node cannot
+reach, the change register, and one-click drift reconcile. PostgreSQL, including active-active HA on
+it, is Community. Enterprise, from $50,000 a year, adds the services that come from outside your
+install: custody of your evidence, evidence work on your audit calendar, and the hosted witness,
+which Team can also buy as an add-on. Every paid feature ships in the paid build, a separate
+download unlocked by a signed license file: no license server, no phone-home, flat per org. The paid
+code is kept in a private repository, mounted at internal/paid/impl as a git submodule that public
+clones do not fetch. A Community build refuses each paid feature by naming the tier it needs, and
+the paid engine is not there to patch a key out of. The one reserved right is offering SwitchTender
+to third parties as a hosted or managed service that provides its primary functionality. Each
+version of the public core converts to Apache-2.0 two years after its release.
 
 See `LICENSE` for the exact terms and [`LICENSING.md`](LICENSING.md) for what self-hosting grants,
 how a commercial license works, and how to ask about support.

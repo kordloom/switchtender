@@ -38,7 +38,7 @@
   "Live host-by-task matrix and per-host history across runs",
   "Drift detection from a dry run",
   "One static Go binary and one SQLite file, with PostgreSQL optional",
-  "One-command import from AWX-format exports (AWX, Tower, and Automation Controller), Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab"
+  "Import from AWX-format exports (AWX, Tower, and Automation Controller), Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab, each with a dry run first"
  ],
  "license": "https://mariadb.com/bsl11/",
  "name": "SwitchTender",
@@ -114,7 +114,7 @@
 							<a class="btn" href="https://github.com/kordloom/switchtender/releases/latest">Download the latest release</a>
 							<a class="ghost" href="https://github.com/kordloom/switchtender/releases">All releases</a>
 						</div>
-						<p>Pick the build for your platform: the <code>.dmg</code> or a <code>darwin</code> tarball on macOS, a <code>linux</code> tarball on Linux, or the <code>windows</code> zip. Verify it against the <code>SHA256SUMS</code> file on the same release. On macOS the app in the <code>.dmg</code> is signed and notarized. The binary in the tarball is not yet, so if you downloaded it through a browser, clear the quarantine flag before running it: <code>xattr -d com.apple.quarantine ./switchtender</code>.</p>
+						<p>Pick the build for your platform: the <code>.dmg</code> or a <code>darwin</code> tarball on macOS, a <code>linux</code> tarball on Linux, or the <code>windows</code> zip. Verify it against the <code>SHA256SUMS</code> file on the same release. On macOS the app in the <code>.dmg</code> and the binary in the tarball are both signed and notarized. If you ever remove it, <a href="/docs/quickstart#remove-it">the quick start lists everything it writes</a>.</p>
 						<p>Prefer to build from source? With the Go toolchain installed:</p>
 						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>go install github.com/kordloom/switchtender@latest</code></pre></div>
 						<p>Ansible runs need ansible-core, which the binary does not carry. If <code>ansible-playbook</code> is not already on the box, one command installs a pinned ansible-core beside the database, checking every file against a hash the binary carries. Run it in the directory you will start the server in, as the account that will run the server. It needs a <code>python3</code> from 3.12 to 3.14 with its <code>venv</code> module. On Python 3.11 add <code>--version 2.19</code>, and on 3.10 <code>--version 2.17</code>. The <code>python3</code> macOS ships is 3.9, so install a newer one there first, and the install does not run on Windows. The <a href="/docs/ansible-runtime">managed Ansible runtime</a> page covers offline installs, workers, and the desktop app.</p>
@@ -167,7 +167,7 @@ switchtender token revoke &lt;initial-token-id&gt; --db switchtender.db</code></
 				</li>
 			</ol>
 			<div class="gs-callout reveal">
-				<p><strong>On Kubernetes?</strong> The Helm chart in the repository runs the same binary as an ordinary Deployment, with no operator: one server on SQLite with the whole install on a persistent volume, or active-active servers on PostgreSQL. Dedicated workers on a Team license run the paid image, which comes with the paid download for you to load into your own registry. Write the keys to a file first and keep it, because every stored credential is sealed against them, and pass the same file to every upgrade:</p>
+				<p><strong>On Kubernetes?</strong> The Helm chart in the repository runs the same binary as an ordinary Deployment, with no operator: one server on SQLite with the whole install on a persistent volume, or active-active servers on PostgreSQL. Distributed workers on a Team license run the paid image, which comes with the paid download for you to load into your own registry. Write the keys to a file first and keep it, because every stored credential is sealed against them, and pass the same file to every upgrade:</p>
 				<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>git clone https://github.com/kordloom/switchtender
 cd switchtender
 printf 'encryptionKey: "%s"\nencryptionSalt: "%s"\nauditKey: "%s"\n' \
@@ -179,7 +179,7 @@ helm install switchtender ./deploy/helm/switchtender \
 				<a class="btn" href="/docs/quickstart#run-on-kubernetes">Kubernetes guide</a>
 			</div>
 			<div class="gs-callout reveal">
-				<p><strong>Moving from another controller?</strong> Start with <code>switchtender assess awx export.json</code>, which reads the estate and says what comes across, what does not, and which templates nobody currently has to approve, before anything is written. Then each source imports in one command. AWX and Semaphore bring projects, inventories, credential shells, templates, surveys, and schedules. Rundeck and Jenkins bring jobs as templates and their triggers as schedules. Chef and Puppet bring the node list as an inventory, and nothing else: a cookbook or a manifest is a program in another language, and a partial translation would look right and do something else. The command is the same shape for all of them: a preview that writes nothing, then the same command with <code>--apply</code>. Ansible Automation Platform, Tower, and Ascender share the AWX export format, and even a crontab imports into governed schedules.</p>
+				<p><strong>Moving from another controller?</strong> Start with <code>switchtender assess awx export.json</code>, which reads the estate and says what comes across, what does not, and which templates nobody currently has to approve, before anything is written. Then each source has its own import command. AWX and Semaphore bring projects, inventories, credential shells, templates, surveys, and schedules. Rundeck and Jenkins bring jobs as templates and their triggers as schedules. Chef and Puppet bring the node list as an inventory, and nothing else: a cookbook or a manifest is a program in another language, and a partial translation would look right and do something else. The command is the same shape for all of them: a preview that writes nothing, then the same command with <code>--apply</code>. Ansible Automation Platform, Tower, and Ascender share the AWX export format, and even a crontab imports into governed schedules.</p>
 				<a class="btn" href="/docs/switching-from-awx">Migration guide</a>
 			</div>
 		</section>

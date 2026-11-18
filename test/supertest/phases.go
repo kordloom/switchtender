@@ -208,7 +208,7 @@ func (h *harness) phaseCommunity() error {
 	// the distance between that and what the playbook now says.
 	h.checkDriftIsSeenAndAttributed(phase)
 	h.checkAScheduleFiresOnItsOwn(phase)
-	// The way into this product is one command off AWX, and no deployed install had ever been
+	// The way into this product is an import off AWX, and no deployed install had ever been
 	// asked to run it.
 	h.checkAnAWXEstateMigrates(phase, "community")
 	h.checkEveryAdvertisedEngineAnswers(phase)
@@ -480,10 +480,10 @@ func (h *harness) phaseTeam(license string) error {
 	}
 	claimedBy, _ := done["claimed_by"].(string)
 	if !strings.Contains(claimedBy, "worker") {
-		h.fail(phase, "a queue-pinned run was claimed by the dedicated worker",
+		h.fail(phase, "a queue-pinned run was claimed by the distributed worker",
 			fmt.Errorf("claimed_by is %q", claimedBy))
 	} else {
-		h.pass(phase, "a queue-pinned run was claimed by the dedicated worker",
+		h.pass(phase, "a queue-pinned run was claimed by the distributed worker",
 			"claimed_by "+claimedBy)
 	}
 	h.checkAnUnservedQueueNeedsAttention(phase)

@@ -207,7 +207,7 @@ const TOURS = [
 			{ page: "workflows", path: "/ui/workflows", sel: "#wf-canvas", title: "Drag a pipeline together", body: "Wire all seven tools, and any tool you plug in, into one graph with per-step retries. AWX's signature feature, without the Kubernetes bill.", hold: 7500 },
 			{ page: "policies", path: "/ui/policies", sel: "#policy-open", title: "The gate nobody skips", body: "Policy holds a prod terraform destroy for an admin's sign-off, automatically. Approvals are enforced, not suggested.", hold: 7000 },
 			{ page: "audit", path: "/ui/audit", sel: "#audit-verify", title: "Prove every change", body: "Every change links into a tamper-evident hash chain. One click verifies it here, and a signed bundle verifies offline with an open verifier.", hold: 7000 },
-			{ page: "overview", path: "/ui/", sel: "#tiles a[href='/ui/migrate']", title: "Switching is one command", body: "Import from AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins in a single pass, and a crontab from the command line. AWX and Semaphore bring projects, inventories, templates, surveys, and schedules.", hold: 8000 },
+			{ page: "overview", path: "/ui/", sel: "#tiles a[href='/ui/migrate']", title: "Switching is an import", body: "Import from AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins with a preview first, and a crontab from the command line. AWX and Semaphore bring projects, inventories, templates, surveys, and schedules.", hold: 8000 },
 			{ title: "That is the moat", body: closingBody(
 				"Running many tools is table stakes. A control plane that proves itself is not. Press Explore and try anything, nothing here can break.",
 				"Running many tools is table stakes. A control plane that proves itself is not. Press Explore and start with a dry run."), hold: 8000 },
@@ -217,7 +217,7 @@ const TOURS = [
 		id: "migrate", title: "Coming from another controller", desc: "Move your automation over",
 		page: "migrate", path: "/ui/migrate",
 		steps: [
-			{ title: "Leave your old controller behind", body: "Import from AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins in a single pass, and a crontab from the command line. AWX and Semaphore bring projects, inventories, templates, surveys, credential shells, and schedules. Rundeck and Jenkins bring templates, surveys, and schedules against an inventory you name. Chef and Puppet bring the fleet, every node grouped by environment. An AWX workflow arrives as a workflow template unless its graph is one a pipeline cannot express, and then it is reported rather than dropped." },
+			{ title: "Leave your old controller behind", body: "Import from AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins with a preview first, and a crontab from the command line. AWX and Semaphore bring projects, inventories, templates, surveys, credential shells, and schedules. Rundeck and Jenkins bring templates, surveys, and schedules against an inventory you name. Chef and Puppet bring the fleet, every node grouped by environment. An AWX workflow arrives as a workflow template unless its graph is one a pipeline cannot express, and then it is reported rather than dropped." },
 			{ title: "Preview before you commit", body: "Every import runs as a dry run first, showing exactly what it will create. Apply it when it looks right." },
 			{ title: "No lock-in", body: "You can export and leave anytime, too. SwitchTender earns the switch. It does not trap you." },
 		],

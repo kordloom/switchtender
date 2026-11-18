@@ -4,10 +4,10 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>AWX alternative without Kubernetes | SwitchTender</title>
-	<meta name="description" content="SwitchTender is a source-available AWX alternative that runs from one Go binary with no Kubernetes, no Postgres, and no Redis. Live host-by-task matrix, seven tools, provable audit, and a one-command AWX import.">
+	<meta name="description" content="SwitchTender is a source-available AWX alternative that runs from one Go binary with no Kubernetes, no Postgres, and no Redis. Live host-by-task matrix, seven tools, provable audit, and an AWX import with a dry run first.">
 	<link rel="canonical" href="https://switchtender.com/awx-alternative">
 	<meta property="og:title" content="AWX alternative without Kubernetes | SwitchTender">
-	<meta property="og:description" content="The AWX jobs you already run, from one binary, plus the things AWX never had: a live host-by-task matrix, seven tools, tamper-evident audit, and a one-command import of your AWX export.">
+	<meta property="og:description" content="The AWX jobs you already run, from one binary, plus the things AWX never had: a live host-by-task matrix, seven tools, tamper-evident audit, and an import of your AWX export with a dry run first.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://switchtender.com/awx-alternative">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
@@ -38,7 +38,7 @@
   "Live host-by-task matrix and per-host history across runs",
   "Drift detection from a dry run",
   "One static Go binary and one SQLite file, with PostgreSQL optional",
-  "One-command import from AWX-format exports (AWX, Tower, and Automation Controller), Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab"
+  "Import from AWX-format exports (AWX, Tower, and Automation Controller), Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab, each with a dry run first"
  ],
  "license": "https://mariadb.com/bsl11/",
  "name": "SwitchTender",
@@ -96,7 +96,7 @@
 		<section class="wrap gs-hero reveal">
 			<span class="eyebrow">AWX alternative</span>
 			<h1>The AWX workflow, on one binary.<br><span class="grad">Without the Kubernetes bill.</span></h1>
-			<p class="lede">AWX needs a Kubernetes cluster, an operator, Postgres, Redis, and Receptor before it runs a single playbook, and it has not shipped a release since July 2024. SwitchTender is one Go binary. Download it, run it, and you have job templates, schedules, RBAC, surveys, workflows, and approvals, with directory sign-in on Pro, plus a live host-by-task matrix AWX never had. Your AWX export imports in one command.</p>
+			<p class="lede">AWX needs a Kubernetes cluster, an operator, Postgres, Redis, and Receptor before it runs a single playbook, and it has not shipped a release since July 2024. SwitchTender is one Go binary. Download it, run it, and you have job templates, schedules, RBAC, surveys, workflows, and approvals, with directory sign-in on Pro, plus a live host-by-task matrix AWX never had. Your AWX export imports with a preview that writes nothing, then the same command with --apply.</p>
 			<p class="moment">Here because the operator install path stopped working, an upgrade
 			stalled, or nobody has owned the cluster since the last reorg? That is the usual reason
 			people arrive on this page, and it is a fine reason to move.</p>
@@ -143,7 +143,7 @@
 				</article>
 				<article class="card reveal">
 					<h3>Security fixes stopped</h3>
-					<p>The 24.6.1 images carry two years of unpatched CVEs. One is <a href="https://access.redhat.com/security/cve/CVE-2026-12564">CVE-2026-12564</a>, which Red Hat rates 9.6 for the Vault credential plugin in Ansible Automation Platform. AWX 24.6.1 ships the same <code>kubernetes_auth</code> function in its Vault plugin, and no AWX release has followed. Teams report those images <a href="https://forum.ansible.com/t/any-news-on-awx-development/45639">failing security audits</a> with nothing patched to move to.</p>
+					<p>The 24.6.1 images carry two years of unpatched CVEs. One is <a href="https://access.redhat.com/security/cve/CVE-2026-12564">CVE-2026-12564</a>, which Red Hat rates 9.6 for the Vault credential plugin in Ansible Automation Platform. AWX 24.6.1 ships the same <code>kubernetes_auth</code> function in its Vault plugin, and no AWX release has followed. One operator <a href="https://forum.ansible.com/t/any-news-on-awx-development/45639">in the AWX forum</a> writes that the images &ldquo;may not comply with our internal security audits for much longer.&rdquo;</p>
 				</article>
 				<article class="card reveal">
 					<h3>Sign-in is moving out of core</h3>
@@ -151,7 +151,7 @@
 				</article>
 				<article class="card reveal">
 					<h3>In Red Hat's words</h3>
-					<p>"Our goal isn't to offer an exact replica of our commercial product for free," <a href="https://forum.ansible.com/t/awx-modernization-moving-forward/45134">from the AWX modernization update</a>. The direction is a subscription.</p>
+					<p>"Our goal isn't to offer an exact replica of our commercial product for free," <a href="https://forum.ansible.com/t/awx-modernization-moving-forward/45134">from the AWX modernization update</a>. Our reading is that the direction is a subscription.</p>
 				</article>
 				<article class="card reveal">
 					<h3>Even the collection was pulled</h3>
@@ -194,11 +194,11 @@
 						<tr><td data-label="Capability">Notification channels</td><td class="us" data-label="SwitchTender">Eleven, each with per-template targets</td><td data-label="AWX"><span class="muted">A similar set, attached to organizations, projects, inventory sources, and templates</span></td></tr>
 						<tr><td data-label="Capability">Advisory AI triage and fleet answers</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="AWX"><i class="n"></i></td></tr>
 						<tr><td data-label="Capability">Drop-in Go plugins: tools, secrets, AI, notifiers</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="AWX"><i class="n"></i></td></tr>
-						<tr><td data-label="Capability">Import from other tools</td><td class="us" data-label="SwitchTender">One command</td><td data-label="AWX"><span class="muted">AWX format only, through awxkit</span></td></tr>
+						<tr><td data-label="Capability">Import from other tools</td><td class="us" data-label="SwitchTender">Seven importers, each with a dry run first</td><td data-label="AWX"><span class="muted">AWX format only, through awxkit</span></td></tr>
 					</tbody>
 				</table>
 			</div>
-			<p class="gs-note reveal">Checked against AWX's own documentation on 2026-08-10, for AWX 24.6.1, still current at 24.6.1 on 2026-09-07. A comparison decays the day it is written, so check a row against the current release before you rely on it. <a href="/docs/comparison">Full table and sources</a>.</p>
+			<p class="gs-note reveal">Checked against AWX's own documentation on 2026-11-11, for AWX 24.6.1, still the latest release. A comparison decays the day it is written, so check a row against the current release before you rely on it. <a href="/docs/comparison">Full table and sources</a>.</p>
 		</section>
 
 		<section class="section wrap">
@@ -211,13 +211,13 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>The other options</h2>
-				<p><a href="/ascender-alternative">Ascender</a> is a support-backed fork of the same frozen codebase, with the same Kubernetes-shaped footprint. Oracle Linux Automation Manager repackages AWX 24.6.1 for Oracle Linux hosts. Semaphore is light, but a run is a text log, custom roles sit in its paid tier, and its workflows are limited to task chaining. The <a href="/semaphore-alternative">full comparison is here</a>. Moving to CI pipelines works until you need RBAC, schedules, approvals, and an audit trail, at which point you have rebuilt a worse control plane. SwitchTender keeps AWX's capabilities without its architecture.</p>
+				<p><a href="/ascender-alternative">Ascender</a> is a support-backed fork of the same frozen codebase, with the same Kubernetes-shaped footprint. Oracle Linux Automation Manager repackages AWX 24.6.1 for Oracle Linux hosts. Semaphore is light, but a run is a text log, custom roles sit in its paid tier, and its workflow graph is listed as Pro in its docs. The <a href="/semaphore-alternative">full comparison is here</a>. Moving to CI pipelines works until you need RBAC, schedules, approvals, and an audit trail, at which point you have rebuilt a worse control plane. SwitchTender keeps AWX's capabilities without its architecture.</p>
 			</div>
 		</section>
 
 		<section class="section wrap">
 			<div class="section-head reveal">
-				<h2>Move in one command</h2>
+				<h2>Export, preview, apply</h2>
 				<p>Export from AWX, import into SwitchTender. Projects, inventories (smart and constructed included), templates, workflows with their approval steps, surveys, schedules, notification templates, and the organizations those belong to come across, with a dry run first so you see the plan before anything is written. A workflow the importer cannot carry over as it stands is named in the plan and left out: one with a node that runs another workflow or a sync, a path taken on failure, nodes from more than one project, or an always path and a success path on the same node. Password survey fields arrive as secret fields. Credential secrets never come across, because AWX will not export a vault password, SSH key, or cloud secret in the clear, and neither do the defaults of password fields. Teams, organization memberships, and projects on anything but git are named in the plan as not imported, so you re-enter what is needed once against the imported credential shells. The import lists exactly which ones need it. A template that took provisioning callbacks answers at its old AWX callback address too, once the import knows its AWX id, so the boot scripts and cloud-init data that carry it keep working once the AWX hostname points here. <code>awx export</code> strips ids, so save <code>GET /api/v2/job_templates/</code> as JSON and pass it with <code>--awx-template-ids</code> to keep those addresses. Smart inventories keep AWX's <code>host_filter</code> syntax, and a static inventory is read inside the binary exactly as Ansible reads it, checked against every ansible-core minor from 2.16 to 2.21.</p>
 			</div>
 			<div class="gs-steps">
@@ -334,7 +334,7 @@ switchtender import awx awx-export.json --db switchtender.db --apply</code></pre
 				<a href="/jenkins-alternative">vs Jenkins</a>
 				<a href="/rundeck-alternative">vs Rundeck</a>
 				<a href="/chef-eol">Off Chef</a>
-				<a href="/puppet-eol">Off Puppet</a>
+				<a href="/moving-off-puppet">Off Puppet</a>
 				<a href="/contact">Contact</a>
 				<a href="/privacy">Privacy</a>
 				<a href="/terms">Terms</a>

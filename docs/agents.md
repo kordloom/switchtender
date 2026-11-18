@@ -340,7 +340,7 @@ The chain proves the record was not altered. It does not prove that changes made
 SwitchTender went through it: an agent holding your cloud credentials can change infrastructure
 directly, and no record here would show it. For agents, credential scoping closes that gap. An
 agent whose only credential is its operator-bound token has no way to act except through the gate,
-so for that agent the record is not just intact, it is the whole story.
+so every run that agent asks for is recorded before it runs.
 
 ## FAQ
 

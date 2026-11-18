@@ -370,7 +370,7 @@ record was not altered, check it yourself.</p>
 SwitchTender went through it: an agent holding your cloud credentials can change infrastructure
 directly, and no record here would show it. For agents, credential scoping closes that gap. An
 agent whose only credential is its operator-bound token has no way to act except through the gate,
-so for that agent the record is not just intact, it is the whole story.</p>
+so every run that agent asks for is recorded before it runs.</p>
 <h2 id="faq">FAQ</h2>
 <p><strong>Is this the built-in advisory AI?</strong> No. The <a href="/docs/ai">advisory AI</a> is the other direction: a model
 that proposes text and never executes, with anything runnable born held for a human. This page is

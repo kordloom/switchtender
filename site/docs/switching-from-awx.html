@@ -280,8 +280,8 @@ renders as a small form.</li>
 by dragging from a step's edge onto another, and run the graph as a pipeline.</li>
 <li>Organizations exist and objects belong to them: create one with <code>POST /v1/orgs</code>, add members with
 a role, and a project, template, inventory, or credential can name its owning <code>org_id</code>. On top of
-that, access is a global role plus optional per-object grants, which AWX's tree does not have.
-Grant a user or a team <code>use</code> or <code>manage</code> on one specific object.</li>
+that, access is a global role plus optional per-object grants, the same idea as an AWX Use or
+Admin role on one resource. Grant a user or a team <code>use</code> or <code>manage</code> on one specific object.</li>
 <li>Notifications are configured on the server with <code>--notify-*</code> flags and cover eleven channels:
 webhook, Slack, Mattermost, Rocket.Chat, Discord, Microsoft Teams, ntfy, PagerDuty, Grafana,
 Twilio SMS, and email. Every finished run reaches every channel configured that way, and a run

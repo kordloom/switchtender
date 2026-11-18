@@ -374,14 +374,14 @@ func importerList(list string) []string {
 func TestCommunityImportersAreThePromise(t *testing.T) {
 	t.Parallel()
 	card := tierCard(t, readFlat(t, "site/pricing.html"), "Community")
-	want := importerList(findOne(t, `One-command importers: ([^<]+)</li>`, card, "the Community importers"))
+	want := importerList(findOne(t, `Importers: ([^<]+)</li>`, card, "the Community importers"))
 	tests := []struct {
 		File    string
 		Pattern string
 	}{{ // Test 0: The license text the terms freeze.
-		File: "LICENSING.md", Pattern: `One-command importers: ([^.]+)\.`,
+		File: "LICENSING.md", Pattern: `Importers: ([^.]+)\.`,
 	}, { // Test 1: The baseline doc that restates it.
-		File: "docs/community-baseline.md", Pattern: `One-command importers: ([^-]+?) -`,
+		File: "docs/community-baseline.md", Pattern: `Importers: ([^-]+?) -`,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -456,7 +456,7 @@ func TestPricingSurfacesDescribeThePaidBuild(t *testing.T) {
 		WantPhrase: "PostgreSQL, including active-active HA on it, is Community.",
 	}, { // Test 9: The comparison doc says the controller work is Community.
 		File:       "docs/comparison.md",
-		WantPhrase: "a one-command import from six tools, ships in Community.",
+		WantPhrase: "importers for six tools, ships in Community.",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

@@ -164,7 +164,7 @@ func (h *harness) phaseUpgrade(prevImage string) error {
 	return nil
 }
 
-// phaseCrash kills the dedicated worker while it is mid-run and requires the product to keep its
+// phaseCrash kills the distributed worker while it is mid-run and requires the product to keep its
 // promise about dying executors: the lease goes stale, the janitor reclaims the run, and the
 // replacement worker picks it up and finishes it. A control plane whose runs vanish with the
 // process that held them is a control plane nobody points at production, and this is the check
@@ -550,12 +550,12 @@ func (h *harness) phaseRollback(prevImage string) error {
 }
 
 // phaseUpgradeTeam proves the paid shape survives the next version too: PostgreSQL, a license, and
-// a dedicated worker, upgraded in place. The Community upgrade proof left the paid tier's upgrade
+// a distributed worker, upgraded in place. The Community upgrade proof left the paid tier's upgrade
 // as an inference, and an inference is not a proof: the schema is initialized by the old binary,
 // written by real work, and must be read whole by the new one.
 //
 // It starts from the previous paid release, never the previous public image alone: since the paid
-// wall, the public image is the Community build, which refuses the dedicated worker this shape
+// wall, the public image is the Community build, which refuses the distributed worker this shape
 // runs.
 func (h *harness) phaseUpgradeTeam(prev previousPaid, license string) error {
 	const phase = "upgrade-team"
@@ -620,7 +620,7 @@ func (h *harness) phaseUpgradeTeam(prev previousPaid, license string) error {
 		return fmt.Errorf("helm install team-shape %s: %w\n%s\n%s", prevImage, err, out,
 			h.installForensics("upteam"))
 	}
-	h.pass(phase, "the previous paid release installed with a license and a dedicated worker",
+	h.pass(phase, "the previous paid release installed with a license and a distributed worker",
 		prevImage)
 
 	service, err := h.serviceName("upteam")
@@ -655,12 +655,12 @@ func (h *harness) phaseUpgradeTeam(prev previousPaid, license string) error {
 	// The same baseline the community upgrade needs, for the same reason: zero before and zero
 	// after compares equal and reads as a chain that crossed the boundary intact.
 	if before.Count == 0 {
-		h.fail(phase, "the previous release did real work through its dedicated worker",
+		h.fail(phase, "the previous release did real work through its distributed worker",
 			fmt.Errorf("%w: run %s succeeded through the worker, so there is no baseline to carry "+
 				"across the upgrade", ErrEmptyChain, oldRunID))
 		return nil
 	}
-	h.pass(phase, "the previous release did real work through its dedicated worker",
+	h.pass(phase, "the previous release did real work through its distributed worker",
 		fmt.Sprintf("run %s, %d chain entries", oldRunID, before.Count))
 
 	if out, err := install(filepath.Join(h.repo, "deploy/helm/switchtender"), "switchtender",
@@ -729,7 +729,7 @@ func (h *harness) phaseUpgradeTeam(prev previousPaid, license string) error {
 		h.fail(phase, "the upgraded worker executes new work", err)
 	} else {
 		h.pass(phase, "the upgraded worker executes new work with the old credentials",
-			"run "+newRunID+" through the dedicated worker")
+			"run "+newRunID+" through the distributed worker")
 	}
 	return nil
 }

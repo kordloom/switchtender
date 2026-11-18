@@ -4,16 +4,16 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Migration | SwitchTender docs</title>
-	<meta name="description" content="SwitchTender imports an AWX, Semaphore, Rundeck, Jenkins, Chef, or Puppet export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
+	<meta name="description" content="SwitchTender imports an AWX, Semaphore, Rundeck, Jenkins, Chef, or Puppet export, or a plain crontab, and creates the equivalent objects, so moving over is an import rather than a rebuild.">
 	<link rel="canonical" href="https://switchtender.com/docs/migration">
 	<meta property="og:title" content="Migration | SwitchTender docs">
-	<meta property="og:description" content="SwitchTender imports an AWX, Semaphore, Rundeck, Jenkins, Chef, or Puppet export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
+	<meta property="og:description" content="SwitchTender imports an AWX, Semaphore, Rundeck, Jenkins, Chef, or Puppet export, or a plain crontab, and creates the equivalent objects, so moving over is an import rather than a rebuild.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/migration">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
 	<meta name="twitter:card" content="summary_large_image">
 	<meta name="twitter:title" content="Migration | SwitchTender docs">
-	<meta name="twitter:description" content="SwitchTender imports an AWX, Semaphore, Rundeck, Jenkins, Chef, or Puppet export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
+	<meta name="twitter:description" content="SwitchTender imports an AWX, Semaphore, Rundeck, Jenkins, Chef, or Puppet export, or a plain crontab, and creates the equivalent objects, so moving over is an import rather than a rebuild.">
 	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
 	<script type="application/ld+json">
 {
@@ -24,7 +24,7 @@
   "name": "SwitchTender",
   "url": "https://switchtender.com/"
  },
- "description": "SwitchTender imports an AWX, Semaphore, Rundeck, Jenkins, Chef, or Puppet export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.",
+ "description": "SwitchTender imports an AWX, Semaphore, Rundeck, Jenkins, Chef, or Puppet export, or a plain crontab, and creates the equivalent objects, so moving over is an import rather than a rebuild.",
  "headline": "Migration",
  "isPartOf": {
   "@type": "WebSite",
@@ -66,7 +66,7 @@
 		<main class="dcontent prose">
 			<h1 id="migrate-off-awx-semaphore-rundeck-jenkins-chef-puppet-or-cron">Migrate off AWX, Semaphore, Rundeck, Jenkins, Chef, Puppet, or cron</h1>
 <p>SwitchTender imports an AWX, Semaphore, Rundeck, Jenkins, Chef, or Puppet export, or a plain crontab,
-and creates the equivalent objects, so moving over is one command rather than a rebuild.</p>
+and creates the equivalent objects, so moving over is an import rather than a rebuild.</p>
 <h2 id="the-migration-summary">The migration summary</h2>
 <p>Every preview prints a summary before the itemized plan, and the API returns the same thing as
 <code>report</code> on an import response. The plan answers what an import did. The summary answers whether to
@@ -471,8 +471,8 @@ out.</p>
 job whose source control checkout mattered has its repository named rather than attached, because
 attaching a project changes the directory every relative path in the script resolves against.</p>
 <h2 id="import-a-chef-or-puppet-fleet">Import a Chef or Puppet fleet</h2>
-<p>Both of these answer the same question: the machines are managed by something whose open source line
-has no supported road ahead, and the fleet needs to be somewhere else before that matters.</p>
+<p>Both importers answer the same question: how to put governed runs in front of a Chef or Puppet fleet
+without converting a cookbook or a manifest.</p>
 <p>Chef reads what the server stores about its nodes. Any of the three shapes the tooling emits works:
 an array of node documents, a single node, or an object keyed by node name.</p>
 <pre><code>knife node list | xargs -I{} knife node show {} -l -F json &gt; chef-nodes.json
@@ -481,7 +481,7 @@ switchtender import chef chef-nodes.json --db switchtender.db
 <p>Each node becomes a host. Its <code>chef_environment</code> becomes a group, and every <code>role[...]</code> in its run
 list becomes a group as well, so a play can target <code>[webserver]</code> on the day of the import. The ohai
 attributes that identify a machine come across as host variables, and <code>ipaddress</code> also becomes
-<code>ansible_host</code>, because a Chef estate addresses machines by certname and has no reason to have kept
+<code>ansible_host</code>, because a Chef estate addresses machines by node name and has no reason to have kept
 DNS in step. The rest of a node's automatic attributes are left out on purpose: they run to hundreds
 of keys per host, and copying them produces an inventory nobody can read.</p>
 <p>Puppet reads PuppetDB queries, or the plain certname list when PuppetDB is not reachable. Export the
@@ -710,8 +710,9 @@ are restored. Only AWX and Semaphore carry credentials at all, so a Rundeck, Jen
 import has none to re-enter and none to attach.</p>
 <h2 id="limits-to-expect">Limits to expect</h2>
 <ul>
-<li>A schedule whose cadence a cron expression cannot represent, such as every third day, is reported
-and skipped rather than converted to a wrong cadence.</li>
+<li>A schedule whose cadence a cron expression cannot represent, such as every third day, comes
+across as the RFC 5545 recurrence it is rather than a cron with the wrong cadence. A schedule
+with no recurrence rule at all is reported and skipped.</li>
 <li>A workflow whose graph cannot be expressed whole is reported and skipped rather than reduced. A
 failure edge, which runs work precisely because something failed, has no pipeline equivalent, and a
 node pointing at a job template the export does not carry has no work to do. A node that runs a

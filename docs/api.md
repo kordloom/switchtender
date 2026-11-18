@@ -1134,9 +1134,10 @@ curl -s "https://switchtender.example.com/v1/fleet?window=30" \
 
 ## Relay endpoints
 
-With `--worker-token` set, the server also serves the mesh relay under `/relay`: the execution
-path an outbound worker started with `--server` uses instead of a database connection. Every call
-presents the worker bearer token.
+The relay is Team. These routes are in the paid build, and a Community build refuses to serve them,
+naming the tier. With `--worker-token` set, the server also serves the mesh relay under `/relay`:
+the execution path an outbound worker started with `--server` uses instead of a database connection.
+Every call presents the worker bearer token.
 
 | Method | Path                               | What                                          |
 |--------|------------------------------------|-----------------------------------------------|

@@ -72,8 +72,8 @@ into the <a href="https://github.com/kordloom/switchtender/releases">release not
 over the tools a fleet already runs.</p>
 <ul>
 <li><strong>Ansible</strong> is engine one, shipped, alongside Terraform, OpenTofu, Bash, PowerShell, Python,
-and Go, with one-command imports from AWX, AAP, Tower, Ascender, Semaphore, Rundeck, Jenkins,
-and crontabs.</li>
+and Go, with importers for AWX, AAP, Tower, Ascender, Semaphore, Rundeck, Jenkins, and
+crontabs.</li>
 <li><strong>Chef and Puppet fleets import today</strong>, as inventories: every node, grouped by environment
 and, for Chef, by every role in its run list. Cookbooks and manifests do not convert and are
 not going to, because a partial translation of a program in another language would read like
@@ -96,6 +96,9 @@ who needs a shell asks for one through the same gate and gets a certificate that
 own.</li>
 <li>SQLite to PostgreSQL full-history migration in one command, so a Community install moves to
 Postgres and HA, both free, without leaving its run history behind.</li>
+<li>Group-driven roles for OIDC sign-in, which LDAP, SAML, and JWT already have.</li>
+<li>Signed desktop packages for Windows.</li>
+<li>A hosted option.</li>
 <li>Card checkout for Team, replacing the email-and-invoice path.</li>
 </ul>
 <p>Dates are deliberately absent. Everything here ships when it holds up under the same gates as

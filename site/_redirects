@@ -10,3 +10,8 @@
 /docs/security      /docs/threat-model  301
 /docs/threatmodel   /docs/threat-model  301
 /threat-model       /docs/threat-model  301
+
+# The Puppet page moved: it never described an end of life, so its address no longer claims one.
+/puppet-eol         /moving-off-puppet  301
+/puppet-eol/        /moving-off-puppet  301
+/puppet-eol.html    /moving-off-puppet  301

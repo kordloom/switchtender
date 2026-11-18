@@ -37,7 +37,7 @@ the server names in its log, from inside the pod, exactly as an operator would. 
 playbook across all three machines. Then it reads the files that playbook wrote back through
 `kubectl exec`, because proof that comes from the product's own reporting is not proof.
 
-**Team runs a dedicated worker against a PostgreSQL schema it has never seen, under a license,
+**Team runs a distributed worker against a PostgreSQL schema it has never seen, under a license,
 with a shared signing identity.** Then it walks the arc the product exists for:
 
 1. A routine playbook runs ungated, because creating files grades reversible.
@@ -53,7 +53,7 @@ with a shared signing identity.** Then it walks the arc the product exists for:
    the cluster**. Then one recorded name is rewritten and verification is required to refuse it.
 7. The estate answers with every machine the runs touched, and the two runs read back as one
    change whose outcome was derived rather than typed.
-8. A queue-pinned run is claimed by the dedicated worker, not the server.
+8. A queue-pinned run is claimed by the distributed worker, not the server.
 9. A run on a queue no worker serves is named in the attention view as waiting for one, with the
    queue and a count of zero, while the served queues are not, and it leaves the view once
    canceled.
@@ -90,7 +90,7 @@ release. A release from before the paid module existed is pulled as its public i
 carried the paid code. A later one is built from its tag and the paid module commit its gitlink
 names, so a run that cannot reach that commit stops before any cluster is made.
 
-**A worker killed mid-run costs a retry, never the work, and never a lie.** The dedicated worker
+**A worker killed mid-run costs a retry, never the work, and never a lie.** The distributed worker
 is deleted while it holds an executing run. The run must be reclaimed to a terminal interrupted
 state with a stated reason, never silently re-run, because re-applying a half-applied change can
 double-act. The chain must verify across the crash, and a rerun of the interrupted run must

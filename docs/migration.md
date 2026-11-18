@@ -8,7 +8,7 @@
 # Migrate off AWX, Semaphore, Rundeck, Jenkins, Chef, Puppet, or cron
 
 SwitchTender imports an AWX, Semaphore, Rundeck, Jenkins, Chef, or Puppet export, or a plain crontab,
-and creates the equivalent objects, so moving over is one command rather than a rebuild.
+and creates the equivalent objects, so moving over is an import rather than a rebuild.
 
 ## The migration summary
 
@@ -399,8 +399,8 @@ attaching a project changes the directory every relative path in the script reso
 
 ## Import a Chef or Puppet fleet
 
-Both of these answer the same question: the machines are managed by something whose open source line
-has no supported road ahead, and the fleet needs to be somewhere else before that matters.
+Both importers answer the same question: how to put governed runs in front of a Chef or Puppet fleet
+without converting a cookbook or a manifest.
 
 Chef reads what the server stores about its nodes. Any of the three shapes the tooling emits works:
 an array of node documents, a single node, or an object keyed by node name.
@@ -411,7 +411,7 @@ an array of node documents, a single node, or an object keyed by node name.
 Each node becomes a host. Its `chef_environment` becomes a group, and every `role[...]` in its run
 list becomes a group as well, so a play can target `[webserver]` on the day of the import. The ohai
 attributes that identify a machine come across as host variables, and `ipaddress` also becomes
-`ansible_host`, because a Chef estate addresses machines by certname and has no reason to have kept
+`ansible_host`, because a Chef estate addresses machines by node name and has no reason to have kept
 DNS in step. The rest of a node's automatic attributes are left out on purpose: they run to hundreds
 of keys per host, and copying them produces an inventory nobody can read.
 
@@ -514,8 +514,9 @@ import has none to re-enter and none to attach.
 
 ## Limits to expect
 
-- A schedule whose cadence a cron expression cannot represent, such as every third day, is reported
-  and skipped rather than converted to a wrong cadence.
+- A schedule whose cadence a cron expression cannot represent, such as every third day, comes
+  across as the RFC 5545 recurrence it is rather than a cron with the wrong cadence. A schedule
+  with no recurrence rule at all is reported and skipped.
 - A workflow whose graph cannot be expressed whole is reported and skipped rather than reduced. A
   failure edge, which runs work precisely because something failed, has no pipeline equivalent, and a
   node pointing at a job template the export does not carry has no work to do. A node that runs a

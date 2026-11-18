@@ -9,7 +9,7 @@
 
 What SwitchTender does today. Almost all of it runs on Community, which needs no license. Six
 capabilities are licensed, and the rows below say so where they appear: directory sign-in is Pro,
-and the full policy engine, the period change register, dedicated workers and named queues, and
+and the full policy engine, the period change register, distributed workers and named queues, and
 the relay that runs them inside networks the control node cannot reach, and one-click drift
 reconcile are Team. No tier counts plain rules: Community holds as many require-approval
 policies and exemptions as it needs. Tiers are at <https://switchtender.com/pricing>.

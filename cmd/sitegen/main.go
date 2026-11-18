@@ -191,7 +191,7 @@ var landingURLs = []string{
 	"https://switchtender.com/semaphore-alternative", "https://switchtender.com/aap-alternative",
 	"https://switchtender.com/rundeck-alternative", "https://switchtender.com/jenkins-alternative",
 	"https://switchtender.com/migration",
-	"https://switchtender.com/chef-eol", "https://switchtender.com/puppet-eol",
+	"https://switchtender.com/chef-eol", "https://switchtender.com/moving-off-puppet",
 	"https://switchtender.com/contact",
 	"https://switchtender.com/privacy",
 	"https://switchtender.com/terms",
@@ -397,8 +397,8 @@ var switchtenderFeatures = []string{
 	"Live host-by-task matrix and per-host history across runs",
 	"Drift detection from a dry run",
 	"One static Go binary and one SQLite file, with PostgreSQL optional",
-	"One-command import from AWX-format exports (AWX, Tower, and Automation Controller), " +
-		"Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab",
+	"Import from AWX-format exports (AWX, Tower, and Automation Controller), " +
+		"Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab, each with a dry run first",
 }
 
 // entitySlugs are the docs pages that carry the full application entity rather than only an article

@@ -1924,9 +1924,10 @@ window these endpoints will answer, so trimmed history is history no request cou
   -H &quot;Authorization: Bearer $ST_TOKEN&quot;
 </code></pre>
 <h2 id="relay-endpoints">Relay endpoints</h2>
-<p>With <code>--worker-token</code> set, the server also serves the mesh relay under <code>/relay</code>: the execution
-path an outbound worker started with <code>--server</code> uses instead of a database connection. Every call
-presents the worker bearer token.</p>
+<p>The relay is Team. These routes are in the paid build, and a Community build refuses to serve them,
+naming the tier. With <code>--worker-token</code> set, the server also serves the mesh relay under <code>/relay</code>:
+the execution path an outbound worker started with <code>--server</code> uses instead of a database connection.
+Every call presents the worker bearer token.</p>
 <table>
 <thead>
 <tr>

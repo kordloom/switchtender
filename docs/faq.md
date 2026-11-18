@@ -185,7 +185,7 @@ using a tool an extension registered, executes once wherever it is claimed. Subm
 shard count is not an error and does not warn. It simply runs as a single run, with no `kind` of
 `split` and no shard count on it, so read the submitted run back if you expected a fan-out.
 
-More than one server instance on PostgreSQL is Community. Team adds dedicated workers and named
+More than one server instance on PostgreSQL is Community. Team adds distributed workers and named
 queues, and the relay that runs them inside networks the control node cannot reach. Starting a
 worker process after a license lapses is refused, and a lapsed license never locks a server out of
 its own data.
@@ -287,7 +287,7 @@ organization. The one restriction is offering it to third parties as a hosted or
 that provides its primary functionality, and each release of the public core converts to Apache 2.0 two years after it
 ships. The Community tier is free and complete on its own, with the built-in hold on agent runs and
 plain rules of your own. Pro adds directory sign-in, deny rules, and risk and reversibility floors.
-Team adds the full policy engine, the period change register, dedicated workers and named queues,
+Team adds the full policy engine, the period change register, distributed workers and named queues,
 and the relay that runs them inside networks the control node cannot reach, and one-click drift
 reconcile. Both unlock in the paid build with a signed license file the binary verifies offline,
 flat per organization by fleet band, and a lapsed license takes nothing: paid features stop while

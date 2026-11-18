@@ -31,7 +31,7 @@ import (
 
 // refuseJSONTail reports an error when data carries anything but whitespace after its first JSON value.
 //
-// A scalar first value is not a refusal. `puppet node list` prints bare certnames one per line, and
+// A scalar first value is not a refusal. A certname list carries bare certnames one per line, and
 // that file is not JSON at all; its own parser says so better than this can. Only an object or an array
 // is a document shape, and only those are held to being the whole file.
 func refuseJSONTail(data []byte) error {

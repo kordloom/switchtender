@@ -4,10 +4,10 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Semaphore UI alternative with governance built in | SwitchTender</title>
-	<meta name="description" content="SwitchTender is a source-available alternative to Ansible Semaphore: the same one-binary simplicity, plus a live host-by-task matrix, seven tools including Go, RBAC with per-object grants, tamper-evident audit, and a one-command Semaphore import.">
+	<meta name="description" content="SwitchTender is a source-available alternative to Semaphore UI: the same one-binary simplicity, plus a live host-by-task matrix, seven tools including Go, RBAC with per-object grants, tamper-evident audit, and a Semaphore import with a dry run first.">
 	<link rel="canonical" href="https://switchtender.com/semaphore-alternative">
 	<meta property="og:title" content="Semaphore UI alternative with governance built in | SwitchTender">
-	<meta property="og:description" content="Semaphore's simplicity with a control plane on top: live run matrix, seven tools, enforced approvals, provable audit, and a one-command import of your Semaphore backup.">
+	<meta property="og:description" content="Semaphore's simplicity with a control plane on top: live run matrix, seven tools, enforced approvals, provable audit, and an import of your Semaphore backup with a dry run first.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://switchtender.com/semaphore-alternative">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
@@ -38,7 +38,7 @@
   "Live host-by-task matrix and per-host history across runs",
   "Drift detection from a dry run",
   "One static Go binary and one SQLite file, with PostgreSQL optional",
-  "One-command import from AWX-format exports (AWX, Tower, and Automation Controller), Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab"
+  "Import from AWX-format exports (AWX, Tower, and Automation Controller), Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab, each with a dry run first"
  ],
  "license": "https://mariadb.com/bsl11/",
  "name": "SwitchTender",
@@ -94,9 +94,9 @@
 
 	<main>
 		<section class="wrap gs-hero reveal">
-			<span class="eyebrow">Ansible Semaphore alternative</span>
+			<span class="eyebrow">Semaphore UI alternative</span>
 			<h1>Semaphore's simplicity.<br><span class="grad">A control plane on top.</span></h1>
-			<p class="lede">Semaphore proved a one-binary Ansible UI is the right shape. SwitchTender keeps that shape and adds what teams go looking for next. Every run paints as a live host-by-task matrix instead of scrollback. Go joins the tool list, and Ansible check mode or a Terraform or OpenTofu plan previews a change before it runs, while a script's dry run only checks the script without running it. RBAC, teams, and an approval bound to the content that runs are in the core. External secret managers plug in, from HashiCorp Vault to 1Password and CyberArk, where Semaphore reaches Vault, OpenBao, AWS, Azure, and Devolutions Server. And there's an audit trail you can prove offline. Your Semaphore backup imports in one command.</p>
+			<p class="lede">Semaphore proved a one-binary Ansible UI is the right shape. SwitchTender keeps that shape and adds what teams go looking for next. Every run paints as a live host-by-task matrix instead of scrollback. Go joins the tool list, and Ansible check mode or a Terraform or OpenTofu plan previews a change before it runs, while a script's dry run only checks the script without running it. RBAC, teams, and an approval bound to the content that runs are in the core. External secret managers plug in, from HashiCorp Vault to 1Password and CyberArk, where Semaphore reaches Vault, OpenBao, AWS, Azure, and Devolutions Server. And there's an audit trail you can prove offline. Your Semaphore backup imports with a preview that writes nothing, then the same command with --apply.</p>
 			<div class="hero-cta">
 				<a class="btn big" href="/get-started">Get started</a>
 				<a class="ghost big" href="/docs/migration">Read the migration guide</a>
@@ -107,7 +107,7 @@
 			<div class="section-head reveal">
 				<h2>What Semaphore's approval does not hold</h2>
 				<p>Semaphore's workflow approval node pauses a run until a user with task-run access approves or rejects it. SwitchTender's approval commits a digest of the inventory snapshot, the resolved container image, the pinned commit, and for Terraform or OpenTofu the saved plan. The executor recomputes that digest before it runs and refuses anything that moved after sign-off. An AI agent here is a principal with a ceiling below admin: it proposes runs, never approves them, and every receipt names the human it acted for. The audit trail is a signed hash chain that an Apache-2.0 verifier checks offline, with no account on the server.</p>
-				<p>What Semaphore sells in paid tiers ships in SwitchTender's free build, in the same binary: container execution for every tool, external secret managers, and per-object grants, which Semaphore offers as custom roles in Enterprise. Workflows with a graphical editor are free here too; Semaphore's docs and roadmap list them as Pro while its pricing page checks them in every tier. Dedicated workers and the relay are Team here. Active-active HA on PostgreSQL is free. Semaphore's global runners are free, so that row is theirs.</p>
+				<p>What Semaphore sells in paid tiers ships in SwitchTender's free build, in the same binary: container execution for every tool, external secret managers, and per-object grants, which Semaphore offers as custom roles in Enterprise. Workflows with a graphical editor are free here too; Semaphore's docs and roadmap list them as Pro while its pricing page checks them in every tier. Distributed workers and the relay are Team here. Active-active HA on PostgreSQL is free. Semaphore's global runners are free, so that row is theirs.</p>
 				<p>Three gaps, in Semaphore's own words. Its approval node "pauses the run until a user with permission approves or rejects," and no page documents what content that approval covers. Its roadmap says "approval decisions are logged with the approver's identity and timestamp"; its workflow docs do not describe approval logging. Its audit events record the acting user, the affected object, the action, the client IP address, and the user agent, and ship by syslog, by webhook as JSON or Splunk HEC, or by API pull, with no hashing or signing documented. Its MCP server lets an AI assistant "inspect and update projects, templates, inventories, repositories, schedules, and task context," in every tier. Here, an agent gets one credential and a ceiling instead.</p>
 			</div>
 			<div class="cards cards-3">
@@ -150,28 +150,28 @@
 						<tr><td data-label="Capability">Duration-balanced job splitting</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="Semaphore"><i class="n"></i></td></tr>
 						<tr><td data-label="Capability">Fleet memory: flaky hosts, trends</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="Semaphore"><i class="n"></i></td></tr>
 						<tr><td data-label="Capability">Drift detection from a dry run</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="Semaphore"><span class="muted">Dry-run tasks, no drift report or reconcile</span></td></tr>
-						<tr><td data-label="Capability">Drag-and-drop workflow editor</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="Semaphore"><span class="muted">Shipped in 2.19 as beta; docs say Pro, pricing lists every tier</span></td></tr>
+						<tr><td data-label="Capability">Drag-and-drop workflow editor</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="Semaphore"><span class="muted">Added in 2.19; docs say Pro, pricing lists every tier</span></td></tr>
 						<tr><td data-label="Capability">Distributed workers in the core</td><td class="us" data-label="SwitchTender"><i class="y"></i> <span class="muted">Team</span></td><td data-label="Semaphore"><span class="muted">global runners free, isolated runners and tag routing Pro</span></td></tr>
-						<tr><td data-label="Capability">Active-active HA on PostgreSQL</td><td class="us" data-label="SwitchTender"><i class="y"></i> <span class="muted">on every tier</span></td><td data-label="Semaphore"><span class="muted">With Redis, per its documentation</span></td></tr>
+						<tr><td data-label="Capability">Active-active HA on PostgreSQL</td><td class="us" data-label="SwitchTender"><i class="y"></i> <span class="muted">on every tier</span></td><td data-label="Semaphore"><span class="muted">With Redis, Enterprise</span></td></tr>
 						<tr><td data-label="Capability">Advisory AI triage and fleet answers</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="Semaphore"><span class="muted">MCP server that inspects and updates projects, templates, inventories, repositories, and schedules</span></td></tr>
 						<tr><td data-label="Capability">Drop-in Go plugins: tools, secrets, AI, notifiers</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="Semaphore"><i class="n"></i></td></tr>
-						<tr><td data-label="Capability">Import from other tools</td><td class="us" data-label="SwitchTender">One command</td><td data-label="Semaphore"><span class="muted">Its own project export only</span></td></tr>
+						<tr><td data-label="Capability">Import from other tools</td><td class="us" data-label="SwitchTender">Seven importers, each with a dry run first</td><td data-label="Semaphore"><span class="muted">Its own project export only</span></td></tr>
 					</tbody>
 				</table>
 			</div>
-			<p class="gs-note reveal">Checked against Semaphore's own documentation on 2026-10-08, for Semaphore 2.19.16, with 2.20.0-alpha3 in prerelease. Semaphore 2.19 added workflows with approval nodes, a graphical editor, Docker and Kubernetes executors, and per-task JWT identity tokens. A comparison decays the day it is written, so check a row against the current release before you rely on it. <a href="/docs/comparison">Full table and sources</a>.</p>
+			<p class="gs-note reveal">Checked against Semaphore's own documentation on 2026-11-11, for Semaphore 2.20.23. Semaphore 2.19 added workflows with approval nodes, a graphical editor, Docker and Kubernetes executors, and per-task JWT identity tokens. Semaphore 2.20 added workflow revisions and outputs, several roles per member, global roles on Pro, and identity provider group to role mapping on Enterprise. A comparison decays the day it is written, so check a row against the current release before you rely on it. <a href="/docs/comparison">Full table and sources</a>.</p>
 		</section>
 
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>Where Semaphore is still ahead</h2>
-				<p>Semaphore has years of production use, a large installed base, and packaged distributions everywhere. If the features above matter more to you than that history, the import brings your projects across in one command and you can see for yourself.</p>
+				<p>Semaphore has years of production use, a large installed base, and packaged distributions everywhere. If the features above matter more to you than that history, the import brings your projects across after a dry run and you can see for yourself.</p>
 			</div>
 		</section>
 
 		<section class="section wrap">
 			<div class="section-head reveal">
-				<h2>Move in one command</h2>
+				<h2>Export, preview, apply</h2>
 				<p>Export a Semaphore backup, import it into SwitchTender. Projects, inventories, templates with their survey variables, schedules, and keys as credential shells come across, with a dry run first so you see the plan before anything is written.</p>
 			</div>
 			<div class="gs-steps">
@@ -296,7 +296,7 @@
 				<a href="/aap-alternative">vs AAP</a>
 				<a href="/rundeck-alternative">vs Rundeck</a>
 				<a href="/chef-eol">Off Chef</a>
-				<a href="/puppet-eol">Off Puppet</a>
+				<a href="/moving-off-puppet">Off Puppet</a>
 				<a href="/contact">Contact</a>
 				<a href="/privacy">Privacy</a>
 				<a href="/terms">Terms</a>

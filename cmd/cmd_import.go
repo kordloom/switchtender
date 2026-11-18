@@ -85,7 +85,7 @@ var importPuppetCmd = &cobra.Command{
 		"managing them. Manifests and modules are not imported, for the same reason Chef's " +
 		"recipes are not.\n\n" +
 		"Accepts a PuppetDB nodes query, a PuppetDB facts query, or the plain certname list " +
-		"that `puppet node list` prints.",
+		"that `puppetserver ca list --all` prints, signed certificates only.",
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runImport(cmd, args[0], importer.FromPuppet)

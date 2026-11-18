@@ -4,10 +4,10 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Ascender alternative without Kubernetes | SwitchTender</title>
-	<meta name="description" content="SwitchTender is a source-available alternative to CIQ Ascender that runs from one Go binary with no Kubernetes, no Postgres, and no Receptor mesh. Seven tools, a live host-by-task matrix, provable audit, and a one-command import of your AWX-format export.">
+	<meta name="description" content="SwitchTender is a source-available alternative to CIQ Ascender that runs from one Go binary with no Kubernetes, no Postgres, and no Receptor mesh. Seven tools, a live host-by-task matrix, provable audit, and an import of AWX-format exports with a dry run first.">
 	<link rel="canonical" href="https://switchtender.com/ascender-alternative">
 	<meta property="og:title" content="Ascender alternative without Kubernetes | SwitchTender">
-	<meta property="og:description" content="Ascender fixes AWX's freeze with releases and support, and keeps AWX's shape. SwitchTender keeps the capabilities and drops the platform: one binary, seven tools, a live host-by-task matrix, and a one-command import.">
+	<meta property="og:description" content="Ascender fixes AWX's freeze with releases and support, and keeps AWX's shape. SwitchTender keeps the capabilities and drops the platform: one binary, seven tools, a live host-by-task matrix, and an import with a dry run first.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://switchtender.com/ascender-alternative">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=11">
@@ -38,7 +38,7 @@
   "Live host-by-task matrix and per-host history across runs",
   "Drift detection from a dry run",
   "One static Go binary and one SQLite file, with PostgreSQL optional",
-  "One-command import from AWX-format exports (AWX, Tower, and Automation Controller), Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab"
+  "Import from AWX-format exports (AWX, Tower, and Automation Controller), Semaphore UI, Chef, Puppet, Rundeck, Jenkins, and crontab, each with a dry run first"
  ],
  "license": "https://mariadb.com/bsl11/",
  "name": "SwitchTender",
@@ -96,7 +96,7 @@
 		<section class="wrap gs-hero reveal">
 			<span class="eyebrow">Ascender alternative</span>
 			<h1>Ascender fixed AWX's freeze.<br><span class="grad">It kept AWX's footprint.</span></h1>
-			<p class="lede">Ascender is CIQ's commercially supported continuation of AWX, and it solves the one thing AWX broke: it ships releases and you can buy a support contract. But it keeps AWX's footprint. A Kubernetes-based install, Postgres, and a Receptor mesh stand up before the first playbook runs, and Ansible is still the only tool. SwitchTender is one Go binary. Download it, run it, and you have job templates, schedules, RBAC, surveys, workflows, and approvals, with directory sign-in on Pro, plus a live host-by-task matrix and seven tools instead of one. Ascender's export, made with its own ascender-kit client on the AWX data model, imports in one command.</p>
+			<p class="lede">Ascender is CIQ's commercially supported continuation of AWX, and it solves the one thing AWX broke: it ships releases and you can buy a support contract. But it keeps AWX's footprint. A Kubernetes-based install, Postgres, and a Receptor mesh stand up before the first playbook runs, and Ansible is still the only tool. SwitchTender is one Go binary. Download it, run it, and you have job templates, schedules, RBAC, surveys, workflows, and approvals, with directory sign-in on Pro, plus a live host-by-task matrix and seven tools instead of one. Run <code>ascender export &gt; export.json</code>. The preview names any workflow with a conditional connector or more than one approver and leaves it for you to rebuild.</p>
 			<div class="hero-cta">
 				<a class="btn big" href="/get-started">Get started</a>
 				<a class="ghost big" href="/docs/switching-from-awx">Read the migration guide</a>
@@ -152,11 +152,11 @@
 						<tr><td data-label="Capability">Notification channels</td><td class="us" data-label="SwitchTender">Eleven, each with per-template targets</td><td data-label="Ascender"><span class="muted">Ten: AWS SNS, Email, Grafana, IRC, Mattermost, PagerDuty, Rocket.Chat, Slack, Twilio, Webhook, attached to organizations, projects, templates, workflows, inventory sources, and system jobs</span></td></tr>
 						<tr><td data-label="Capability">Advisory AI triage and fleet answers</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="Ascender"><span class="muted">No AI, LLM, or agent feature documented</span></td></tr>
 						<tr><td data-label="Capability">Drop-in Go plugins: tools, secrets, AI, notifiers</td><td class="us" data-label="SwitchTender"><i class="y"></i></td><td data-label="Ascender"><i class="n"></i></td></tr>
-						<tr><td data-label="Capability">Import from other tools</td><td class="us" data-label="SwitchTender">One command</td><td data-label="Ascender"><span class="muted">Its own export through ascender-kit; in-place migration from AWX through the installer</span></td></tr>
+						<tr><td data-label="Capability">Import from other tools</td><td class="us" data-label="SwitchTender">Seven importers, each with a dry run first</td><td data-label="Ascender"><span class="muted">Its own export through ascender-kit; in-place migration from AWX through the installer</span></td></tr>
 					</tbody>
 				</table>
 			</div>
-			<p class="gs-note reveal">Checked against Ascender's own documentation on 2026-10-08, for Ascender 25.6.2, published 2026-09-09. A comparison decays the day it is written, so check a row against the current release before you rely on it. <a href="/docs/comparison">Full table and sources</a>.</p>
+			<p class="gs-note reveal">Checked against Ascender's own documentation on 2026-11-11, for Ascender 25.6.3, published 2026-10-28. A comparison decays the day it is written, so check a row against the current release before you rely on it. <a href="/docs/comparison">Full table and sources</a>.</p>
 		</section>
 
 		<section class="section wrap">
@@ -168,7 +168,7 @@
 
 		<section class="section wrap">
 			<div class="section-head reveal">
-				<h2>Move in one command</h2>
+				<h2>Export, preview, apply</h2>
 				<p>Ascender uses AWX's data model, so its export imports into SwitchTender the same way AWX's does. Projects, inventories, templates, surveys, and schedules come across, with a dry run first so you see the plan before anything is written.</p>
 			</div>
 			<div class="gs-steps">
@@ -285,7 +285,7 @@ switchtender import awx awx-export.json --db switchtender.db --apply</code></pre
 				<a href="/jenkins-alternative">vs Jenkins</a>
 				<a href="/rundeck-alternative">vs Rundeck</a>
 				<a href="/chef-eol">Off Chef</a>
-				<a href="/puppet-eol">Off Puppet</a>
+				<a href="/moving-off-puppet">Off Puppet</a>
 				<a href="/contact">Contact</a>
 				<a href="/privacy">Privacy</a>
 				<a href="/terms">Terms</a>

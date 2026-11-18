@@ -23,7 +23,7 @@ believes it has a control it does not have.
 | Deny rules and risk and reversibility floors | Pro | Creating a policy that uses one. Require-approval policies and exemptions stay Community, as many as you need. |
 | The full policy engine: actor and account scoping, distinct-approver separation of duties, and Rego policies | Team | Creating a policy that uses one. |
 | The period change register | Team | `audit report`, and `GET /v1/audit/register`. |
-| Dedicated workers and named queues, and the relay that runs them inside networks the control node cannot reach | Team | Every `switchtender worker`, whether it shares the database or reaches the server over the mesh relay with `--server`. PostgreSQL, including active-active HA on it, is Community. |
+| Distributed workers and named queues, and the relay that runs them inside networks the control node cannot reach | Team | Every `switchtender worker`, whether it shares the database or reaches the server over the mesh relay with `--server`. PostgreSQL, including active-active HA on it, is Community. |
 | One-click drift reconcile | Team | `POST /v1/drift/reconcile`. Drift detection itself is free. |
 
 `license status` prints the tier this install runs and when a license lapses. Tiers and prices are at
@@ -426,8 +426,9 @@ Migrates from AWX, Semaphore, Chef, Puppet, Rundeck, Jenkins, or cron. Which obj
   node documents, a single node, or an object keyed by node name. Cookbooks and recipes are not
   imported and the recipes seen are named in the report.
 - `import puppet <nodes.json|facts.json|nodes.txt> [--apply]` brings one inventory of the fleet,
-  grouped by environment, from a PuppetDB nodes query, a PuppetDB facts query, or the plain
-  certname list `puppet node list` prints. Deactivated and expired nodes are left out and counted.
+  grouped by environment, from a PuppetDB nodes query, a PuppetDB facts query, or the certname
+  list `puppetserver ca list --all` prints, signed certificates only. Deactivated and expired nodes
+  are left out and counted.
   Manifests and modules are not imported.
 - `import rundeck <jobs.yaml|project-archive.zip> [--inventory <name>] [--apply]` brings templates,
   surveys, and schedules from either a job export or a project archive, told apart by content. An
