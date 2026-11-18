@@ -892,10 +892,21 @@ your Okta organization. A shared issuer such as `https://accounts.google.com` si
 account, so every Google user who reaches the sign-in page gets an account unless the provider limits
 who can use your client, as a Google Workspace client marked Internal does.
 
+An account OIDC creates records the issuer and the subject of the identity that created it, and
+every later sign-in is matched on that pair. A provider that sends no `email_verified` claim, as
+Microsoft Entra ID does by default, therefore signs the same person in every time. A different
+identity that asserts the same name is refused, whether or not its address is verified. Subjects
+change when the issuer or the client registration changes. After a change like that, an
+administrator deletes the account and the next sign-in creates it again at the default role.
+
 This matters most when the username does not come from a stable subject. With
 `--jwt-username-claim email` or a SAML username attribute pointing at an email, against an issuer
-that lets a user set their own address, matching on username alone was account takeover. OIDC has
-always refused the equivalent when the provider does not vouch for the address.
+that lets a user set their own address, matching on username alone was account takeover. OIDC
+refuses the equivalent: an address the provider does not vouch for never signs in to an account that
+OIDC did not create.
+
+An assertion must carry a bearer subject confirmation and an audience restriction that names this
+server, and an identity provider that encrypts assertions must use RSA-OAEP key transport.
 
 An account created before this was recorded carries no source, so it cannot be told apart from a
 local one of the same name. Those are still signed in to, because refusing them would lock out every
