@@ -428,7 +428,7 @@ func TestPricingSurfacesDescribeThePaidBuild(t *testing.T) {
 		File: "LICENSING.md",
 		WantPhrase: "The paid code is kept in a private repository, mounted at internal/paid/impl as " +
 			"a git submodule that public clones do not fetch. A Community build refuses each paid " +
-			"feature by naming the tier it needs. The paid engine is not there to patch a key out of.",
+			"feature by naming the tier it needs. From v1.107.0 on, the paid engine is not there to patch a key out of.",
 	}, { // Test 2: The README names the paid build.
 		File: "README.md",
 		WantPhrase: "Every paid feature ships in the paid build, a separate download unlocked by a " +
@@ -437,7 +437,7 @@ func TestPricingSurfacesDescribeThePaidBuild(t *testing.T) {
 		File: "README.md",
 		WantPhrase: "The paid code is kept in a private repository, mounted at internal/paid/impl as " +
 			"a git submodule that public clones do not fetch. A Community build refuses each paid " +
-			"feature by naming the tier it needs, and the paid engine is not there to patch a key out of.",
+			"feature by naming the tier it needs, and from v1.107.0 on the paid engine is not there to patch a key out of.",
 	}, { // Test 4: The Pro card names the paid build.
 		File:       "site/pricing.html",
 		WantPhrase: "The paid build, unlocked by a signed license file the product verifies offline.",

@@ -37,16 +37,18 @@ at no cost.
 
 The commercial model is open core. The Community build is this repository. Paid features live in a
 private module, and the paid build that carries them is a separate download, unlocked by a small
-signed file verified offline against a key compiled into the binary.
+signed file verified offline against a key compiled into the binary. Versions before v1.107.0
+carried the paid features they had in the public tree under the Business Source License 1.1, and
+that code stays available under that license.
 
 The paid code is kept in a private repository, mounted at internal/paid/impl as a git submodule that
 public clones do not fetch. A Community build refuses each paid feature by naming the tier it needs.
-The paid engine is not there to patch a key out of. Rules scoped to an actor, an agent, or an
-account use the same matching code every build carries, because free exemptions are decided on it. A
-Community build cannot author such a rule, and a rule of that kind restored from a Team backup holds
-every run its other criteria cover, so it never narrows to the paid scope. Separation of duties is
-enforced on every build for any run that carries it, because a restored backup must keep its gates.
-Team is what lets you write the rule.
+From v1.107.0 on, the paid engine is not there to patch a key out of. Rules scoped to an actor, an
+agent, or an account use the same matching code every build carries, because free exemptions are
+decided on it. A Community build cannot author such a rule, and a rule of that kind restored from a
+Team backup holds every run its other criteria cover, so it never narrows to the paid scope.
+Separation of duties is enforced on every build for any run that carries it, because a restored
+backup must keep its gates. Team is what lets you write the rule.
 
 Reconcile's wall is the private proposal code and the route's refusal naming Team. Plan keeping
 stays public because a pull request plan, a Community feature, is kept by the same code and read by

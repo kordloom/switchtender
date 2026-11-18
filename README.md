@@ -453,9 +453,9 @@ which Team can also buy as an add-on. Every paid feature ships in the paid build
 download unlocked by a signed license file: no license server, no phone-home, flat per org. The paid
 code is kept in a private repository, mounted at internal/paid/impl as a git submodule that public
 clones do not fetch. A Community build refuses each paid feature by naming the tier it needs, and
-the paid engine is not there to patch a key out of. The one reserved right is offering SwitchTender
-to third parties as a hosted or managed service that provides its primary functionality. Each
-version of the public core converts to Apache-2.0 two years after its release.
+from v1.107.0 on the paid engine is not there to patch a key out of. The one reserved right is
+offering SwitchTender to third parties as a hosted or managed service that provides its primary
+functionality. Each version of the public core converts to Apache-2.0 two years after its release.
 
 See `LICENSE` for the exact terms and [`LICENSING.md`](LICENSING.md) for what self-hosting grants,
 how a commercial license works, and how to ask about support.
