@@ -1221,8 +1221,9 @@ facts that identify a machine, with <code>ipaddress</code> also set as <code>ans
 node documents, a single node, or an object keyed by node name. Cookbooks and recipes are not
 imported and the recipes seen are named in the report.</li>
 <li><code>import puppet &lt;nodes.json|facts.json|nodes.txt&gt; [--apply]</code> brings one inventory of the fleet,
-grouped by environment, from a PuppetDB nodes query, a PuppetDB facts query, or the plain
-certname list <code>puppet node list</code> prints. Deactivated and expired nodes are left out and counted.
+grouped by environment, from a PuppetDB nodes query, a PuppetDB facts query, or the certname
+list <code>puppetserver ca list --all</code> prints, signed certificates only. Deactivated and expired nodes
+are left out and counted.
 Manifests and modules are not imported.</li>
 <li><code>import rundeck &lt;jobs.yaml|project-archive.zip&gt; [--inventory &lt;name&gt;] [--apply]</code> brings templates,
 surveys, and schedules from either a job export or a project archive, told apart by content. An

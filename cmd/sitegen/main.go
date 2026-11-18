@@ -191,7 +191,7 @@ var landingURLs = []string{
 	"https://switchtender.com/semaphore-alternative", "https://switchtender.com/aap-alternative",
 	"https://switchtender.com/rundeck-alternative", "https://switchtender.com/jenkins-alternative",
 	"https://switchtender.com/migration",
-	"https://switchtender.com/chef-eol", "https://switchtender.com/puppet-eol",
+	"https://switchtender.com/chef-eol", "https://switchtender.com/moving-off-puppet",
 	"https://switchtender.com/contact",
 	"https://switchtender.com/privacy",
 	"https://switchtender.com/terms",

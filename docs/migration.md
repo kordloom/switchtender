@@ -399,8 +399,8 @@ attaching a project changes the directory every relative path in the script reso
 
 ## Import a Chef or Puppet fleet
 
-Both of these answer the same question: the machines are managed by something whose open source line
-has no supported road ahead, and the fleet needs to be somewhere else before that matters.
+Both importers answer the same question: how to put governed runs in front of a Chef or Puppet fleet
+without converting a cookbook or a manifest.
 
 Chef reads what the server stores about its nodes. Any of the three shapes the tooling emits works:
 an array of node documents, a single node, or an object keyed by node name.

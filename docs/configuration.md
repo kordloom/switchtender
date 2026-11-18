@@ -426,8 +426,9 @@ Migrates from AWX, Semaphore, Chef, Puppet, Rundeck, Jenkins, or cron. Which obj
   node documents, a single node, or an object keyed by node name. Cookbooks and recipes are not
   imported and the recipes seen are named in the report.
 - `import puppet <nodes.json|facts.json|nodes.txt> [--apply]` brings one inventory of the fleet,
-  grouped by environment, from a PuppetDB nodes query, a PuppetDB facts query, or the plain
-  certname list `puppet node list` prints. Deactivated and expired nodes are left out and counted.
+  grouped by environment, from a PuppetDB nodes query, a PuppetDB facts query, or the certname
+  list `puppetserver ca list --all` prints, signed certificates only. Deactivated and expired nodes
+  are left out and counted.
   Manifests and modules are not imported.
 - `import rundeck <jobs.yaml|project-archive.zip> [--inventory <name>] [--apply]` brings templates,
   surveys, and schedules from either a job export or a project archive, told apart by content. An

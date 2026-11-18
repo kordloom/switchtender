@@ -162,7 +162,7 @@ func FuzzFromChef(f *testing.F) {
 // FuzzFromPuppet feeds arbitrary bytes to the Puppet importer to prove it never panics.
 //
 // It reads three shapes as well: a PuppetDB nodes query, a facts query that names its nodes one
-// fact row at a time, and the plain certname list `puppet node list` prints, which is not JSON at
+// fact row at a time, and the certname list `puppetserver ca list --all` prints, which is not JSON at
 // all. A fuzzer gets to hand it something that is almost each of those.
 func FuzzFromPuppet(f *testing.F) {
 	f.Add([]byte(`[{"certname":"a.prod","catalog_environment":"production"}]`))
