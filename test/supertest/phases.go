@@ -480,10 +480,10 @@ func (h *harness) phaseTeam(license string) error {
 	}
 	claimedBy, _ := done["claimed_by"].(string)
 	if !strings.Contains(claimedBy, "worker") {
-		h.fail(phase, "a queue-pinned run was claimed by the dedicated worker",
+		h.fail(phase, "a queue-pinned run was claimed by the distributed worker",
 			fmt.Errorf("claimed_by is %q", claimedBy))
 	} else {
-		h.pass(phase, "a queue-pinned run was claimed by the dedicated worker",
+		h.pass(phase, "a queue-pinned run was claimed by the distributed worker",
 			"claimed_by "+claimedBy)
 	}
 	h.checkAnUnservedQueueNeedsAttention(phase)

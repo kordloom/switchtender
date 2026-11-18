@@ -77,7 +77,8 @@ var puppetStructured = map[string]map[string][]string{
 // governing runs on day one.
 //
 // Accepts a PuppetDB nodes query, a PuppetDB facts query, or the certname list that
-// `puppetserver ca list --all` prints, because which of those somebody has depends on what they can reach.
+// `puppetserver ca list --all` prints, because which of those somebody has depends on what they
+// can reach.
 func FromPuppet(data []byte, now time.Time) (*Plan, error) {
 	data, err := textOf(data)
 	if err != nil {
@@ -196,8 +197,8 @@ func decodePuppet(data []byte) ([]puppetNode, map[string]map[string]any, int, er
 	if len(trimmed) == 0 {
 		return nil, nil, 0, fmt.Errorf("%w: this document is empty", ErrNothingRecognized)
 	}
-	// A plain certname list is not JSON, and it is what `puppetserver ca list --all` prints. Reading it means
-	// somebody who can reach the CA but not PuppetDB still has a path.
+	// A plain certname list is not JSON, and it is what `puppetserver ca list --all` prints. Reading
+	// it means somebody who can reach the CA but not PuppetDB still has a path.
 	if trimmed[0] != '[' && trimmed[0] != '{' {
 		nodes, unsigned := decodePuppetNodeList(trimmed)
 		return nodes, nil, unsigned, nil

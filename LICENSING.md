@@ -62,7 +62,7 @@ rules and risk and reversibility floors.
 
 Team, from $7,500 a year by fleet band, adds the full policy engine (Rego policies,
 distinct-approver separation of duties, and rules scoped to an actor or agent), the period change
-register, dedicated workers and named queues, and the relay that runs them inside networks the
+register, distributed workers and named queues, and the relay that runs them inside networks the
 control node cannot reach, and one-click drift reconcile. PostgreSQL, including active-active high
 availability on it, is Community. No license server, no activation, no phone-home, no seat counting,
 and fleet bands are self-reported and never audited. A lapsed license takes nothing: opening or

@@ -31,7 +31,7 @@ type attentionPage struct {
 // checkAnUnservedQueueNeedsAttention submits a run to a queue nothing serves and requires the
 // attention view to name it as waiting for a worker, with the queue and a zero count, while the
 // queue this install's worker serves and the default queue its server serves read as served. It
-// runs on the Team install, which has a dedicated worker on one named queue and no other, so the
+// runs on the Team install, which has a distributed worker on one named queue and no other, so the
 // one missing worker the view reports is the one this check made missing.
 func (h *harness) checkAnUnservedQueueNeedsAttention(phase string) {
 	const claim = "a run on a queue no worker serves is named as waiting for one"

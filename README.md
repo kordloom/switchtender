@@ -444,18 +444,18 @@ the agent gate, which holds an agent token's runs for a person with no rule writ
 your own, require-approval policies and exemptions, approvals bound to the exact content released,
 and the whole evidence engine with signed receipts and offline verification. Pro adds directory
 sign-in (OIDC, SAML, LDAP, JWT), deny rules, and risk and reversibility floors at $500 a year for up
-to 500 hosts. Team, from $7,500 a year by fleet band, adds the full policy engine, dedicated workers
-and named queues, and the relay that runs them inside networks the control node cannot reach, the
-change register, and one-click drift reconcile. PostgreSQL, including active-active HA on it, is
-Community. Enterprise, from $50,000 a year, adds the services that come from outside your install:
-custody of your evidence, evidence work on your audit calendar, and the hosted witness, which Team
-can also buy as an add-on. Every paid feature ships in the paid build, a separate download unlocked
-by a signed license file: no license server, no phone-home, flat per org. The paid code is kept in a
-private repository, mounted at internal/paid/impl as a git submodule that public clones do not
-fetch. A Community build refuses each paid feature by naming the tier it needs, and the paid engine
-is not there to patch a key out of. The one reserved right is offering SwitchTender to third parties
-as a hosted or managed service that provides its primary functionality. Each version of the public core converts to
-Apache-2.0 two years after its release.
+to 500 hosts. Team, from $7,500 a year by fleet band, adds the full policy engine, distributed
+workers and named queues, and the relay that runs them inside networks the control node cannot
+reach, the change register, and one-click drift reconcile. PostgreSQL, including active-active HA on
+it, is Community. Enterprise, from $50,000 a year, adds the services that come from outside your
+install: custody of your evidence, evidence work on your audit calendar, and the hosted witness,
+which Team can also buy as an add-on. Every paid feature ships in the paid build, a separate
+download unlocked by a signed license file: no license server, no phone-home, flat per org. The paid
+code is kept in a private repository, mounted at internal/paid/impl as a git submodule that public
+clones do not fetch. A Community build refuses each paid feature by naming the tier it needs, and
+the paid engine is not there to patch a key out of. The one reserved right is offering SwitchTender
+to third parties as a hosted or managed service that provides its primary functionality. Each
+version of the public core converts to Apache-2.0 two years after its release.
 
 See `LICENSE` for the exact terms and [`LICENSING.md`](LICENSING.md) for what self-hosting grants,
 how a commercial license works, and how to ask about support.

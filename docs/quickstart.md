@@ -244,7 +244,7 @@ service user alone:
 
 Sign in with it, create named accounts and tokens, and delete it.
 
-Point `database.dsn` at PostgreSQL to run more than one server. Dedicated workers are Team, and
+Point `database.dsn` at PostgreSQL to run more than one server. Distributed workers are Team, and
 they need the paid image as well as the license: the image on ghcr is the Community build, which has
 no worker in it, and the chart refuses `worker.enabled=true` on it. The paid download carries the
 paid image as an OCI archive per architecture. Load it into your own registry, then set

@@ -153,7 +153,7 @@
    "name": "What about scale?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Runs stream and page by a sequence cursor, the runs list and event history paginate, and a large host matrix renders one cell at a time. An Ansible run shards across the inventory by measured host duration, and the server executes those shards in its own concurrent slots on any tier. Sharding is Ansible only. It fans one playbook across inventory hosts, which is a thing Ansible does and the other tools do not: a Bash, Python, PowerShell, Go, Terraform, or OpenTofu run, or one using a tool an extension registered, executes once wherever it is claimed. Submitting one with a shard count is not an error and does not warn. It simply runs as a single run, with no kind of split and no shard count on it, so read the submitted run back if you expected a fan-out. More than one server instance on PostgreSQL is Community. Team adds dedicated workers and named queues, and the relay that runs them inside networks the control node cannot reach. Starting a worker process after a license lapses is refused, and a lapsed license never locks a server out of its own data."
+    "text": "Runs stream and page by a sequence cursor, the runs list and event history paginate, and a large host matrix renders one cell at a time. An Ansible run shards across the inventory by measured host duration, and the server executes those shards in its own concurrent slots on any tier. Sharding is Ansible only. It fans one playbook across inventory hosts, which is a thing Ansible does and the other tools do not: a Bash, Python, PowerShell, Go, Terraform, or OpenTofu run, or one using a tool an extension registered, executes once wherever it is claimed. Submitting one with a shard count is not an error and does not warn. It simply runs as a single run, with no kind of split and no shard count on it, so read the submitted run back if you expected a fan-out. More than one server instance on PostgreSQL is Community. Team adds distributed workers and named queues, and the relay that runs them inside networks the control node cannot reach. Starting a worker process after a license lapses is refused, and a lapsed license never locks a server out of its own data."
    }
   },
   {
@@ -209,7 +209,7 @@
    "name": "What is the license?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Business Source License 1.1: free to self-host, modify, and run in production for your own organization. The one restriction is offering it to third parties as a hosted or managed service that provides its primary functionality, and each release of the public core converts to Apache 2.0 two years after it ships. The Community tier is free and complete on its own, with the built-in hold on agent runs and plain rules of your own. Pro adds directory sign-in, deny rules, and risk and reversibility floors. Team adds the full policy engine, the period change register, dedicated workers and named queues, and the relay that runs them inside networks the control node cannot reach, and one-click drift reconcile. Both unlock in the paid build with a signed license file the binary verifies offline, flat per organization by fleet band, and a lapsed license takes nothing: paid features stop while your data, evidence, and every Community feature keep working. There is no license server and nothing ever phones home."
+    "text": "Business Source License 1.1: free to self-host, modify, and run in production for your own organization. The one restriction is offering it to third parties as a hosted or managed service that provides its primary functionality, and each release of the public core converts to Apache 2.0 two years after it ships. The Community tier is free and complete on its own, with the built-in hold on agent runs and plain rules of your own. Pro adds directory sign-in, deny rules, and risk and reversibility floors. Team adds the full policy engine, the period change register, distributed workers and named queues, and the relay that runs them inside networks the control node cannot reach, and one-click drift reconcile. Both unlock in the paid build with a signed license file the binary verifies offline, flat per organization by fleet band, and a lapsed license takes nothing: paid features stop while your data, evidence, and every Community feature keep working. There is no license server and nothing ever phones home."
    }
   }
  ]
@@ -388,7 +388,7 @@ does and the other tools do not: a Bash, Python, PowerShell, Go, Terraform, or O
 using a tool an extension registered, executes once wherever it is claimed. Submitting one with a
 shard count is not an error and does not warn. It simply runs as a single run, with no <code>kind</code> of
 <code>split</code> and no shard count on it, so read the submitted run back if you expected a fan-out.</p>
-<p>More than one server instance on PostgreSQL is Community. Team adds dedicated workers and named
+<p>More than one server instance on PostgreSQL is Community. Team adds distributed workers and named
 queues, and the relay that runs them inside networks the control node cannot reach. Starting a
 worker process after a license lapses is refused, and a lapsed license never locks a server out of
 its own data.</p>
@@ -467,7 +467,7 @@ organization. The one restriction is offering it to third parties as a hosted or
 that provides its primary functionality, and each release of the public core converts to Apache 2.0 two years after it
 ships. The Community tier is free and complete on its own, with the built-in hold on agent runs and
 plain rules of your own. Pro adds directory sign-in, deny rules, and risk and reversibility floors.
-Team adds the full policy engine, the period change register, dedicated workers and named queues,
+Team adds the full policy engine, the period change register, distributed workers and named queues,
 and the relay that runs them inside networks the control node cannot reach, and one-click drift
 reconcile. Both unlock in the paid build with a signed license file the binary verifies offline,
 flat per organization by fleet band, and a lapsed license takes nothing: paid features stop while
