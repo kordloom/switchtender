@@ -5,11 +5,12 @@ incorporates the third-party Go modules listed below, each under its own open-so
 dependency is licensed under the GPL, LGPL, or AGPL. Full license texts are available in each
 module's source repository.
 
-The lists below are the modules `go version -m` prints for the macOS binary, with each license read
-by `go-licenses` 1.6.0. Two licenses were read by hand from the module's own LICENSE file:
-`modernc.org/mathutil`, which the tool could not classify, and `modernc.org/libc`, which the tool
-labeled from the module's list of bundled components. The Linux and Windows binaries link a slightly
-different set, named under Platform differences.
+The lists below are the modules `go version -m` prints for the macOS release binary, which is built
+with the Go version `go.mod` names, with each license read by `go-licenses` 1.6.0. Two licenses were
+read by hand from the module's own LICENSE file: `modernc.org/mathutil`, which the tool could not
+classify, and `modernc.org/libc`, which the tool labeled from the module's list of bundled
+components. The Linux and Windows binaries link a slightly different set, named under Platform
+differences.
 
 Regenerate this file after any dependency change. Build the binary and run `go version -m` on it for
 the module list, then run `go-licenses report .` from the repository root for the licenses, once as
@@ -37,7 +38,6 @@ is and once each with `GOOS=linux` and `GOOS=windows`.
 
 - github.com/apparentlymart/go-textseg/v15 (its grapheme break tables are Unicode data, under the
   Unicode data files license reproduced in its LICENSE)
-- github.com/apparentlymart/go-textseg/v17
 - github.com/dustin/go-humanize
 - github.com/fatih/color
 - github.com/hashicorp/go-hclog
