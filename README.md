@@ -249,7 +249,7 @@ place.
 
 ## See it
 
-Poke at the [live demo](https://demo.switchtender.com/ui/held?who=agent), read-only and seeded with real runs, nothing to install.
+Poke at the [live demo](https://demo.switchtender.com/ui/held?who=agent), read-only and seeded with real runs against a made-up fleet, nothing to install.
 
 A two-shard split executing live: the merged host matrix fills in as hosts report, one shard
 fails on the broken database host while the other lands clean, and the timeline draws itself:
