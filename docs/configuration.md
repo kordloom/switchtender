@@ -885,6 +885,13 @@ directory identity signs in to an account only when that account is its own, so 
 asserting the username of a local administrator is refused rather than handed that administrator's
 account and role.
 
+OIDC creates an account, at the `--oidc-default-role` role, for every identity the issuer signs the
+first time it signs in. No setting limits sign-in to one domain or tenant, so point `--oidc-issuer` at
+an issuer that signs only your own people, such as a tenant-specific Microsoft Entra ID issuer or
+your Okta organization. A shared issuer such as `https://accounts.google.com` signs any Google
+account, so every Google user who reaches the sign-in page gets an account unless the provider limits
+who can use your client, as a Google Workspace client marked Internal does.
+
 This matters most when the username does not come from a stable subject. With
 `--jwt-username-claim email` or a SAML username attribute pointing at an email, against an issuer
 that lets a user set their own address, matching on username alone was account takeover. OIDC has
