@@ -223,7 +223,7 @@
 					</article>
 					<article class="card">
 						<div class="ic ic-secret"></div>
-						<h3>Verified without trusting the server</h3>
+						<h3>Verified without trusting the server, once anchored</h3>
 						<p>Export the chain as a signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundle and check it on a machine with no network, using a verifier that is not this binary, or <a href="/verify">in your browser</a> with nothing uploaded. LoomSeal is an open Apache-2.0 format anyone can reimplement. Pin the install's key from <code>/.well-known/loomseal.json</code>, and the bundle never vouches for itself.</p>
 					</article>
 				</div>
@@ -294,7 +294,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 					<article class="card">
 						<div class="ic ic-audit"></div>
 						<h3>Provable audit</h3>
-						<p>Every change links into a tamper-evident SHA-256 hash chain, and a change that can't be recorded is refused rather than made quietly. Export the chain as a signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundle and verify it offline with an open, independent verifier, without trusting the server. From LoomSeal 1.7.0 on, the verifier also checks what a run's receipt discloses, its spec, its outcome, and each approval decision, against what the chain committed, so a receipt edited and signed again fails.</p>
+						<p>Every change links into a tamper-evident SHA-256 hash chain, and a change that can't be recorded is refused rather than made quietly. Export the chain as a signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundle and verify it with an open verifier on a machine with no network. From LoomSeal 1.7.0 on, the verifier also checks what a run's receipt discloses, its spec, its outcome, and each approval decision, against what the chain committed, so a receipt edited and signed again fails.</p>
 					</article>
 					<article class="card">
 						<div class="ic ic-matrix"></div>
@@ -496,7 +496,7 @@ func main() {
 					<h2>The honest side-by-side</h2>
 				</div>
 				<div class="sh-body">
-					<p>Every product in this table runs jobs and schedules them, and most of them pause a workflow for a click. SwitchTender starts one layer above that. An approval here commits a digest of the inventory snapshot, the resolved container image, the pinned commit, and the saved plan, and the executor recomputes that digest before it runs anything. An AI agent gets one credential and a ceiling below admin, so it can propose a change and never approve one. The audit trail is a signed hash chain that an Apache-2.0 verifier checks offline, without an account on this server or trust in it. No product in this table documents an approval whose digest is recomputed at run time, an agent that cannot approve its own run, or evidence verified without the server. The nearest things are documented in the <a href="/docs/comparison">comparison doc</a>: Ansible Automation Platform checks signed project files and an OPA policy at launch, separately from its approval node, and Rundeck limits its MCP server with an ACL policy that the operator writes. The rest of the table is controller work, and all of it but the Team row is free. The comparison doc says row by row where that is ahead, even, or behind, with a source for each cell. Go deeper on any one: <a href="/awx-alternative">AWX</a>, <a href="/aap-alternative">Ansible Automation Platform</a>, <a href="/ascender-alternative">Ascender</a>, and <a href="/semaphore-alternative">Semaphore</a>. <a href="/docs/reliability">How runs execute under load</a> covers the engine underneath.</p>
+					<p>Every product in this table runs jobs and schedules them, and most of them pause a workflow for a click. SwitchTender starts one layer above that. An approval here commits a digest of the inventory snapshot, the resolved container image, the pinned commit, and the saved plan, and the executor recomputes that digest before it runs anything. An AI agent gets one credential and a ceiling below admin, so it can propose a change and never approve one. The audit trail is a signed hash chain that an Apache-2.0 verifier checks offline, without an account on this server, and without trust in it once the chain is anchored by a timestamp authority you trust and checked against a key you pin. No product in this table documents an approval whose digest is recomputed at run time, an agent that cannot approve its own run, or evidence verified without the server. The nearest things are documented in the <a href="/docs/comparison">comparison doc</a>: Ansible Automation Platform checks signed project files and an OPA policy at launch, separately from its approval node, and Rundeck limits its MCP server with an ACL policy that the operator writes. The rest of the table is controller work, and all of it but the Team row is free. The comparison doc says row by row where that is ahead, even, or behind, with a source for each cell. Go deeper on any one: <a href="/awx-alternative">AWX</a>, <a href="/aap-alternative">Ansible Automation Platform</a>, <a href="/ascender-alternative">Ascender</a>, and <a href="/semaphore-alternative">Semaphore</a>. <a href="/docs/reliability">How runs execute under load</a> covers the engine underneath.</p>
 				</div>
 			</div>
 			<div class="table-wrap reveal">
@@ -585,7 +585,7 @@ open http://localhost:8080/ui/</code></pre>
 
 		<section class="cta wrap reveal">
 			<h2>Every finished run leaves a receipt.</h2>
-			<p>Who asked, who approved it when a person had to, what changed on every host, and proof that none of it was edited after the fact. Human or AI agent, the record is the same, and once the chain is anchored, anyone can check it offline without trusting your server or ours.</p>
+			<p>Who asked, who approved it when a person had to, what changed on every host, and proof that none of it was edited after the fact. Human or AI agent, the record is the same, and once the chain is anchored, anyone who pins its key and its timestamp authority can check it offline without trusting your server or ours.</p>
 			<p class="cta-note">Self-hosted, nothing phones home, and a lapsed license takes nothing with it. You never bet your operations on our survival.</p>
 			<div class="hero-cta center">
 				<a class="btn big" href="/get-started">Get started</a>

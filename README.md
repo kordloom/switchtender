@@ -99,10 +99,10 @@ and the spec digest, is committed to the chain by the process that observed it f
 the execution, the outcome, into one signed file. `switchtender verify` checks it with no database
 and no network: every chain link recomputes, the approver's decision provably binds the digest of
 the spec that executed, and, when anchoring is configured, external RFC 3161 timestamps fix the
-history in time. Once the chain is anchored, the check needs no trust in the server that produced
-it. The same bytes verify under the open [loomseal](https://loomseal.com) verifier, which KordLoom
-also publishes, and its separate Python reference implementation, both held to the same
-conformance vectors.
+history in time. Once the chain is anchored and the reader pins both the install's key and the
+timestamp authority, the check needs no trust in the server that produced it. The same bytes verify
+under the open [loomseal](https://loomseal.com) verifier, which KordLoom also publishes, and its
+separate Python reference implementation, both held to the same conformance vectors.
 
 The remaining three stages are load-bearing but not headline: identity resolves who is asking and
 caps what an agent may ever do, risk grades each operation from its command and its reach so
