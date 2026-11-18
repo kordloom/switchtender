@@ -682,3 +682,17 @@ h1 {
 @media (prefers-reduced-motion: reduce) {
 	.deck-on .deck-stack > .card, .deck-dot { transition: none; }
 }
+
+/* Balance pass. The hero picture is shorter than the copy, so it centers on the copy instead of
+   hanging from the top with empty space under it. A split section's title stays beside its text
+   while the text scrolls, so the left column never reads as a blank strip. The note under the
+   comparison table sits inside the table's frame, so it takes the cells' padding and the frame's
+   full width rather than a narrow column against the left border. */
+.hero-shot { align-self: center; }
+@media (min-width: 900px) {
+	.section-head.split .sh-title { position: sticky; top: 96px; }
+}
+.table-wrap .compare-note { margin: 0; padding: 16px 18px 18px; max-width: none; border-top: 1px solid var(--border); }
+@media (max-width: 899px) {
+	.table-wrap .compare-note { padding: 16px 0 0; border-top: none; }
+}
