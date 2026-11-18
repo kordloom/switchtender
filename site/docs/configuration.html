@@ -1903,6 +1903,12 @@ that holds everything, or alert on the scrape's own staleness as well as its val
 directory identity signs in to an account only when that account is its own, so an identity provider
 asserting the username of a local administrator is refused rather than handed that administrator's
 account and role.</p>
+<p>OIDC creates an account, at the <code>--oidc-default-role</code> role, for every identity the issuer signs the
+first time it signs in. No setting limits sign-in to one domain or tenant, so point <code>--oidc-issuer</code> at
+an issuer that signs only your own people, such as a tenant-specific Microsoft Entra ID issuer or
+your Okta organization. A shared issuer such as <code>https://accounts.google.com</code> signs any Google
+account, so every Google user who reaches the sign-in page gets an account unless the provider limits
+who can use your client, as a Google Workspace client marked Internal does.</p>
 <p>This matters most when the username does not come from a stable subject. With
 <code>--jwt-username-claim email</code> or a SAML username attribute pointing at an email, against an issuer
 that lets a user set their own address, matching on username alone was account takeover. OIDC has
