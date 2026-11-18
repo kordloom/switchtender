@@ -689,9 +689,16 @@ h1 {
    comparison table sits inside the table's frame, so it takes the cells' padding and the frame's
    full width rather than a narrow column against the left border. */
 .hero-shot { align-self: center; }
+/* A split title sits level with the middle of the text beside it, so a short title never strands
+   itself at the top of a tall column. */
 @media (min-width: 900px) {
-	.section-head.split .sh-title { position: sticky; top: 96px; }
+	.section-head.split .sh-title { align-self: center; }
+	/* The proof section's text ends in one long paragraph that pulls its middle low, so its title
+	   sits a little above center to read as level. */
+	#proof .section-head.split:not(.sub) .sh-title { transform: translateY(-48px); }
 }
+/* Keep a lone word off the last line of a paragraph. */
+p { text-wrap: pretty; }
 .table-wrap .compare-note { margin: 0; padding: 16px 18px 18px; max-width: none; border-top: 1px solid var(--border); }
 @media (max-width: 899px) {
 	.table-wrap .compare-note { padding: 16px 0 0; border-top: none; }
