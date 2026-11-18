@@ -143,7 +143,7 @@
 				</article>
 				<article class="card reveal">
 					<h3>Security fixes stopped</h3>
-					<p>The 24.6.1 images carry two years of unpatched CVEs. One is <a href="https://access.redhat.com/security/cve/CVE-2026-12564">CVE-2026-12564</a>, which Red Hat rates 9.6 for the Vault credential plugin in Ansible Automation Platform. AWX 24.6.1 ships the same <code>kubernetes_auth</code> function in its Vault plugin, and no AWX release has followed. Teams report those images <a href="https://forum.ansible.com/t/any-news-on-awx-development/45639">failing security audits</a> with nothing patched to move to.</p>
+					<p>The 24.6.1 images carry two years of unpatched CVEs. One is <a href="https://access.redhat.com/security/cve/CVE-2026-12564">CVE-2026-12564</a>, which Red Hat rates 9.6 for the Vault credential plugin in Ansible Automation Platform. AWX 24.6.1 ships the same <code>kubernetes_auth</code> function in its Vault plugin, and no AWX release has followed. One operator <a href="https://forum.ansible.com/t/any-news-on-awx-development/45639">in the AWX forum</a> writes that the images &ldquo;may not comply with our internal security audits for much longer.&rdquo;</p>
 				</article>
 				<article class="card reveal">
 					<h3>Sign-in is moving out of core</h3>
@@ -151,7 +151,7 @@
 				</article>
 				<article class="card reveal">
 					<h3>In Red Hat's words</h3>
-					<p>"Our goal isn't to offer an exact replica of our commercial product for free," <a href="https://forum.ansible.com/t/awx-modernization-moving-forward/45134">from the AWX modernization update</a>. The direction is a subscription.</p>
+					<p>"Our goal isn't to offer an exact replica of our commercial product for free," <a href="https://forum.ansible.com/t/awx-modernization-moving-forward/45134">from the AWX modernization update</a>. Our reading is that the direction is a subscription.</p>
 				</article>
 				<article class="card reveal">
 					<h3>Even the collection was pulled</h3>
@@ -198,7 +198,7 @@
 					</tbody>
 				</table>
 			</div>
-			<p class="gs-note reveal">Checked against AWX's own documentation on 2026-08-10, for AWX 24.6.1, still current at 24.6.1 on 2026-09-07. A comparison decays the day it is written, so check a row against the current release before you rely on it. <a href="/docs/comparison">Full table and sources</a>.</p>
+			<p class="gs-note reveal">Checked against AWX's own documentation on 2026-11-11, for AWX 24.6.1, still the latest release. A comparison decays the day it is written, so check a row against the current release before you rely on it. <a href="/docs/comparison">Full table and sources</a>.</p>
 		</section>
 
 		<section class="section wrap">
@@ -211,7 +211,7 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>The other options</h2>
-				<p><a href="/ascender-alternative">Ascender</a> is a support-backed fork of the same frozen codebase, with the same Kubernetes-shaped footprint. Oracle Linux Automation Manager repackages AWX 24.6.1 for Oracle Linux hosts. Semaphore is light, but a run is a text log, custom roles sit in its paid tier, and its workflows are limited to task chaining. The <a href="/semaphore-alternative">full comparison is here</a>. Moving to CI pipelines works until you need RBAC, schedules, approvals, and an audit trail, at which point you have rebuilt a worse control plane. SwitchTender keeps AWX's capabilities without its architecture.</p>
+				<p><a href="/ascender-alternative">Ascender</a> is a support-backed fork of the same frozen codebase, with the same Kubernetes-shaped footprint. Oracle Linux Automation Manager repackages AWX 24.6.1 for Oracle Linux hosts. Semaphore is light, but a run is a text log, custom roles sit in its paid tier, and its workflow graph is listed as Pro in its docs. The <a href="/semaphore-alternative">full comparison is here</a>. Moving to CI pipelines works until you need RBAC, schedules, approvals, and an audit trail, at which point you have rebuilt a worse control plane. SwitchTender keeps AWX's capabilities without its architecture.</p>
 			</div>
 		</section>
 

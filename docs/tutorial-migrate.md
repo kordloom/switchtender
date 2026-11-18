@@ -66,9 +66,8 @@ report lists which ones need a secret. Fill them in once with
 
 A Rundeck, Jenkins, or crontab import creates no credentials at all, because those exports hold
 none. A job that needed a login needs a credential built by hand and attached to its template
-afterward. A secure Rundeck option or a Jenkins password parameter is refused rather than imported
-as a survey field, and the report names each one, because a survey answer is stored in plain text on
-every run.
+afterward. A secure Rundeck option or a Jenkins password parameter imports as a secret field with
+no value, and the report names each one so you can set it.
 
 A Rundeck import needs an inventory attached by hand for the same reason. A job export names no
 host, and a project archive carries the configuration of where Rundeck fetched its nodes from and

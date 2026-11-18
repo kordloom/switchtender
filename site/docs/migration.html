@@ -481,7 +481,7 @@ switchtender import chef chef-nodes.json --db switchtender.db
 <p>Each node becomes a host. Its <code>chef_environment</code> becomes a group, and every <code>role[...]</code> in its run
 list becomes a group as well, so a play can target <code>[webserver]</code> on the day of the import. The ohai
 attributes that identify a machine come across as host variables, and <code>ipaddress</code> also becomes
-<code>ansible_host</code>, because a Chef estate addresses machines by certname and has no reason to have kept
+<code>ansible_host</code>, because a Chef estate addresses machines by node name and has no reason to have kept
 DNS in step. The rest of a node's automatic attributes are left out on purpose: they run to hundreds
 of keys per host, and copying them produces an inventory nobody can read.</p>
 <p>Puppet reads PuppetDB queries, or the plain certname list when PuppetDB is not reachable. Export the
@@ -710,8 +710,9 @@ are restored. Only AWX and Semaphore carry credentials at all, so a Rundeck, Jen
 import has none to re-enter and none to attach.</p>
 <h2 id="limits-to-expect">Limits to expect</h2>
 <ul>
-<li>A schedule whose cadence a cron expression cannot represent, such as every third day, is reported
-and skipped rather than converted to a wrong cadence.</li>
+<li>A schedule whose cadence a cron expression cannot represent, such as every third day, comes
+across as the RFC 5545 recurrence it is rather than a cron with the wrong cadence. A schedule
+with no recurrence rule at all is reported and skipped.</li>
 <li>A workflow whose graph cannot be expressed whole is reported and skipped rather than reduced. A
 failure edge, which runs work precisely because something failed, has no pipeline equivalent, and a
 node pointing at a job template the export does not carry has no work to do. A node that runs a

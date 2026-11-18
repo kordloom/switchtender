@@ -41,6 +41,9 @@ beside the database. Try `switchtender demo` for a seeded read-only tour.
 - [Ansible Automation Platform alternative](https://switchtender.com/aap-alternative)
 - [Ascender alternative](https://switchtender.com/ascender-alternative)
 - [Rundeck alternative](https://switchtender.com/rundeck-alternative)
+- [Jenkins alternative](https://switchtender.com/jenkins-alternative)
+- [Moving off Chef](https://switchtender.com/chef-eol)
+- [Moving off Puppet](https://switchtender.com/moving-off-puppet)
 - [Switching from AWX](https://switchtender.com/docs/switching-from-awx): export, preview, apply, and re-enter secrets
 - [Feature comparison](https://switchtender.com/docs/comparison)
 

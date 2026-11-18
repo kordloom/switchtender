@@ -184,8 +184,8 @@ schedule its template.
   by dragging from a step's edge onto another, and run the graph as a pipeline.
 - Organizations exist and objects belong to them: create one with `POST /v1/orgs`, add members with
   a role, and a project, template, inventory, or credential can name its owning `org_id`. On top of
-  that, access is a global role plus optional per-object grants, which AWX's tree does not have.
-  Grant a user or a team `use` or `manage` on one specific object.
+  that, access is a global role plus optional per-object grants, the same idea as an AWX Use or
+  Admin role on one resource. Grant a user or a team `use` or `manage` on one specific object.
 - Notifications are configured on the server with `--notify-*` flags and cover eleven channels:
   webhook, Slack, Mattermost, Rocket.Chat, Discord, Microsoft Teams, ntfy, PagerDuty, Grafana,
   Twilio SMS, and email. Every finished run reaches every channel configured that way, and a run
