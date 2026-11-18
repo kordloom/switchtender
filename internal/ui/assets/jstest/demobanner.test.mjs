@@ -40,6 +40,7 @@ test("the hosted demo says it runs open on purpose and a real install does not",
 	const { text } = bannerOn("demo.switchtender.com", true);
 	assert.match(text, /runs open on purpose, on made-up data/);
 	assert.match(text, /every change is refused/);
+	assert.match(text, /anything marked Pro or Team needs the paid build and a license/);
 	assert.match(text, /An install you run never serves open on a network address/);
 });
 
