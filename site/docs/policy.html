@@ -202,6 +202,11 @@ routine work that should keep running unattended, and leave everything else held
     command_contains: drop database
     effect: deny
 </code></pre>
+<p>Actor and account scoping (<code>actor_kind</code>, <code>actor</code>, <code>account</code>) is Team, and <code>effect: deny</code> and the
+<code>min_risk</code> and <code>reversibility</code> floors are Pro, as <a href="#license">License</a> says. A Community build fails
+closed on such a rule: it holds every run the rule's other criteria cover, without its actor
+scope, and labels the hold with the tier that would evaluate it. There the third example above
+holds every run whose command contains <code>drop database</code> rather than refusing an agent's.</p>
 <p>A rule matches on <code>tool</code>, <code>command_contains</code> (ignoring case), <code>inventory_id</code>, <code>queue</code>, <code>actor_kind</code>,
 <code>actor</code>, <code>account</code>, <code>min_risk</code>, <code>reversibility</code>, and <code>exclude_dry_run</code>. <code>account</code> is the username of
 the account the requesting credential is bound to: the person behind a token or a session, or the

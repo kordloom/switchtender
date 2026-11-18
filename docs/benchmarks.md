@@ -5,10 +5,12 @@ at idle, how big the binary is, and how big the container image is. Every figure
 measured on 2026-10-05 against commit `5bd9bb5` on main, except where a line carries its own date or
 names another version. The release this page ships with adds code on top of that commit, among it
 the managed Ansible runtime and the pull request commands, and that build has not been measured
-here. Figures that vary from run to run say how many trials they came from and how
-far apart those trials fell. Nothing here is a projection, and no measured cell is arithmetic on
-another cell. Where the page does divide or add published figures, for a ratio or a total, it says
-which figures it used.
+here. Since that commit the paid engine, Open Policy Agent among it, moved out of the public binary,
+so the release binary is smaller than the sizes below: the v1.109.1 macOS download, read with
+`ls -l`, is 87,606,563 bytes, 42,378,837 for its arm64 slice. Figures that vary from run to run say
+how many trials they came from and how far apart those trials fell. Nothing here is a projection,
+and no measured cell is arithmetic on another cell. Where the page does divide or add published
+figures, for a ratio or a total, it says which figures it used.
 
 The machine is a ten-core Apple Silicon laptop. Boot times are timed in process on macOS. The memory
 and container figures come from Docker Desktop's Linux virtual machine on the same laptop, five vCPU
@@ -64,8 +66,8 @@ Linux figures above are the ones to plan against.
 
 ## Binary size
 
-A stripped release build of commit `5bd9bb5`, with Go 1.26.6, the version `go.mod` names, and the
-flags the release uses:
+A stripped release build of commit `5bd9bb5`, with Go 1.26.6, the version `go.mod` named then, and
+the flags the release uses:
 
     CGO_ENABLED=0 go build -trimpath \
       -ldflags "-s -w -X github.com/kordloom/switchtender/cmd.Version=5bd9bb5"
@@ -93,11 +95,12 @@ versions today with one toolchain and one set of flags, the darwin/arm64 binary 
 at v1.30.0, 31.90 MiB at v1.76.0, 33.63 MiB at v1.102.0 and 52.75 MiB at `5bd9bb5`. The v1.76.0
 build is 33,450,818 bytes, exactly what this page published for it on 2026-09-08. From v1.30.0 to
 v1.102.0 the binary grew 3.91 MiB across 122 releases. The step after v1.102.0 is 19.12 MiB, and
-most of it is one feature. Rego policies run on the Open Policy Agent engine, which is compiled into
-the binary. Built from the same commit with the one file that imports it replaced by a stub, the
-darwin/arm64 binary measures 38.98 MiB, so the engine and the packages only it pulls in account for
-13.77 MiB of the step. The other 5.35 MiB is everything else that landed after v1.102.0, among it
-the wider AWX importer, the native inventory engine, and federated cloud credentials.
+most of it is one feature. At that commit Rego policies ran on the Open Policy Agent engine,
+compiled into the binary. It has since moved to the paid build. Built from the same commit with the
+one file that imports it replaced by a stub, the darwin/arm64 binary measures 38.98 MiB, so the
+engine and the packages only it pulls in account for 13.77 MiB of the step. The other 5.35 MiB is
+everything else that landed after v1.102.0, among it the wider AWX importer, the native inventory
+engine, and federated cloud credentials.
 
 ## Reproduce it
 

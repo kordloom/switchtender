@@ -37,10 +37,10 @@ and stapled, and the app inside it is notarized and stapled on its own, so a cop
 `/Applications` carries its ticket and Gatekeeper can find it on a Mac that cannot reach Apple's
 notary service.
 
-The macOS binary in the `tar.gz`, which the Homebrew cask installs, is not signed or notarized yet.
-The install script and a `curl` download run it as is. A copy downloaded through a browser, or
-installed by the cask, carries macOS's quarantine flag, and Gatekeeper can refuse to run it until the
-flag is cleared with `xattr -d com.apple.quarantine` on the binary.
+The macOS binary in the `tar.gz`, which the Homebrew cask installs, is signed with a Developer ID
+and notarized. A bare binary cannot carry a stapled ticket, so the first time a downloaded copy
+runs, Gatekeeper asks Apple's notary service about it. On a Mac that cannot reach that service,
+clear the quarantine flag with `xattr -d com.apple.quarantine` on the binary.
 
 The Linux and Windows binaries in the tarballs and packages carry no code-signing certificate, so
 Windows shows the unidentified-developer prompt on first launch: choose More info, then Run anyway.
