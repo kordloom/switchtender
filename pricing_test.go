@@ -229,7 +229,7 @@ func TestProReadsTheSameEverywhere(t *testing.T) {
 	t.Parallel()
 	card := tierCard(t, readFlat(t, "site/pricing.html"), "Pro")
 	price := findOne(t, `<div class="tier-price"><b>\$([\d,]+)</b>`, card, "the Pro price")
-	hosts := findOne(t, `To ([\d,]+) hosts, single-node`, card, "the Pro host limit")
+	hosts := findOne(t, `To ([\d,]+) hosts\.`, card, "the Pro host limit")
 	mint := findOne(t, `const proBand = "(\d+)"`, readFlat(t, "cmd/cmd_license.go"), "proBand")
 	if diff := cmp.Diff(strings.ReplaceAll(hosts, ",", ""), mint); diff != "" {
 		t.Errorf("the mint signs Pro at a band the pricing page does not sell (-page +mint):\n%s", diff)

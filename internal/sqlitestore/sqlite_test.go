@@ -670,7 +670,7 @@ func TestPinnedCommitSurvivesTheStore(t *testing.T) {
 // TestStreamTicketCrossesReplicas opens two handles on one database file, the way two server
 // replicas open one shared store, and proves a ticket minted through one redeems exactly once
 // through the other. Held in process memory the ticket was invisible across replicas, so live run
-// tailing 401ed at random behind the active-active shape the Team tier sells.
+// tailing 401ed at random behind the active-active shape every build carries.
 func TestStreamTicketCrossesReplicas(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "switchtender.db")
