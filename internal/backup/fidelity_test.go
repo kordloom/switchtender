@@ -68,6 +68,7 @@ func fillEverything(t *testing.T, ctx context.Context, s Stores) {
 	}))
 	must(s.Users.Save(ctx, &user.User{
 		ID: "user_2", Username: "grace", PasswordHash: "argon2id$OTHER", Role: user.RoleViewer,
+		Source: "oidc", Issuer: "https://idp.example.com", Subject: "00uGRACESUBJECT",
 		CreatedAt: later,
 	}))
 	must(s.Teams.AddMember(ctx, "team_1", "user_1"))
@@ -289,7 +290,7 @@ func TestRoundTripIsFaithfulForEveryObject(t *testing.T) {
 	}, { // Test 6: Triggers, whose token hash and signing secret are hidden from JSON.
 		Name: "triggers",
 		List: func(s Stores) (any, error) { return s.Triggers.List(ctx) },
-	}, { // Test 7: Accounts, whose password hash is hidden from JSON.
+	}, { // Test 7: Accounts, whose password hash and sign-in identity are hidden from JSON.
 		Name: "users",
 		List: func(s Stores) (any, error) { return s.Users.List(ctx) },
 	}, { // Test 8: API tokens, whose hash is what actually authenticates them.
@@ -737,6 +738,7 @@ func TestBackupHidesEveryFixtureSecret(t *testing.T) {
 		{Name: "repository url", Secret: "example.com/app.git"},         // Test 9.
 		{Name: "sealed notification address", Secret: "SEALED-NTF-URL"}, // Test 10.
 		{Name: "sealed notification key", Secret: "SEALED-NTF-KEY"},     // Test 11.
+		{Name: "sign-in subject", Secret: "00uGRACESUBJECT"},            // Test 12.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

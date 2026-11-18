@@ -2,6 +2,7 @@ package user_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -210,5 +211,36 @@ func TestUseMinCostForTestsRefusesOnceTheGuardIsBuilt(t *testing.T) {
 	if cost != guardCost {
 		t.Errorf("user.New hashed at cost %d after the refusal, want the guard's cost %d", cost,
 			guardCost)
+	}
+}
+
+// TestTheSignInIdentityNeverCrossesJSON holds the issuer and subject out of JSON in both directions.
+// No API response may show them, and no request body may set them: an account update that took the
+// pair from a body would let an administrator page, or anything that reaches one, retie an account
+// to another person's identity at the provider.
+func TestTheSignInIdentityNeverCrossesJSON(t *testing.T) {
+	t.Parallel()
+	const issuer, subject = "https://idp.example.com", "00u1a2b3c4"
+	out, err := json.Marshal(user.User{ID: "user_1", Username: "ada", Issuer: issuer, Subject: subject})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	for _, secret := range []string{issuer, subject, `"issuer"`, `"subject"`} {
+		if strings.Contains(string(out), secret) {
+			t.Errorf("Marshal() = %s, want no %s", out, secret)
+		}
+	}
+
+	var in user.User
+	body := `{"id":"user_1","username":"ada","issuer":"` + issuer + `","subject":"` + subject +
+		`","Issuer":"` + issuer + `","Subject":"` + subject + `"}`
+	if err := json.Unmarshal([]byte(body), &in); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if in.Issuer != "" || in.Subject != "" {
+		t.Errorf("Unmarshal() pair = (%q, %q), want neither set from a body", in.Issuer, in.Subject)
+	}
+	if in.Username != "ada" {
+		t.Errorf("Unmarshal() username = %q, want ada, so the body was read at all", in.Username)
 	}
 }

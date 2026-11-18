@@ -22,6 +22,7 @@ func Contract(t *testing.T, newStore func() user.Store) {
 	t.Run("list ordered", func(t *testing.T) { testList(t, newStore()) })
 	t.Run("update", func(t *testing.T) { testUpdate(t, newStore()) })
 	t.Run("profile", func(t *testing.T) { testProfile(t, newStore()) })
+	t.Run("identity", func(t *testing.T) { testIdentity(t, newStore()) })
 	t.Run("last admin is guarded in one statement", func(t *testing.T) {
 		testLastAdminGuard(t, newStore())
 	})
@@ -350,4 +351,79 @@ func testListTimeOrder(t *testing.T, store user.Store) {
 	if diff := cmp.Diff(want, ids); diff != "" {
 		t.Errorf("List() order mismatch (-want +got):\n%s", diff)
 	}
+}
+
+// testIdentity verifies the issuer and subject of the identity that created an account are written
+// by Save and by nothing else. A returning directory sign-in is matched on that pair, so every read
+// has to return it, and an update from an admin page or a role change must never move it: an edit
+// that rewrote the pair would hand the account to whichever identity the edit named.
+func testIdentity(t *testing.T, store user.Store) {
+	ctx := context.Background()
+	const issuer, subject = "https://idp.example.com", "00u1a2b3c4"
+	u := &user.User{
+		ID: "user_1", Username: "ada", Role: user.RoleViewer, Source: "oidc",
+		Issuer: issuer, Subject: subject, CreatedAt: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+	}
+	if err := store.Save(ctx, u); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	reads := map[string]func() (*user.User, error){
+		"Get": func() (*user.User, error) { return store.Get(ctx, "user_1") },
+		"FindByUsername": func() (*user.User, error) {
+			return store.FindByUsername(ctx, "ada")
+		},
+		"List": func() (*user.User, error) {
+			all, err := store.List(ctx)
+			if err != nil {
+				return nil, err
+			}
+			if len(all) != 1 {
+				return nil, fmt.Errorf("List() returned %d accounts, want 1", len(all))
+			}
+			return all[0], nil
+		},
+	}
+	wantPair := func(step, wantIssuer, wantSubject string) {
+		t.Helper()
+		for name, read := range reads {
+			got, err := read()
+			if err != nil {
+				t.Fatalf("%s: %s() error = %v", step, name, err)
+			}
+			if got.Issuer != wantIssuer || got.Subject != wantSubject {
+				t.Errorf("%s: %s() pair = (%q, %q), want (%q, %q)", step, name, got.Issuer,
+					got.Subject, wantIssuer, wantSubject)
+			}
+		}
+	}
+	wantPair("after Save", issuer, subject)
+
+	// An update with a new role and a different pair on the struct changes the role only.
+	changed := *u
+	changed.Role = user.RoleOperator
+	changed.Issuer, changed.Subject = "https://other.example.com", "someone-else"
+	if err := store.Update(ctx, &changed); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	got, err := store.Get(ctx, "user_1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Role != user.RoleOperator {
+		t.Errorf("role after Update() = %q, want operator", got.Role)
+	}
+	wantPair("after Update", issuer, subject)
+
+	changed.Role = user.RoleAdmin
+	if ok, err := store.UpdateUnlessLastAdmin(ctx, &changed); err != nil || !ok {
+		t.Fatalf("UpdateUnlessLastAdmin() = %v, %v, want true", ok, err)
+	}
+	wantPair("after UpdateUnlessLastAdmin", issuer, subject)
+
+	// A second Save is the one write that may replace the pair.
+	u.Issuer, u.Subject = "https://idp2.example.com", "00u9z8y7"
+	if err := store.Save(ctx, u); err != nil {
+		t.Fatalf("Save() again error = %v", err)
+	}
+	wantPair("after a second Save", "https://idp2.example.com", "00u9z8y7")
 }
