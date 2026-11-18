@@ -25,7 +25,7 @@ use the one on the PATH, or run `switchtender ansible install` for a pinned, has
 beside the database. Try `switchtender demo` for a seeded read-only tour.
 
 ## Start here
-- Live demo, read-only and seeded with real runs, nothing to install: https://demo.switchtender.com
+- Live demo, read-only and seeded with real runs against a made-up fleet, nothing to install: https://demo.switchtender.com
 
 - [Homepage](https://switchtender.com/): what it is and the live matrix
 - [Pricing](https://switchtender.com/pricing): Community free forever with plain rules of your own, as many as you need, Pro $500/year to 500 hosts for SSO, deny rules, and risk and reversibility floors, Team from $7,500/year flat per org by fleet band with a KordLoom-hosted witness add-on at $3,000/year, Enterprise from $50,000/year for evidence custody and evidence work outside your install with the hosted witness included, scoped on the order form
