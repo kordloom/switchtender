@@ -36,9 +36,9 @@ function measure(page) {
     const img = document.querySelector(".hero-shot img");
     const captured = Number(img.getAttribute("width")) || 0;
     return {
-      h1: box(".hero-copy h1"),
       copy: box(".hero-copy"),
       shot: box(".hero-shot .window"),
+      frame: box(".hero-shot"),
       scale: captured > 0 ? img.getBoundingClientRect().width / captured : 0,
       docWidth: document.documentElement.scrollWidth,
       viewWidth: window.innerWidth,
@@ -47,12 +47,14 @@ function measure(page) {
 }
 
 for (const size of TWO_COLUMN) {
-  test(`at ${size[0]} the screenshot is level with the headline and readable`, async ({ page }) => {
+  test(`at ${size[0]} the screenshot is centered on the copy and readable`, async ({ page }) => {
     await open(page, size);
     const m = await measure(page);
-    // The window's tilt moves its painted corner a few pixels, so level means within 8. Each check
-    // is soft so one failure still reports the others.
-    expect.soft(Math.abs(m.shot.top - m.h1.top), `shot top ${m.shot.top}, h1 top ${m.h1.top}`)
+    // The picture is shorter than the copy, so the stylesheet centers its frame on the copy.
+    // Centered means the two middles are within 8 pixels. Each check is soft so one failure still
+    // reports the others.
+    const mid = (b) => (b.top + b.bottom) / 2;
+    expect.soft(Math.abs(mid(m.frame) - mid(m.copy)), `frame middle ${mid(m.frame)}, copy middle ${mid(m.copy)}`)
       .toBeLessThanOrEqual(8);
     expect.soft(m.shot.left, "the shot sits beside the copy").toBeGreaterThan(m.copy.right);
     expect.soft(m.scale, "rendered width over capture width").toBeGreaterThanOrEqual(0.6);
