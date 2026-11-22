@@ -31,10 +31,11 @@ func dryRunScan(r *run.Run, pb *run.PlaybookSignals, unread string, checkouts Ch
 		if r.Playbook == "" {
 			return run.DryRunScan{}, false
 		}
-		if pb == nil {
-			return run.UnreadPlaybookScan(r.Playbook, unread), true
+		scan := run.UnreadPlaybookScan(r.Playbook, unread)
+		if pb != nil {
+			scan = pb.DryRunScan()
 		}
-		return pb.DryRunScan(), true
+		return scan.WithExtraVars(r.ExtraVars), true
 	case run.ToolTerraform, run.ToolOpenTofu:
 		if r.Command == "" {
 			return run.DryRunScan{}, false

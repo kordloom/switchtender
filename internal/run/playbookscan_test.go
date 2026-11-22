@@ -565,6 +565,56 @@ func TestTheScanDeniesEveryLookupItCannotClear(t *testing.T) {
 	}
 }
 
+// TestTheScanDeniesConnectionVariables covers a play, role, task, or set_fact that sets an Ansible
+// connection or interpreter variable. Each names a program the controller starts, under --check as
+// much as without it, so the dry run is not change free. The variables that only say who and where
+// stay allowed.
+func TestTheScanDeniesConnectionVariables(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Files          map[string]string
+		WantChangeFree bool
+		WantFinding    string
+	}{{ // Test 0: A play var naming the shell.
+		Files: map[string]string{"site.yml": "- hosts: all\n  vars:\n    ansible_shell_executable: /tmp/sh\n" +
+			"  tasks:\n    - ansible.builtin.ping:\n"},
+		WantFinding: `sets "ansible_shell_executable"`,
+	}, { // Test 1: A task var naming the interpreter.
+		Files: map[string]string{"site.yml": checkPlay + "    - name: Probe\n      ansible.builtin.ping:\n" +
+			"      vars:\n        ansible_python_interpreter: /tmp/py\n"},
+		WantFinding: `task "Probe" sets "ansible_python_interpreter"`,
+	}, { // Test 2: A fact set for the tasks after it.
+		Files: map[string]string{"site.yml": checkPlay + "    - name: Switch\n      ansible.builtin.set_fact:\n" +
+			"        ansible_connection: local\n"},
+		WantFinding: `task "Switch" sets "ansible_connection"`,
+	}, { // Test 3: A role parameter.
+		Files: map[string]string{
+			"site.yml":                 "- hosts: all\n  roles:\n    - role: web\n      ansible_ssh_common_args: -o x\n",
+			"roles/web/tasks/main.yml": "- ansible.builtin.ping:\n",
+		},
+		WantFinding: `role "web" sets "ansible_ssh_common_args"`,
+	}, { // Test 4: Control, who and where on the play.
+		Files: map[string]string{"site.yml": "- hosts: all\n  vars:\n    ansible_user: deploy\n" +
+			"    ansible_port: 2222\n  tasks:\n    - ansible.builtin.ping:\n"},
+		WantChangeFree: true,
+	}, { // Test 5: Control, an ordinary fact.
+		Files:          map[string]string{"site.yml": checkPlay + "    - ansible.builtin.set_fact:\n        tier: web\n"},
+		WantChangeFree: true,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			scan := scanned(t, test.Files, "site.yml").DryRunScan()
+			if diff := cmp.Diff(test.WantChangeFree, scan.ChangeFree()); diff != "" {
+				t.Errorf("ChangeFree() mismatch (-want +got):\n%s\nfindings=%q", diff, scan.Findings)
+			}
+			if test.WantFinding != "" && !strings.Contains(strings.Join(scan.Findings, "\n"), test.WantFinding) {
+				t.Errorf("findings %q, want one naming %q", scan.Findings, test.WantFinding)
+			}
+		})
+	}
+}
+
 // TestTheScanDeniesWhatTheTreeLoads covers what Ansible loads from the tree without any playbook
 // naming it. A plugin directory, a module directory, an ansible.cfg, or a requirements file that
 // installs collections can bring code onto the controller that no task names, so wherever one sits

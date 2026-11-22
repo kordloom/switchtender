@@ -372,7 +372,7 @@ The scan looks for the known ways a check or a plan acts for real, and for anyth
 read. It cannot prove a preview harmless: Ansible lookups and plugins, and Terraform and OpenTofu
 providers, run code during a check or a plan. The scan counts an Ansible check as change free only
 when every lookup it reads names a plugin on a short list that runs nothing and the tree carries no
-plugins or configuration of its own, and it does not judge provider code at all. It does not read
+plugins or configuration of its own, and it does not judge provider code at all. A dry run whose variables set an Ansible connection or interpreter variable, or carry a template, is not treated as change free. It does not read
 variable files or templates either. So `exclude_dry_run` trusts the playbooks and configurations it lets through, and
 belongs on rules for code your team reviews. It cannot release an agent's dry run on its own: the
 built-in hold keeps that run waiting for a person whatever the scan finds, unless an exemption

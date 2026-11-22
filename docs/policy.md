@@ -624,7 +624,7 @@ is never change free, since the plugin runs its dry run as it was coded and noth
 
 The scan does not prove a preview harmless. The Ansible scan reads the playbook, what it imports and
 includes, and its roles' tasks, handlers, and dependencies, and not variable files or templates,
-which can call lookups too. A module that claims to support check mode can act anyway, and a plan
+which can call lookups too. A dry run whose variables set an Ansible connection or interpreter variable, or carry a template, is not treated as change free. A module that claims to support check mode can act anyway, and a plan
 runs provider code, all with the run's credentials. A rule
 that exempts dry runs trusts the playbooks and configurations it lets through, so keep it to code
 your team reviews. An agent's dry run is held by the [built-in
