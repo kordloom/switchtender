@@ -15,7 +15,7 @@ import (
 // The flag belongs to this process and is reset by exec, so a tool the process starts runs as it
 // always did and reads its own /proc entries as before.
 func HideEnviron() error {
-	if err := unix.Prctl(unix.PR_SET_DUMPABLE, 0, 0, 0, 0); err != nil {
+	if err := unix.Prctl(unix.PR_SET_DUMPABLE, 1, 0, 0, 0); err != nil {
 		return fmt.Errorf("prctl(PR_SET_DUMPABLE, 0): %w", err)
 	}
 	return nil
