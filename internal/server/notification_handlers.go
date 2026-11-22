@@ -234,6 +234,10 @@ func updateNotificationHandler(store notification.Store, sealer *credential.Seal
 			// A different kind reads its address and key differently, so nothing carries over.
 			next = run.NotifyTarget{Kind: req.Kind}
 		}
+		if keyLeftBehind(next.Kind, current.Kind, current.URL, req.URL, req.Key) {
+			respondError(w, log, http.StatusBadRequest, grafanaKeyAgain)
+			return
+		}
 		if !masked(req.URL) {
 			next.URL = req.URL
 		}

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -53,6 +54,20 @@ func maskTemplates(list []*template.Template) []*template.Template {
 		out[i] = maskTemplate(t)
 	}
 	return out
+}
+
+// grafanaKeyAgain is the refusal when a Grafana target's address changes and its stored API token
+// would be carried to the new one.
+const grafanaKeyAgain = "enter the API token again when the Grafana address changes"
+
+// keyLeftBehind reports whether an edit points a target whose key goes with its address at a new
+// address while keeping the stored key: the kind is unchanged, the address sent is real and differs
+// from the stored one, and the key sent is blank or masked. A Grafana token authenticates to the
+// Grafana it was issued by, so keeping it beside an address the editor chose sent it there with the
+// next annotation. A PagerDuty routing key has one fixed destination and is left alone.
+func keyLeftBehind(kind, storedKind, storedURL, url, key string) bool {
+	return kind == run.NotifyGrafana && kind == storedKind && !masked(url) && url != storedURL &&
+		masked(key)
 }
 
 // restoreMaskedNotifications replaces redacted URLs and keys in a submitted target list with the
@@ -110,6 +125,10 @@ func restoreMaskedNotifications(incoming, stored []run.NotifyTarget) ([]run.Noti
 		at := taken[out[i].Kind]
 		if at < len(have) {
 			taken[out[i].Kind]++
+			if maskedKey && keyLeftBehind(out[i].Kind, have[at].Kind, have[at].URL, out[i].URL,
+				out[i].Key) {
+				return nil, errors.New(grafanaKeyAgain)
+			}
 			if maskedURL {
 				out[i].URL = have[at].URL
 			}

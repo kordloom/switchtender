@@ -155,8 +155,9 @@ function ntfFormPlan(kind, editing) {
 		if (editing.needs_secret) plan.url.show = false;
 	}
 	if (fields.key && !missing.includes("key") && (editing.key_set || editing.needs_secret)) {
+		// A Grafana token belongs to the Grafana at the stored address, so a new address needs it again.
 		plan.key.configured = (kind === "pagerduty" ? "Routing key" : "Token") +
-			": configured. Leave empty to keep it.";
+			": configured. Leave empty to keep it" + (kind === "grafana" ? ", unless the address changes." : ".");
 		if (editing.needs_secret) plan.key.show = false;
 	}
 	return plan;

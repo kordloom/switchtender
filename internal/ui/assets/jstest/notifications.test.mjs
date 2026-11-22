@@ -96,11 +96,19 @@ test("ntfFormPlan never puts a stored secret back in an input and asks a shell o
 			Want: { url: { show: false,
 				configured: "Address: configured (https://grafana.example.com/…). Leave empty to keep it." },
 			key: { show: true, configured: "" }, to: { show: false }, missing: ["key"] } },
-		// Test 3: Changing the kind of what is being edited starts the new kind over.
+		// Test 3: A configured Grafana target says its token goes with its address.
+		{ Kind: "grafana", Editing: target({ kind: "grafana", url: "https://grafana.example.com/…",
+			key_set: true }),
+			Want: { url: { show: true,
+				configured: "Address: configured (https://grafana.example.com/…). Leave empty to keep it." },
+			key: { show: true,
+				configured: "Token: configured. Leave empty to keep it, unless the address changes." },
+			to: { show: false }, missing: [] } },
+		// Test 4: Changing the kind of what is being edited starts the new kind over.
 		{ Kind: "pagerduty", Editing: target(),
 			Want: { url: { show: false, configured: "" }, key: { show: true, configured: "" },
 				to: { show: false }, missing: [] } },
-		// Test 4: A PagerDuty target holding its key says so.
+		// Test 5: A PagerDuty target holding its key says so.
 		{ Kind: "pagerduty", Editing: target({ kind: "pagerduty", url: "", key_set: true }),
 			Want: { url: { show: false, configured: "" },
 				key: { show: true, configured: "Routing key: configured. Leave empty to keep it." },
