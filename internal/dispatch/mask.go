@@ -1,6 +1,9 @@
 package dispatch
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -420,6 +423,55 @@ func (m *masker) redactValueLocked(v any) any {
 	default:
 		return v
 	}
+}
+
+// redactJSON returns doc, a JSON document, with every known secret in its string values replaced by
+// the mask token. A document that holds none is returned as it was, byte for byte. One that does is
+// encoded again with its numbers kept as written and no HTML escaping, so only masked strings
+// change. Keys are left alone: they name values rather than carry them.
+func (m *masker) redactJSON(doc json.RawMessage) (json.RawMessage, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.shortest == 0 || len(doc) == 0 {
+		return doc, nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(doc))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return nil, fmt.Errorf("read a fact document: %w", err)
+	}
+	changed := false
+	var walk func(v any) any
+	walk = func(v any) any {
+		switch t := v.(type) {
+		case string:
+			if r := m.redactStringLocked(t); r != t {
+				changed = true
+				return r
+			}
+		case map[string]any:
+			for k, val := range t {
+				t[k] = walk(val)
+			}
+		case []any:
+			for i, val := range t {
+				t[i] = walk(val)
+			}
+		}
+		return v
+	}
+	v = walk(v)
+	if !changed {
+		return doc, nil
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, fmt.Errorf("write a masked fact document: %w", err)
+	}
+	return bytes.TrimRight(buf.Bytes(), "\n"), nil
 }
 
 // runOwnSecrets collects the secret values a run carries in its own request, so the log masker holds

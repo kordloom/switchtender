@@ -172,8 +172,13 @@ func plainLimitHosts(limit string) ([]string, bool) {
 // names, or that the run's recap shows it reached, are kept, so a play cannot plant facts for a
 // host the inventory does not hold. It runs whatever the run's outcome, as AWX does, since a play
 // that failed on one host still gathered the others.
+//
+// Every document is masked with the run's own secret values before it is saved. A local play
+// gathers ansible_env, which holds every variable an env credential injected, and the stored facts
+// are read later by people who could not read that credential. Collection is the one place that
+// knows the values, so it is where they come out.
 func (d *Dispatcher) collectFactCache(r *run.Run, fc *factCacheRun, inventoryPath string,
-	fold *run.SummaryFold) {
+	fold *run.SummaryFold, mask *masker) {
 	if fc == nil {
 		return
 	}
@@ -211,6 +216,14 @@ func (d *Dispatcher) collectFactCache(r *run.Run, fc *factCacheRun, inventoryPat
 	// facts over newer ones.
 	now := d.now()
 	for i := range got.Updated {
+		masked, err := mask.redactJSON(got.Updated[i].Facts)
+		if err != nil {
+			d.log.Warn("dispatch: mask cached facts: "+err.Error(), zap.String("run_id", r.ID))
+			addWarning(r, "the facts this run gathered could not be masked, so the fact cache was "+
+				"not updated")
+			return
+		}
+		got.Updated[i].Facts, got.Updated[i].Bytes = masked, len(masked)
 		got.Updated[i].InventoryID = fc.inventoryID
 		got.Updated[i].RunID = r.ID
 		got.Updated[i].ModifiedAt = gatheredAt(got.Updated[i].ModifiedAt, fc.prepared, now)
