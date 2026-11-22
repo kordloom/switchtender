@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"net"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -23,6 +24,7 @@ func TestTokenCountGuard(t *testing.T) {
 		ReadOnly     bool
 		ExternalAuth bool
 		Loopback     bool
+		Proxies      []*net.IPNet
 		Addr         string
 		WantPosture  servePosture
 		WantErr      bool
@@ -74,12 +76,23 @@ func TestTokenCountGuard(t *testing.T) {
 			Name: "count error with accounts", Count: 0, Accounts: 2, CountErr: errors.New("db locked"),
 			Addr: "0.0.0.0:8080", WantErr: true,
 		},
+		{ // Test 10: A loopback install declared to sit behind a proxy starts authenticated, since
+			// an open install refuses everything a proxy relays.
+			Name: "empty loopback behind a proxy", Count: 0, Loopback: true, Addr: "127.0.0.1:8080",
+			Proxies:     []*net.IPNet{{IP: net.IPv4(10, 0, 0, 0), Mask: net.CIDRMask(8, 32)}},
+			WantPosture: postureBootstrap,
+		},
+		{ // Test 11: A read-only public server behind its proxy still runs open, as the demo does.
+			Name: "empty read-only behind a proxy", Count: 0, ReadOnly: true, Addr: "127.0.0.1:8080",
+			Proxies:     []*net.IPNet{{IP: net.IPv4(127, 0, 0, 1), Mask: net.CIDRMask(32, 32)}},
+			WantPosture: postureWarn,
+		},
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			posture, err := tokenCountGuard(test.Count, test.CountErr, test.Accounts, test.ReadOnly,
-				test.ExternalAuth, test.Loopback, test.Addr)
+				test.ExternalAuth, test.Loopback, test.Proxies, test.Addr)
 			if (err != nil) != test.WantErr {
 				t.Errorf("%s: err = %v, want error: %v", test.Name, err, test.WantErr)
 			}

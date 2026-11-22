@@ -161,6 +161,8 @@ func serveWith(t *testing.T, method, path, body string, opts ...Option) *httptes
 	} else {
 		req = httptest.NewRequest(method, path, reader)
 	}
+	// An install with no account answers its own machine only, so the request names a loopback host.
+	req.Host = "127.0.0.1:8080"
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	return rec

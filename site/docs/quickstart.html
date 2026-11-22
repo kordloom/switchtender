@@ -172,6 +172,11 @@ keep those few.</p>
 <p>A loopback bind, or <code>--read-only</code>, starts without minting an initial token: a loopback API is
 reachable only from this machine, and a read-only one changes nothing. On a loopback bind the API
 asks for a token from the moment the install holds any token or account.</p>
+<p>An install with no account or token must not be put behind a proxy or a tunnel. It answers its own
+machine only, and refuses a request for any other host name or one that carries a forwarding header.
+A forward that adds no header and rewrites the host to localhost cannot be told from the owner, so
+run <code>switchtender init</code> or mint a token first. A server started with <code>--trusted-proxy</code> mints its
+initial token on a loopback bind too.</p>
 <h2 id="run-with-docker">Run with Docker</h2>
 <p>The compose file lives in the repository, so this one needs a checkout rather than the installed
 binary:</p>
