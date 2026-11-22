@@ -329,10 +329,11 @@ jobs:
         # commands go first on the PATH and nothing else of it does: its python3 has no botocore,
         # and putting it first hid the runner's from the test that probes the AWS SDK's caches.
         # The release is at or above the floor constructed inventories need, so the tests that
-        # compose one with real Ansible run here rather than check the refusal.
+        # compose one with real Ansible run here rather than check the refusal. PyYAML is pinned as
+        # the conformance jobs pin it, since ansible-core leaves it unpinned.
         run: |
           python3 -m venv "$RUNNER_TEMP/ansible"
-          "$RUNNER_TEMP/ansible/bin/pip" install --quiet "ansible-core==2.21.4"
+          "$RUNNER_TEMP/ansible/bin/pip" install --quiet "ansible-core==2.21.4" "PyYAML==6.0.3"
           mkdir -p "$RUNNER_TEMP/ansible-commands"
           ln -s "$RUNNER_TEMP"/ansible/bin/ansible* "$RUNNER_TEMP/ansible-commands/"
           echo "$RUNNER_TEMP/ansible-commands" >> "$GITHUB_PATH"
@@ -419,9 +420,12 @@ jobs:
         # another version either keeps the runner's or cannot replace it. The venv's ansible
         # commands go first on the PATH and nothing else of it does: its python3 has no botocore,
         # and putting it first hid the runner's from the test that probes the AWS SDK's caches.
+        # PyYAML is pinned beside it. ansible-core leaves it unpinned, and PyYAML 6.0.4 changed which
+        # map wins in a merge key that lists several, so every job moved under an unchanged tree.
         run: |
           python3 -m venv "$RUNNER_TEMP/ansible"
-          "$RUNNER_TEMP/ansible/bin/pip" install --quiet "ansible-core==${{ matrix.ansible-core }}"
+          "$RUNNER_TEMP/ansible/bin/pip" install --quiet "ansible-core==${{ matrix.ansible-core }}" \
+            "PyYAML==6.0.3"
           mkdir -p "$RUNNER_TEMP/ansible-commands"
           ln -s "$RUNNER_TEMP"/ansible/bin/ansible* "$RUNNER_TEMP/ansible-commands/"
           echo "$RUNNER_TEMP/ansible-commands" >> "$GITHUB_PATH"
@@ -587,7 +591,7 @@ jobs:
         # The release is at or above the floor constructed inventories need.
         run: |
           python3 -m venv "$RUNNER_TEMP/ansible"
-          "$RUNNER_TEMP/ansible/bin/pip" install --quiet "ansible-core==2.21.4"
+          "$RUNNER_TEMP/ansible/bin/pip" install --quiet "ansible-core==2.21.4" "PyYAML==6.0.3"
           mkdir -p "$RUNNER_TEMP/ansible-commands"
           ln -s "$RUNNER_TEMP"/ansible/bin/ansible* "$RUNNER_TEMP/ansible-commands/"
           echo "$RUNNER_TEMP/ansible-commands" >> "$GITHUB_PATH"
