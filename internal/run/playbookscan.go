@@ -293,6 +293,7 @@ func (s *playbookScan) scanPlays(file string, plays []map[string]any, depth int)
 			}
 		}
 		s.connectionVars(file, playLabel(play), play["vars"])
+		s.followVarsFiles(basedir, play["vars_files"], depth+1)
 		for _, key := range sortedKeys(play) {
 			// An imported playbook is a play-level entry naming another playbook, resolved against
 			// the directory of the one importing it.
@@ -341,6 +342,16 @@ func (s *playbookScan) scanTree() {
 		}
 		if why := treeLoads(name, base, d); why != "" {
 			s.treeFinding(name, why)
+		}
+		// Variables beside an inventory or a playbook load with nothing naming them, and a template
+		// source is rendered whole on the controller, so both are read wherever they sit.
+		if d.Type().IsRegular() {
+			switch {
+			case inVarsTree(name) && varFileName(name):
+				s.judgeVarFile(name)
+			case inTemplatesDir(name):
+				s.judgeTemplate(name)
+			}
 		}
 		return nil
 	})
@@ -453,6 +464,8 @@ func (s *playbookScan) followRole(ctx scanContext, how, name, tasksFrom, handler
 			depth: ctx.depth + 1}
 		s.scanRoleFile(inner, what, path.Join(dir, "tasks"), tasksFrom)
 		s.scanRoleFile(inner, what, path.Join(dir, "handlers"), handlersFrom)
+		s.judgeVarDir(path.Join(dir, "defaults"))
+		s.judgeVarDir(path.Join(dir, "vars"))
 		s.followDependencies(inner, what, dir)
 	}
 }
@@ -637,6 +650,11 @@ func (s *playbookScan) scanTask(ctx scanContext, task map[string]any) {
 			s.followRole(ctx, module, stringArg(args, "name"), stringArg(args, "tasks_from"),
 				stringArg(args, "handlers_from"))
 			continue
+		case "include_vars":
+			s.followIncludeVars(ctx, value)
+			continue
+		case "template", "win_template":
+			s.followTemplate(ctx, value)
 		case "set_fact":
 			// set_fact runs under --check, so a fact it names takes effect for the tasks after it.
 			s.connectionVars(ctx.file, taskLabel(task), moduleArgs(value))

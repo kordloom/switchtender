@@ -187,9 +187,9 @@ lookup plugins `vars`, `items`, `list`, `dict`, `indexed_items`, `subelements`, 
 of those too, and the words `lookup` and `query` appear nowhere else in what the scan reads, a
 task's name included. The repository must also carry no `library`, `module_utils`, or `*_plugins`
 directory, no `ansible.cfg`, and no requirements file that installs collections, since Ansible loads
-code and settings from each of those without a task naming them. The scan reads the playbook, what
-it imports and includes, and its roles' tasks, handlers, and dependencies. It does not read variable
-files or templates, which is why it is the second line.
+code and settings from each of those without a task naming them. The scan reads the playbook, what it imports and includes, its roles' tasks, handlers, dependencies, defaults, and vars, every `vars_files` and `include_vars` target, `group_vars` and `host_vars` in the repository, and every template source. A variable file it cannot read as plain data, a vault-encrypted one included, leaves the scan incomplete, so the dry run is not change free. A repository whose
+variable files are vault encrypted therefore gets no automatic plan. The scan still cannot judge
+provider or plugin code, which is why it is the second line.
 
 A playbook that forces real tasks or fails any of those is not planned, since its plan would act
 from a branch nobody merged, and neither is a configuration that declares an `external` or

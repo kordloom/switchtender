@@ -622,9 +622,7 @@ a role that is not in the project, a registry module the gate could not download
 only known at run time, or a file that does not parse. A dry run of a tool a plugin or the SDK added
 is never change free, since the plugin runs its dry run as it was coded and nothing scans it.
 
-The scan does not prove a preview harmless. The Ansible scan reads the playbook, what it imports and
-includes, and its roles' tasks, handlers, and dependencies, and not variable files or templates,
-which can call lookups too. A dry run whose variables set an Ansible connection or interpreter variable, or carry a template, is not treated as change free. A module that claims to support check mode can act anyway, and a plan
+The scan does not prove a preview harmless. The Ansible scan reads the playbook, what it imports and includes, its roles' tasks, handlers, dependencies, defaults, and vars, every `vars_files` and `include_vars` target, `group_vars` and `host_vars` in the repository, and every template source. A variable file it cannot read as plain data, a vault-encrypted one included, leaves the scan incomplete, so the dry run is not change free. A dry run whose variables set an Ansible connection or interpreter variable, or carry a template, is not treated as change free. A module that claims to support check mode can act anyway, and a plan
 runs provider code, all with the run's credentials. A rule
 that exempts dry runs trusts the playbooks and configurations it lets through, so keep it to code
 your team reviews. An agent's dry run is held by the [built-in
