@@ -197,3 +197,34 @@ test("a search superseded by a newer one leaves the table alone when it fails", 
 		"the stale failure showed a message over good data: " + JSON.stringify(status.textContent));
 	net.assertClean();
 });
+
+test("a list the server stopped walking says so and offers no Load more", async () => {
+	const { app, document, clock } = loadPage("runs", {
+		parts: PARTS,
+		routes: {
+			"/v1/runs": reply({ runs: [runOf("run_one")], has_more: false, partial: true, summary: {} }),
+		},
+	});
+
+	await app.loadRuns();
+	await clock.flush();
+	assert.deepEqual(rowIDs(document), ["run_one"]);
+	assert.equal(document.getElementById("status").textContent,
+		"The list stopped after 20,000 runs. Narrow the filter to see the rest.");
+	assert.equal(document.getElementById("runs-more").hidden, true,
+		"Load more was offered past the point the server stopped looking");
+});
+
+test("an empty list the server stopped walking does not read as no runs", async () => {
+	const { app, document, clock } = loadPage("runs", {
+		parts: PARTS,
+		routes: {
+			"/v1/runs": reply({ runs: [], has_more: false, partial: true, summary: {} }),
+		},
+	});
+
+	await app.loadRuns();
+	await clock.flush();
+	assert.equal(document.getElementById("status").textContent,
+		"The list stopped after 20,000 runs. Narrow the filter to see the rest.");
+});

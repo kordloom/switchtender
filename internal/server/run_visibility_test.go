@@ -91,15 +91,13 @@ func saveRun(t *testing.T, store run.Store, id, projectID string, at time.Time) 
 	}
 }
 
-// TestListRunsHasMoreBeforeFilter proves HasMore reflects what the store returned, not the page after
-// the read filter thinned it. A full store page with a row dropped by the filter must still report
-// more, or later readable runs never page in.
-func TestListRunsHasMoreBeforeFilter(t *testing.T) {
+// TestListRunsFillsThePageWithReadableRuns proves a strict-grants page is filled with readable runs
+// from past the rows the filter drops. A page of two over three runs, the middle one unreadable,
+// holds both readable runs and reports no more, because no further readable run exists.
+func TestListRunsFillsThePageWithReadableRuns(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
 	base := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
-	// Three runs newest last; a page of two returns run_c and run_b, of which only run_c is readable
-	// by an org_a member. run_a remains behind the page, so more genuinely follows.
 	saveRun(t, store, "run_a", "proj_solo", base)
 	saveRun(t, store, "run_b", "proj_b", base.Add(time.Second))
 	saveRun(t, store, "run_c", "proj_solo", base.Add(2*time.Second))
@@ -107,12 +105,12 @@ func TestListRunsHasMoreBeforeFilter(t *testing.T) {
 	authz := orgOwnedFixture(t)(true)
 	resp := listRunsFor(t, store, authz, "user_member_a", "?limit=2")
 
-	if diff := cmp.Diff([]string{"run_c"}, runIDs(resp.Runs), cmpopts.EquateEmpty()); diff != "" {
+	if diff := cmp.Diff([]string{"run_c", "run_a"}, runIDs(resp.Runs), cmpopts.EquateEmpty()); diff != "" {
 		t.Errorf("visible runs mismatch (-want +got):\n%s", diff)
 	}
-	if !resp.HasMore {
-		t.Error("HasMore = false, want true: the store returned a full page with a filtered row and " +
-			"a further run exists, so more pages follow")
+	if resp.HasMore || resp.NextOffset != 2 {
+		t.Errorf("has_more = %v, next_offset = %d, want false and 2: both readable runs are on this "+
+			"page", resp.HasMore, resp.NextOffset)
 	}
 }
 

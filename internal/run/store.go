@@ -591,6 +591,14 @@ type LogChunk struct {
 	Data []byte
 }
 
+// SearchFields returns the run fields a free-text term is matched against, in the order the SQL
+// stores list the same columns: id, playbook, command, tool, status, step name, and inventory. The
+// memory store matches these and the run list matches the same fields as a caller is shown them, so
+// the two cannot drift apart on which fields a search reads.
+func SearchFields(r *Run) []string {
+	return []string{r.ID, r.Playbook, r.Command, r.Tool, string(r.Status), r.StepName, r.Inventory}
+}
+
 // ListFilter narrows and orders a runs listing. Zero values apply no constraint, so the empty
 // filter lists everything newest first.
 type ListFilter struct {

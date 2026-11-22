@@ -152,6 +152,8 @@ func TestRunSearchClauseBindsOneArgumentPerColumn(t *testing.T) {
 		Name: "mixed case", Query: "  SiTe.YML  ", WantArg: "%site.yml%",
 	}, { // Test 3: Unicode survives the fold rather than being mangled.
 		Name: "unicode", Query: "Ünïcode", WantArg: "%ünïcode%",
+	}, { // Test 4: A percent sign, an underscore, and the escape itself are escaped to literals.
+		Name: "wildcards", Query: "50%_off!", WantArg: "%50!%!_off!!%",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

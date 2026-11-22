@@ -175,6 +175,36 @@ func testBackendEdgeParity(t *testing.T, store run.Store) {
 		t.Errorf("a search term containing a backslash did not match the run holding it, so the "+
 			"two backends read the term differently (%d rows returned)", len(page))
 	}
+
+	// A % or _ in a term matches only that character. The run list matches the same term in Go,
+	// and a wildcard in the store let the two disagree about which runs a search finds.
+	for _, w := range []struct{ id, command string }{
+		{"run_pct", "deploy 50% canary"},
+		{"run_unders", "deploy web_3 canary"},
+		{"run_bang", "deploy now! canary"},
+		{"run_plain", "deploy 50x canary webx3"},
+	} {
+		rn := sampleRun(w.id)
+		rn.Command = w.command
+		rn.IdempotencyKey = "idem_" + w.id
+		if err := store.Save(ctx, rn); err != nil {
+			t.Fatalf("Save() %s error = %v", w.id, err)
+		}
+	}
+	for _, probe := range []struct{ term, want string }{
+		{"50%", "run_pct"},
+		{"web_3", "run_unders"},
+		{"now!", "run_bang"},
+	} {
+		page, err := store.ListPage(ctx, run.ListFilter{Query: probe.term}, 50, 0)
+		if err != nil {
+			t.Fatalf("ListPage(%q) error = %v", probe.term, err)
+		}
+		if got := runIDs(page); len(got) != 1 || got[0] != probe.want {
+			t.Errorf("search %q = %v, want only %s: a %% or _ in a term was read as a wildcard",
+				probe.term, got, probe.want)
+		}
+	}
 }
 
 // testUnrepresentableText checks a run whose text carries a NUL byte or invalid UTF-8 is stored and

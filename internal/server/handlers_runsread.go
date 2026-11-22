@@ -15,6 +15,7 @@ import (
 	"github.com/kordloom/switchtender/internal/review"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
+	"github.com/kordloom/switchtender/internal/scrub"
 	"github.com/kordloom/switchtender/internal/template"
 )
 
@@ -28,10 +29,14 @@ type listRunsResponse struct {
 	Summary runSummary `json:"summary"`
 	// HasMore reports whether another page follows this one.
 	HasMore bool `json:"has_more"`
-	// NextOffset is where the next page starts in the store's own ordering. It advances by the
-	// page the store returned, before the read filter thinned it: a strict-grants caller advancing
-	// by the rows it could see re-read the rows it could not, and Load more repeated the page.
+	// NextOffset is where the next page starts. For a caller grants place no restriction on it is
+	// the store's own ordering. For a caller whose list is filtered row by row it counts only rows
+	// that caller may read, on the way in and on the way out: a store offset sent to that caller
+	// minus the rows it was given counted the runs it was refused, and so did every has_more.
 	NextOffset int `json:"next_offset"`
+	// Partial reports that a filtered list stopped at its walk bound before it found the end, so
+	// has_more is false because the server stopped looking, not because no run follows.
+	Partial bool `json:"partial,omitempty"`
 }
 
 // runSummary is the per-status rollup of all top-level runs, shown as cards above the list.
@@ -188,6 +193,71 @@ const (
 	maxRunsPage     = 1000
 )
 
+// runsWalk is the shape of the walk a filtered run list takes through the store: the size of each
+// store page and how many pages it reads before it stops. Production passes maxRunsPage and
+// runsReadWalkPages. A test passes a small walk to the handler rather than bending a shared value,
+// the same reason derivedReadFilterIn takes its window as an argument.
+type runsWalk struct {
+	pageSize int
+	pages    int
+}
+
+// walkRuns reads store pages from the start in the list's order and returns the page of rows keep
+// accepts, with offset and limit counted in accepted rows only. hasMore is true only when one more
+// accepted row exists. partial is true when the walk reached its bound before the store ran out.
+//
+// A store offset is never taken from or given to the caller. Paging the store and filtering after
+// handed back a next_offset whose distance from the rows returned was the number of rows the caller
+// was refused, which counted another tenant's runs, and a filter narrowed that count to the runs
+// matching any status or term the caller chose to probe with.
+func walkRuns(ctx context.Context, store run.Store, filter run.ListFilter, limit, offset int,
+	walk runsWalk, keep func(*run.Run) bool) (page []*run.Run, hasMore, partial bool, err error) {
+	skipped := 0
+	page = make([]*run.Run, 0, min(limit, walk.pageSize))
+	for p := range walk.pages {
+		rows, lerr := store.ListPage(ctx, filter, walk.pageSize, p*walk.pageSize)
+		if lerr != nil {
+			return nil, false, false, lerr
+		}
+		for _, rn := range rows {
+			if !keep(rn) {
+				continue
+			}
+			if skipped < offset {
+				skipped++
+				continue
+			}
+			if len(page) == limit {
+				return page, true, false, nil
+			}
+			page = append(page, rn)
+		}
+		if len(rows) < walk.pageSize {
+			return page, false, false, nil
+		}
+	}
+	return page, false, true, nil
+}
+
+// shownMaskByte stands in for each mask marker when a search term is matched against what a caller
+// is shown. A term never holds it, so a term matches neither the marker's own letters nor text that
+// straddles a masked value.
+const shownMaskByte = "\x00"
+
+// matchesShown reports whether a lowercased search term matches the run as the response would show
+// it to the caller in ctx, built by the same functions the response uses, across run.SearchFields.
+func matchesShown(ctx context.Context, rn *run.Run, term string) bool {
+	if strings.Contains(term, shownMaskByte) {
+		return false
+	}
+	for _, field := range run.SearchFields(scrubbedRun(ctx, maskRun(rn))) {
+		if strings.Contains(strings.ToLower(strings.ReplaceAll(field, scrub.Marker, shownMaskByte)), term) {
+			return true
+		}
+	}
+	return false
+}
+
 // listRunsHandler returns a page of runs newest first, bounded even when no limit is given.
 //
 // The page is filtered to what the caller may read. Fetching one run already checked that, but the
@@ -195,6 +265,13 @@ const (
 // everything on it, by listing. A run carries extra vars, a command line, and credential ids, so the
 // list leaked more than the object it was listing.
 func listRunsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+	return listRunsHandlerWalk(store, authz, log, runsWalk{pageSize: maxRunsPage,
+		pages: runsReadWalkPages})
+}
+
+// listRunsHandlerWalk is listRunsHandler with the filtered walk's shape passed in.
+func listRunsHandlerWalk(store run.Store, authz *authorizer, log *zap.Logger,
+	walk runsWalk) http.HandlerFunc {
 	if store == nil {
 		panic("server: listRunsHandler: Store required")
 	}
@@ -225,20 +302,46 @@ func listRunsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 		if before, err := time.Parse(time.RFC3339, r.URL.Query().Get("before")); err == nil {
 			filter.Before = before
 		}
-		runs, err := store.ListPage(r.Context(), filter, limit, offset)
+		// The status totals and the paging below both turn on whether grants restrict this caller.
+		// derivedReadFilter opens with the same question, so the two cannot disagree about which
+		// callers are filtered.
+		keep, restricted, err := runReadPredicate(r.Context(), authz)
 		if err != nil {
-			log.Error("server: list runs: " + err.Error())
+			log.Error("server: read filter: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list runs")
 			return
 		}
-		// Whether another page follows is decided by what the store returned, before the read filter
-		// thins it. Computing it from the trimmed page reported no more whenever the filter dropped a
-		// row from a full page, so later readable runs never paged in.
-		storeFullPage := len(runs) == limit
-		nextOffset := offset + len(runs)
-		runs, err = readableRuns(r.Context(), authz, runs)
+		// A caller below admin is shown each run's command masked, so a free-text term has to match
+		// what that caller is shown, not the stored text, or a run's presence answers whether its
+		// secret starts with the letters in the term. The store still narrows by the raw term first:
+		// masking replaces a value and leaves every other byte alone, so a term that matches the
+		// shown text outside a mask matches the raw text too.
+		term := strings.ToLower(strings.TrimSpace(filter.Query))
+		searchShown := term != "" && !isAdmin(r.Context())
+		var (
+			runs       []*run.Run
+			hasMore    bool
+			partial    bool
+			nextOffset int
+		)
+		if restricted || searchShown {
+			test := keep
+			if searchShown {
+				test = func(rn *run.Run) bool {
+					return keep(rn) && matchesShown(r.Context(), rn, term)
+				}
+			}
+			runs, hasMore, partial, err = walkRuns(r.Context(), store, filter, limit, offset, walk, test)
+			nextOffset = offset + len(runs)
+		} else {
+			// Nothing is filtered out of this caller's list, so one store page is the answer and its
+			// offsets are the store's own.
+			runs, err = store.ListPage(r.Context(), filter, limit, offset)
+			hasMore = len(runs) == limit
+			nextOffset = offset + len(runs)
+		}
 		if err != nil {
-			log.Error("server: filter runs: " + err.Error())
+			log.Error("server: list runs: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list runs")
 			return
 		}
@@ -255,17 +358,6 @@ func listRunsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 		// leak it was written to close: a viewer restricted to one organization could read some runs,
 		// which satisfied the test, and then received counts covering every organization on the
 		// install. One number is enough to publish another tenant's volume.
-		//
-		// This is the same question derivedReadFilter opens with, so it costs nothing: it asks
-		// whether grants restrict this caller at all, rather than walking rows through a filter,
-		// which at a thousand rows and ten thousand grants is the cost the filter's own comment
-		// warns about.
-		restricted, ferr := restrictedReader(r.Context(), authz)
-		if ferr != nil {
-			log.Error("server: read filter: " + ferr.Error())
-			respondError(w, log, http.StatusInternalServerError, "could not list runs")
-			return
-		}
 		summary := runSummary{}
 		switch {
 		case !restricted:
@@ -285,8 +377,9 @@ func listRunsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 			Runs:       scrubbedRuns(r.Context(), maskRuns(runs)),
 			Count:      len(runs),
 			Summary:    summary,
-			HasMore:    storeFullPage,
+			HasMore:    hasMore,
 			NextOffset: nextOffset,
+			Partial:    partial,
 		}, wantsPretty(r))
 	}
 }
