@@ -67,10 +67,28 @@ func checkContainerRunFilesSize() error {
 	return nil
 }
 
-// protectProcess turns off core dumps for this process and every tool it starts, before any run
-// holds a decrypted secret in memory. A crash then writes no core file for anything to find later.
-// A platform with no core limit says so in the log rather than stopping the process.
-func protectProcess(log *zap.Logger) {
+// protectProcess closes this process's memory and environment to the runs it executes, before any
+// run starts. A run with no execution image runs as this process's account, so on Linux the process
+// marks itself non-dumpable, which keeps that account's processes out of its /proc entries and so
+// out of the master key and salt in its environment. A process that cannot set the flag does not
+// start, since every host run would otherwise be one read away from the key. On a platform with no
+// such flag the log says a host run can read the key.
+//
+// It also turns off core dumps for this process and every tool it starts, so a crash writes no core
+// file for anything to find later. A platform with no core limit says so in the log rather than
+// stopping the process.
+func protectProcess(log *zap.Logger) error {
+	switch err := coredump.HideEnviron(); {
+	case err == nil:
+		log.Info("this process is non-dumpable, so a run under its account cannot read its " +
+			"environment or memory")
+	case errors.Is(err, errors.ErrUnsupported):
+		log.Warn("this platform cannot close a process's environment to its own account, so a run " +
+			"with no execution image can read the encryption key; give runs an execution image or a " +
+			"separate worker")
+	default:
+		return fmt.Errorf("close this process to the runs it executes: %w", err)
+	}
 	switch err := coredump.Disable(); {
 	case err == nil:
 		log.Info("core dumps are off for this process and every tool it runs")
@@ -81,6 +99,7 @@ func protectProcess(log *zap.Logger) {
 		log.Warn("could not turn off core dumps, so a crash could write process memory, " +
 			"credentials included, to disk: " + err.Error())
 	}
+	return nil
 }
 
 // prepareRunFiles picks the directory runs stage their secret files under and proves it before

@@ -152,7 +152,9 @@ func runWorker(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("init logger: %w", err)
 	}
 	defer func() { _ = log.Sync() }()
-	protectProcess(log)
+	if err := protectProcess(log); err != nil {
+		return err
+	}
 	if err := applyEgressProxy(log); err != nil {
 		return err
 	}

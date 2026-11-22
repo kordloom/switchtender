@@ -184,17 +184,26 @@ writes a config file in one step. It can also write a systemd unit:
 
 The unit runs the server as the account that ran `init`, and every run the server executes without
 an execution image runs as that account too, which is why `init` runs here as an account made for
-the job rather than as you or as root. It prints the admin password once, so save it. Move the unit
-into place and start it:
+the job rather than as you or as root. It prints the admin password once, so save it. The unit
+loads the key from `/etc/switchtender/switchtender.env`, a file only root reads, since systemd reads
+it as root before it starts the server. Move the key there, move the unit into place, start it, and
+remove the copy the account can read:
 
+    sudo install -d -m 0755 -o root -g root /etc/switchtender
+    sudo install -m 0600 -o root -g root /var/lib/switchtender/switchtender.env \
+      /etc/switchtender/switchtender.env
     sudo cp /var/lib/switchtender/switchtender.service /etc/systemd/system/switchtender.service
     sudo systemctl enable --now switchtender
+    sudo rm /var/lib/switchtender/switchtender.env
+
+Keep a backup of the key and salt off the host.
 
 The unit listens on loopback, which suits a reverse proxy on the same machine. To serve HTTPS
 directly with nothing in front, give it a certificate and key and listen on the network: add
 `--addr :8443 --tls-cert /path/to/tls.crt --tls-key /path/to/tls.key` to the unit's `ExecStart`
-line, then `sudo systemctl daemon-reload && sudo systemctl restart switchtender`. Run by hand, the
-server reads the same key and salt from the file `init` wrote:
+line, then `sudo systemctl daemon-reload && sudo systemctl restart switchtender`. Run by hand in
+place of systemd, the server reads the key and salt from a file you source, so keep the file `init`
+wrote and skip the move:
 
     set -a; . /var/lib/switchtender/switchtender.env; set +a
     switchtender serve --db /var/lib/switchtender/switchtender.db --addr :8443 \
@@ -287,8 +296,9 @@ Stop the server, then delete what it wrote. Take a backup first if you might wan
 - Run files in `switchtender-runfiles-<uid>` under the system temporary directory, or in
   `switchtender-runfiles` under `$XDG_RUNTIME_DIR` when that is set. They stay after the server
   stops.
-- The environment file `switchtender init` wrote (`switchtender.env` by default) and the systemd
-  unit, if you asked for one, plus any witness files you created.
+- The environment file `switchtender init` wrote (`switchtender.env` by default), or
+  `/etc/switchtender/switchtender.env` if you moved it there for the systemd unit, and the unit, if
+  you asked for one, plus any witness files you created.
 
 ```sh
 rm -f "$(command -v switchtender)"
