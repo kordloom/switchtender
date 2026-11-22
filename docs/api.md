@@ -427,7 +427,9 @@ A run, a project, and a template take `image`, the container image the run execu
 and `/v1/templates` answer `400` naming the rule when it is any other kind. A `registry` credential
 needs `settings.registry_host`, and a create or update that would leave one without it is refused
 with `400`. Its login is sent only to that registry, so an image on another registry is looked up
-with no login. See [Pull credentials](secrets.md#pull-credentials).
+with no login. Changing the host needs the login in the same request, so a stored login is never
+carried to a new host: below admin, a `PUT` that changes `registry_host` with no `secret` is
+refused with `400`. See [Pull credentials](secrets.md#pull-credentials).
 
 ## Ansible run controls
 

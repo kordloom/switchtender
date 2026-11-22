@@ -1125,7 +1125,9 @@ inventory, and a workflow step, which cannot split, are open to an operator as b
 and <code>/v1/templates</code> answer <code>400</code> naming the rule when it is any other kind. A <code>registry</code> credential
 needs <code>settings.registry_host</code>, and a create or update that would leave one without it is refused
 with <code>400</code>. Its login is sent only to that registry, so an image on another registry is looked up
-with no login. See <a href="/docs/secrets#pull-credentials">Pull credentials</a>.</p>
+with no login. Changing the host needs the login in the same request, so a stored login is never
+carried to a new host: below admin, a <code>PUT</code> that changes <code>registry_host</code> with no <code>secret</code> is
+refused with <code>400</code>. See <a href="/docs/secrets#pull-credentials">Pull credentials</a>.</p>
 <h2 id="ansible-run-controls">Ansible run controls</h2>
 <p>A run submission and a template both accept the Ansible controls that used to require a hand-built
 command. They ride onto a run the same way from the API, a schedule, or a webhook trigger, and a
