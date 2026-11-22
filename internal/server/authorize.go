@@ -510,6 +510,12 @@ func forbiddenOrg(w http.ResponseWriter) {
 // was a var once, and a test shrinking it raced every parallel test on the derived-read path.
 const derivedReadScan = 2000
 
+// runsReadWalkPages bounds how many store pages a run list walks for a caller whose list is
+// filtered row by row, the same kind of bound derivedReadScan is. The walk counts its offsets in
+// rows the caller may read, so it cannot jump into the store's own ordering and has to read from the
+// start. Past the bound the response says it stopped rather than claiming the list ended.
+const runsReadWalkPages = 20
+
 // derivedReadFilter returns a predicate deciding whether a row derived from a run may be shown, and
 // whether the caller may see fleet-wide aggregates at all.
 //
@@ -625,6 +631,27 @@ func probeAnyReadable(ctx context.Context, store run.Store, keep func(id, orgID 
 // readableRuns drops any run the caller may not read. A run is readable when every object it uses is,
 // which is the same rule fetching one run applies, so listing and fetching cannot disagree.
 func readableRuns(ctx context.Context, authz *authorizer, runs []*run.Run) ([]*run.Run, error) {
+	keep, restricted, err := runReadPredicate(ctx, authz)
+	if err != nil {
+		return nil, err
+	}
+	// Grants restrict nothing for this caller, so the list passes through untouched.
+	if !restricted {
+		return runs, nil
+	}
+	out := make([]*run.Run, 0, len(runs))
+	for _, rn := range runs {
+		if keep(rn) {
+			out = append(out, rn)
+		}
+	}
+	return out, nil
+}
+
+// runReadPredicate returns the test readableRuns applies to one run, and whether grants restrict
+// this caller at all, so a walk over many store pages resolves the caller's visibility once.
+func runReadPredicate(ctx context.Context, authz *authorizer) (keep func(*run.Run) bool,
+	restricted bool, err error) {
 	// Decided at use, which is what fetching a run by id requires, rather than at read. Any grant
 	// satisfies read, so filtering there put a run in the list whose by-id fetch answered 403: an
 	// explicit read grant on one of its objects disclosed the whole run, its command, its extra vars
@@ -635,21 +662,16 @@ func readableRuns(ctx context.Context, authz *authorizer, runs []*run.Run) ([]*r
 	// install, so resolving it per run made a run list cost the whole grant table once per row.
 	vis, err := authz.visibilityFor(ctx, grant.AccessUse, filterInEveryMode, runScopedObjects)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	// Grants restrict nothing for this caller, so no object needs its owning organization resolved
-	// and the list passes through untouched.
+	// Grants restrict nothing for this caller, so no object needs its owning organization resolved.
 	if !vis.restricted() {
-		return runs, nil
+		return func(*run.Run) bool { return true }, false, nil
 	}
 	orgOf := authz.orgResolverMemo(ctx)
-	out := make([]*run.Run, 0, len(runs))
-	for _, rn := range runs {
-		if runReadable(run.AuthOf(rn), vis.allows, orgOf) {
-			out = append(out, rn)
-		}
-	}
-	return out, nil
+	return func(rn *run.Run) bool {
+		return runReadable(run.AuthOf(rn), vis.allows, orgOf)
+	}, true, nil
 }
 
 // runReadable reports whether one run passes the read filter.

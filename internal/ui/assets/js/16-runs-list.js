@@ -163,6 +163,17 @@ function runsPageURL(offset) {
 		"&q=" + encodeURIComponent(runsQuery()) + runsFilterParams();
 }
 
+// runsPartialNote is the line a filtered list shows when the server stopped walking run history at
+// its bound. The list's offsets count only runs this reader may see, so the server reads history
+// from the start for each page, and past twenty store pages of a thousand it stops and says so.
+const runsPartialNote = "The list stopped after 20,000 runs. Narrow the filter to see the rest.";
+
+// noteRunsPartial shows the stopped line when a response says the server stopped looking, so an
+// empty or short table is not read as the end of the history.
+function noteRunsPartial(data) {
+	if (data && data.partial) setStatus(runsPartialNote);
+}
+
 // loadRuns populates the run history table.
 async function loadRuns() {
 	syncRunsURL();
@@ -183,12 +194,14 @@ async function loadRuns() {
 			table.hidden = true;
 			const filtered = runsFiltered();
 			showEmpty(filtered ? "No runs match your search." : "No runs yet.", filtered);
+			noteRunsPartial(data);
 			return;
 		}
 		showListControls();
 		renderSummary(data.summary || {}, runs.length, runsFiltered(), data.has_more);
 		appendRunRows(tbody, runs);
 		wireRunsMore(tbody, data.next_offset || runs.length, data.has_more);
+		noteRunsPartial(data);
 	} catch (e) {
 		// A failure from a superseded load says nothing about the table a newer load already drew,
 		// so it is dropped the same way a superseded success is. Clearing here wiped good rows and
@@ -573,6 +586,11 @@ async function runsExportPrepare() {
 		const runs = data.runs || [];
 		appendRunRows(tbody, runs);
 		runsHasMore = !!data.has_more && runs.length > 0;
+		if (data.partial) {
+			noteRunsPartial(data);
+			wireRunsMore(tbody, tbody.querySelectorAll("tr").length, false);
+			return "-partial";
+		}
 	}
 	wireRunsMore(tbody, tbody.querySelectorAll("tr").length, runsHasMore);
 	return "";
@@ -604,9 +622,9 @@ function wireRunsMore(tbody, offset, hasMore) {
 			// the rows below it contradict.
 			const table = tbody.closest("table");
 			if (table) table.dispatchEvent(new CustomEvent("rowsappended"));
-			// The server's cursor counts the page it read, not the rows this caller may see, so a
-			// strict-grants reader stops re-reading, and repeating, the rows it was refused.
+			// The server's cursor counts the rows this caller may see, the same rows the table holds.
 			wireRunsMore(tbody, data.next_offset || offset + runs.length, data.has_more);
+			noteRunsPartial(data);
 		} catch (e) {
 			setStatus("Failed to load more runs: " + e.message);
 		} finally {

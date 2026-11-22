@@ -126,13 +126,13 @@ func runListAgreesWithFetch(t *testing.T, strict bool) {
 	}
 }
 
-// TestListRunsCursorCountsTheStorePage pins that pagination advances by what the store read, not
-// by what the caller was allowed to see.
+// TestListRunsCursorCountsReadableRows pins that a strict-grants reader pages through the rows it may
+// read with no repeats and no gaps, and that the cursor counts those rows only.
 //
-// The read filter thins the page after the store returns it. A caller advancing its offset by the
-// visible rows re-read the refused ones on the next page, so Load more repeated rows for every
-// strict-grants reader whose page had a hole in it.
-func TestListRunsCursorCountsTheStorePage(t *testing.T) {
+// The read filter used to thin a store page after the store returned it. Advancing by the visible
+// rows re-read the refused ones, so Load more repeated rows, and advancing by the store page sent the
+// caller a cursor whose distance from the rows returned counted the runs it was refused.
+func TestListRunsCursorCountsReadableRows(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	runs := run.NewMemStore()
@@ -169,7 +169,7 @@ func TestListRunsCursorCountsTheStorePage(t *testing.T) {
 		t.Fatalf("Save() user error = %v", err)
 	}
 	if err := grants.Save(ctx, &grant.Grant{
-		ID: "grant_a", Subject: u.ID, Object: "proj_a", Access: grant.AccessRead,
+		ID: "grant_a", Subject: u.ID, Object: "proj_a", Access: grant.AccessUse,
 		CreatedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("Save() grant error = %v", err)
@@ -177,29 +177,43 @@ func TestListRunsCursorCountsTheStorePage(t *testing.T) {
 	handler := New(runs, &fakeSubmitter{run: &run.Run{ID: "run_x"}}, zap.NewNop(),
 		WithGrants(grants, true), WithOrgs(orgs), WithProjects(projects), WithUsers(users)).Handler()
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/runs?limit=2&offset=0", nil)
-	req = req.WithContext(context.WithValue(req.Context(), actorKey{},
-		Actor{UserID: u.ID, Role: user.RoleOperator, Name: "pager"}))
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
+	// Newest first the store holds 3 (proj_b), 2 (proj_a), 1 (proj_b), 0 (proj_a), and the caller
+	// uses proj_a only.
+	tests := []struct {
+		Offset         int
+		WantID         string
+		WantNextOffset int
+		WantHasMore    bool
+	}{ // Test 0: The first readable run, with one more behind it.
+		{0, "run_cursor_2", 1, true},
+		// Test 1: The second and last readable run.
+		{1, "run_cursor_0", 2, false},
 	}
-	var body struct {
-		Runs []struct {
-			ID string `json:"id"`
-		} `json:"runs"`
-		HasMore    bool `json:"has_more"`
-		NextOffset int  `json:"next_offset"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if body.NextOffset != 2 {
-		t.Errorf("next_offset = %d, want 2: the cursor counts the store's page of two, not the %d "+
-			"row(s) this caller may see", body.NextOffset, len(body.Runs))
-	}
-	if !body.HasMore {
-		t.Error("has_more = false with two more rows in the store")
+	for _, test := range tests {
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v1/runs?limit=1&offset=%d", test.Offset), nil)
+		req = req.WithContext(context.WithValue(req.Context(), actorKey{},
+			Actor{UserID: u.ID, Role: user.RoleOperator, Name: "pager"}))
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
+		}
+		var body struct {
+			Runs []struct {
+				ID string `json:"id"`
+			} `json:"runs"`
+			HasMore    bool `json:"has_more"`
+			NextOffset int  `json:"next_offset"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(body.Runs) != 1 || body.Runs[0].ID != test.WantID {
+			t.Errorf("offset %d: runs = %+v, want only %s", test.Offset, body.Runs, test.WantID)
+		}
+		if body.NextOffset != test.WantNextOffset || body.HasMore != test.WantHasMore {
+			t.Errorf("offset %d: next_offset = %d, has_more = %v, want %d and %v", test.Offset,
+				body.NextOffset, body.HasMore, test.WantNextOffset, test.WantHasMore)
+		}
 	}
 }
