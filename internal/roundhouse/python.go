@@ -41,10 +41,11 @@ func (p *pythonRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Resul
 }
 
 // pythonArgs builds the python argument list for a script at path, shared by the host runner and the
-// container plan. A dry run runs py_compile so syntax is checked without executing the script.
+// container plan. A dry run runs py_compile in isolated mode (-I) so syntax is checked without
+// executing the script and without importing any file from the project directory.
 func pythonArgs(path string, dryRun bool) []string {
 	if dryRun {
-		return []string{"-m", "py_compile", path}
+		return []string{"-I", "-m", "py_compile", path}
 	}
 	return []string{path}
 }

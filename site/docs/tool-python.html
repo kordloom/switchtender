@@ -70,7 +70,8 @@ is more comfortable in Python than a shell: calling an API, reconciling state, o
 <h2 id="what-runs">What runs</h2>
 <p>The script is written to a temporary file and run with <code>python3</code>, so multi-line scripts work
 unchanged. The working directory is the project checkout when the run sources a project. A dry run
-runs <code>python3 -m py_compile</code>, which checks syntax without executing the script.</p>
+runs <code>python3 -I -m py_compile</code>, which checks syntax in Python's isolated mode, so no file in the
+project is imported and the script is not executed.</p>
 <h2 id="how-values-reach-the-script">How values reach the script</h2>
 <ul>
 <li>
