@@ -204,16 +204,24 @@ sudo -u switchtender -H switchtender init --db /var/lib/switchtender/switchtende
 </code></pre>
 <p>The unit runs the server as the account that ran <code>init</code>, and every run the server executes without
 an execution image runs as that account too, which is why <code>init</code> runs here as an account made for
-the job rather than as you or as root. It prints the admin password once, so save it. Move the unit
-into place and start it:</p>
-<pre><code>sudo cp /var/lib/switchtender/switchtender.service /etc/systemd/system/switchtender.service
+the job rather than as you or as root. It prints the admin password once, so save it. The unit
+loads the key from <code>/etc/switchtender/switchtender.env</code>, a file only root reads, since systemd reads
+it as root before it starts the server. Move the key there, move the unit into place, start it, and
+remove the copy the account can read:</p>
+<pre><code>sudo install -d -m 0755 -o root -g root /etc/switchtender
+sudo install -m 0600 -o root -g root /var/lib/switchtender/switchtender.env \
+  /etc/switchtender/switchtender.env
+sudo cp /var/lib/switchtender/switchtender.service /etc/systemd/system/switchtender.service
 sudo systemctl enable --now switchtender
+sudo rm /var/lib/switchtender/switchtender.env
 </code></pre>
+<p>Keep a backup of the key and salt off the host.</p>
 <p>The unit listens on loopback, which suits a reverse proxy on the same machine. To serve HTTPS
 directly with nothing in front, give it a certificate and key and listen on the network: add
 <code>--addr :8443 --tls-cert /path/to/tls.crt --tls-key /path/to/tls.key</code> to the unit's <code>ExecStart</code>
-line, then <code>sudo systemctl daemon-reload &amp;&amp; sudo systemctl restart switchtender</code>. Run by hand, the
-server reads the same key and salt from the file <code>init</code> wrote:</p>
+line, then <code>sudo systemctl daemon-reload &amp;&amp; sudo systemctl restart switchtender</code>. Run by hand in
+place of systemd, the server reads the key and salt from a file you source, so keep the file <code>init</code>
+wrote and skip the move:</p>
 <pre><code>set -a; . /var/lib/switchtender/switchtender.env; set +a
 switchtender serve --db /var/lib/switchtender/switchtender.db --addr :8443 \
   --tls-cert /path/to/tls.crt --tls-key /path/to/tls.key
@@ -289,8 +297,9 @@ one. The desktop app keeps all of this in the data directory <a href="/docs/desk
 <li>Run files in <code>switchtender-runfiles-&lt;uid&gt;</code> under the system temporary directory, or in
 <code>switchtender-runfiles</code> under <code>$XDG_RUNTIME_DIR</code> when that is set. They stay after the server
 stops.</li>
-<li>The environment file <code>switchtender init</code> wrote (<code>switchtender.env</code> by default) and the systemd
-unit, if you asked for one, plus any witness files you created.</li>
+<li>The environment file <code>switchtender init</code> wrote (<code>switchtender.env</code> by default), or
+<code>/etc/switchtender/switchtender.env</code> if you moved it there for the systemd unit, and the unit, if
+you asked for one, plus any witness files you created.</li>
 </ul>
 <pre><code class="language-sh">rm -f &quot;$(command -v switchtender)&quot;
 rm -rf ~/Library/Caches/switchtender ~/.cache/switchtender   # whichever exists

@@ -565,22 +565,23 @@ func TestRandomHexIsTheRightLengthAndNotRepeated(t *testing.T) {
 }
 
 // TestSystemdUnitStartsTheServerItWasAskedFor pins the generated unit. It is the file an operator
-// copies into /etc/systemd/system without reading closely, so the database, the address, and the
-// environment file it names have to be the ones init was given, and the hardening line has to
-// survive: a unit that quietly dropped NoNewPrivileges would run the whole fleet's automation with
-// privilege escalation available to it.
+// copies into /etc/systemd/system without reading closely, so the database and the address have to
+// be the ones init was given, the environment file has to be the root-owned one, and the hardening
+// line has to survive: a unit that quietly dropped NoNewPrivileges would run the whole fleet's
+// automation with privilege escalation available to it.
 func TestSystemdUnitStartsTheServerItWasAskedFor(t *testing.T) {
 	t.Parallel()
 	unit := systemdUnit(unitSpec{DB: "/var/lib/switchtender/st.db", Addr: "127.0.0.1:8080",
-		Config: "/etc/switchtender.env", Exe: "/opt/switchtender/bin/switchtender",
-		WorkDir: "/var/lib/switchtender", User: "switchtender", Group: "switchtender"})
+		Exe: "/opt/switchtender/bin/switchtender", WorkDir: "/var/lib/switchtender",
+		User: "switchtender", Group: "switchtender"})
 	wants := []string{
 		// Without these systemd runs the service as root, and every run without an execution image
 		// runs as the server's own account, so the whole fleet's local automation ran as root.
 		"User=switchtender",
 		"Group=switchtender",
 		"PrivateTmp=true",
-		"EnvironmentFile=/etc/switchtender.env",
+		// The key file only root reads, never one the service's own account can.
+		"EnvironmentFile=/etc/switchtender/switchtender.env\n",
 		// The binary is the one that generated the unit, not a guess at where it was installed.
 		// The hardcoded /usr/local/bin here failed 203/EXEC for every install the published script
 		// put in ~/.local/bin, which is what it does whenever /usr/local/bin is not writable.

@@ -4,14 +4,16 @@
 #
 #   useradd --system --home-dir /var/lib/switchtender-worker --shell /usr/sbin/nologin switchtender
 #   install -d -m 0750 -o root -g switchtender /etc/switchtender
-#   install -m 0640 -o root -g switchtender /dev/null /etc/switchtender/worker.env
+#   install -m 0600 -o root -g root /dev/null /etc/switchtender/worker.env
 #   install -m 0644 switchtender-worker.service /etc/systemd/system/
 #   systemctl daemon-reload && systemctl enable --now switchtender-worker
 #
 # worker.env holds the worker's settings, one KEY=value per line: SWITCHTENDER_ENCRYPTION_KEY,
 # SWITCHTENDER_ENCRYPTION_SALT, and SWITCHTENDER_DB with the shared PostgreSQL DSN, or, for a worker
 # that reaches the control node over the relay, SWITCHTENDER_WORKER_TOKEN with --server added to
-# ExecStart. SWITCHTENDER_LICENSE names the license file.
+# ExecStart. SWITCHTENDER_LICENSE names the license file. It belongs to root at mode 0600: systemd
+# reads it as root before it starts the service as switchtender, and every run with no execution
+# image runs as switchtender, so a file that account could read would hand its secrets to any run.
 #
 # Run files, the keys, tokens, and secret answers each run stages on disk, go to the runtime
 # directory below: memory-backed under /run, private to this account, and removed by systemd when the

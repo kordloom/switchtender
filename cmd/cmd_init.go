@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	osuser "os/user"
 	"path/filepath"
@@ -65,6 +67,9 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	existing, haveConfig := readInitConfig(initConfig)
 	if haveConfig && !initForce {
 		return fmt.Errorf("%s already exists, use --force to overwrite", initConfig)
+	}
+	if err := refuseUnreadableSystemKey(haveConfig); err != nil {
+		return err
 	}
 
 	// A --force rerun keeps the key and salt the install is already using.
@@ -129,10 +134,6 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	}
 
 	if initSystemd != "" {
-		cfgPath, err := filepath.Abs(initConfig)
-		if err != nil {
-			return fmt.Errorf("resolve config path: %w", err)
-		}
 		dbPath, err := filepath.Abs(initDB)
 		if err != nil {
 			return fmt.Errorf("resolve database path: %w", err)
@@ -145,8 +146,8 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return err
 		}
-		unit := systemdUnit(unitSpec{DB: dbPath, Addr: initAddr, Config: cfgPath, Exe: exe,
-			WorkDir: filepath.Dir(dbPath), User: account, Group: group})
+		unit := systemdUnit(unitSpec{DB: dbPath, Addr: initAddr, Exe: exe, WorkDir: filepath.Dir(dbPath),
+			User: account, Group: group})
 		if err := os.WriteFile(initSystemd, []byte(unit), 0o644); err != nil {
 			return fmt.Errorf("write systemd unit: %w", err)
 		}
@@ -164,8 +165,31 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintf(os.Stderr, "The admin account %q already exists, so it was left as it is, password "+
 			"included.\n", initAdmin)
 	}
-	printInitSummary(generated, password)
+	printInitSummary(os.Stderr, generated, password)
 	return nil
+}
+
+// systemEnvFile is where a unit init writes loads the encryption key and salt from. It belongs to
+// root at mode 0600, since systemd reads it as root before it starts the service, and a run with no
+// execution image runs as the service's account and so can read any file that account can. Tests
+// point it elsewhere.
+var systemEnvFile = "/etc/switchtender/switchtender.env"
+
+// refuseUnreadableSystemKey stops init writing a unit when the config it was pointed at is gone
+// and the root-owned file a unit loads may already hold the install's key. Init tells the person
+// to remove their own copy once the root one is in place, and a rerun to regenerate the unit would
+// then find no key to keep, mint new ones, and orphan every sealed secret and every backup.
+func refuseUnreadableSystemKey(haveConfig bool) error {
+	if haveConfig || initSystemd == "" {
+		return nil
+	}
+	if _, err := os.Stat(systemEnvFile); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return fmt.Errorf("%w: %s is missing and %s may hold this install's encryption key, which only "+
+		"root can read; init would mint new keys and orphan every sealed secret. Copy it back first "+
+		"with sudo install -m 0600 -o $(id -un) %s %s, or remove %s to start over", ErrUsage,
+		initConfig, systemEnvFile, systemEnvFile, util.ShellQuote(initConfig), systemEnvFile)
 }
 
 // accountExists reports whether the store already holds an account with the given username.
@@ -238,8 +262,6 @@ type unitSpec struct {
 	DB string
 	// Addr is the address the server listens on.
 	Addr string
-	// Config is the environment file holding the encryption key and salt, as an absolute path.
-	Config string
 	// Exe is the binary the unit runs, as an absolute path.
 	Exe string
 	// WorkDir is the directory the service runs in.
@@ -265,6 +287,10 @@ type unitSpec struct {
 // no execution image runs as the server's own account, so every Bash, Python, and local Ansible run
 // the server executed ran as root, and the server wrote root-owned files into the directory init had
 // just set up as somebody else.
+//
+// The key is loaded from systemEnvFile and from no file the service's own account can read. A run
+// with no execution image runs as that account, so a key file it owned was one cat away from any
+// such run.
 //
 // The runtime directory is where runs stage their keys and tokens: memory-backed, private, and
 // removed by systemd when the service stops for any reason, a crash included. LimitCORE=0 keeps a
@@ -295,7 +321,7 @@ TimeoutStopSec=90
 
 [Install]
 WantedBy=multi-user.target
-`, u.User, u.Group, u.Config, u.WorkDir, u.Exe, u.DB, u.Addr)
+`, u.User, u.Group, systemEnvFile, u.WorkDir, u.Exe, u.DB, u.Addr)
 }
 
 // unitAccount returns the account and group running init, which own every file init writes and so
@@ -312,26 +338,36 @@ func unitAccount() (name, group string, err error) {
 	return u.Username, g.Name, nil
 }
 
-// printInitSummary writes the setup result and the next steps to stderr, keeping stdout clean. The
-// admin password is shown once, since it is not stored in the clear.
-func printInitSummary(generated bool, password string) {
-	fmt.Fprintln(os.Stderr, "SwitchTender is set up.")
-	fmt.Fprintln(os.Stderr, "  admin account: "+initAdmin)
+// printInitSummary writes the setup result and the next steps to w, which is stderr so stdout
+// stays clean. The admin password is shown once, since it is not stored in the clear. With a unit,
+// the steps move the key into the root-owned file the unit loads and remove the copy init wrote,
+// since a run with no execution image runs as this account and could read it.
+func printInitSummary(w io.Writer, generated bool, password string) {
+	fmt.Fprintln(w, "SwitchTender is set up.")
+	fmt.Fprintln(w, "  admin account: "+initAdmin)
 	if generated {
-		fmt.Fprintln(os.Stderr, "  admin password: "+password+"  (shown once, save it now)")
+		fmt.Fprintln(w, "  admin password: "+password+"  (shown once, save it now)")
 	}
-	fmt.Fprintln(os.Stderr, "  config file:   "+initConfig+"  (holds the encryption key, keep it safe)")
-	fmt.Fprintln(os.Stderr, "  database:      "+initDB)
+	fmt.Fprintln(w, "  config file:   "+initConfig+"  (holds the encryption key, keep it safe)")
+	fmt.Fprintln(w, "  database:      "+initDB)
 	if initSystemd != "" {
-		fmt.Fprintln(os.Stderr, "  systemd unit:  "+initSystemd)
-		fmt.Fprintln(os.Stderr, "\nStart with systemd:")
-		fmt.Fprintln(os.Stderr, "  sudo cp "+initSystemd+" /etc/systemd/system/switchtender.service")
-		fmt.Fprintln(os.Stderr, "  sudo systemctl enable --now switchtender")
+		cfg := util.ShellQuote(initConfig)
+		fmt.Fprintln(w, "  systemd unit:  "+initSystemd)
+		fmt.Fprintln(w, "\nStart with systemd. The unit loads the key from a file only root reads,")
+		fmt.Fprintln(w, "so a run under this account cannot read it:")
+		fmt.Fprintln(w, "  sudo install -d -m 0755 -o root -g root "+filepath.Dir(systemEnvFile))
+		fmt.Fprintln(w, "  sudo install -m 0600 -o root -g root "+cfg+" "+systemEnvFile)
+		fmt.Fprintln(w, "  sudo cp "+util.ShellQuote(initSystemd)+
+			" /etc/systemd/system/switchtender.service")
+		fmt.Fprintln(w, "  sudo systemctl enable --now switchtender")
+		fmt.Fprintln(w, "Then remove the copy this account can read, and keep a backup of the key")
+		fmt.Fprintln(w, "off this host:")
+		fmt.Fprintln(w, "  rm "+cfg)
 		return
 	}
-	fmt.Fprintln(os.Stderr, "\nStart the server:")
-	fmt.Fprintln(os.Stderr, "  set -a; . "+util.ShellQuote(sourceablePath(initConfig))+"; set +a")
-	fmt.Fprintln(os.Stderr, "  switchtender serve --db "+util.ShellQuote(initDB)+" --addr "+initAddr)
+	fmt.Fprintln(w, "\nStart the server:")
+	fmt.Fprintln(w, "  set -a; . "+util.ShellQuote(sourceablePath(initConfig))+"; set +a")
+	fmt.Fprintln(w, "  switchtender serve --db "+util.ShellQuote(initDB)+" --addr "+initAddr)
 }
 
 // sourceablePath returns a path the shell's dot command reads as a file rather than searching PATH
