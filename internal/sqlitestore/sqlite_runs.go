@@ -273,6 +273,11 @@ func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offs
 // package's matchesQuery searches in the in-memory store.
 var runSearchColumns = []string{"id", "playbook", "command", "tool", "status", "step_name", "inventory"}
 
+// likeEscaper makes a search term literal inside a LIKE pattern whose escape is '!', so % and _ in
+// a term match only themselves. The run list matches the same term in Go with strings.Contains, and
+// a wildcard here let the store return rows that match fails, or the reverse.
+var likeEscaper = strings.NewReplacer("!", "!!", "%", "!%", "_", "!_")
+
 // runSearchClause builds a case-insensitive LIKE clause over runSearchColumns and the args to bind,
 // or empty when the search term is blank.
 func runSearchClause(query string) (string, []any) {
@@ -280,11 +285,11 @@ func runSearchClause(query string) (string, []any) {
 	if term == "" {
 		return "", nil
 	}
-	like := "%" + term + "%"
+	like := "%" + likeEscaper.Replace(term) + "%"
 	parts := make([]string, len(runSearchColumns))
 	args := make([]any, len(runSearchColumns))
 	for i, col := range runSearchColumns {
-		parts[i] = "lower(" + col + ") LIKE ?"
+		parts[i] = "lower(" + col + ") LIKE ? ESCAPE '!'"
 		args[i] = like
 	}
 	return "(" + strings.Join(parts, " OR ") + ")", args

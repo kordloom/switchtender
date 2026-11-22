@@ -675,7 +675,9 @@ The run list pages, because run history grows without bound: `limit` (default 20
 may read, `offset` and `next_offset` count only runs that caller may read, and the server reads
 history from the start of the list's order for each page. It stops after 20,000 runs and then answers with
 `partial: true` and `has_more: false`, so a narrower filter reaches the rest. `partial` is absent
-when the list is whole.
+when the list is whole. For a caller below admin, `q` matches each run as that caller is shown it, so
+a term never matches a masked value, the mask itself, or text on both sides of one, and the list
+pages the same way. A `%` or `_` in `q` matches only that character.
 
 The configuration lists page the same way: users, tokens, templates, schedules, triggers,
 notification targets, organizations and organization members take `limit` (default and maximum 1000)

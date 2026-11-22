@@ -1408,7 +1408,9 @@ stating the bound.</p>
 may read, <code>offset</code> and <code>next_offset</code> count only runs that caller may read, and the server reads
 history from the start of the list's order for each page. It stops after 20,000 runs and then answers with
 <code>partial: true</code> and <code>has_more: false</code>, so a narrower filter reaches the rest. <code>partial</code> is absent
-when the list is whole.</p>
+when the list is whole. For a caller below admin, <code>q</code> matches each run as that caller is shown it, so
+a term never matches a masked value, the mask itself, or text on both sides of one, and the list
+pages the same way. A <code>%</code> or <code>_</code> in <code>q</code> matches only that character.</p>
 <p>The configuration lists page the same way: users, tokens, templates, schedules, triggers,
 notification targets, organizations and organization members take <code>limit</code> (default and maximum 1000)
 and <code>offset</code>, and carry <code>has_more</code> and <code>next_offset</code>. They also take <code>id</code>, repeatable, to read only

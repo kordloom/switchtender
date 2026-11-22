@@ -277,6 +277,11 @@ func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offs
 // package's matchesQuery searches in the in-memory store.
 var runSearchColumns = []string{"id", "playbook", "command", "tool", "status", "step_name", "inventory"}
 
+// likeEscaper makes a search term literal inside a LIKE pattern whose escape is '!', so % and _ in
+// a term match only themselves. The run list matches the same term in Go with strings.Contains, and
+// a wildcard here let the store return rows that match fails, or the reverse.
+var likeEscaper = strings.NewReplacer("!", "!!", "%", "!%", "_", "!_")
+
 // runSearchClause builds a case-insensitive LIKE clause over runSearchColumns, reusing the single
 // $1 placeholder for every column, and the one arg to bind. It returns empty when the term is blank.
 func runSearchClause(query string) (string, []any) {
@@ -286,12 +291,13 @@ func runSearchClause(query string) (string, []any) {
 	}
 	parts := make([]string, len(runSearchColumns))
 	for i, col := range runSearchColumns {
-		// ESCAPE '' turns off PostgreSQL's default backslash escape, which SQLite's LIKE does not
-		// have. Without it the same search term matched different rows on the two backends: a term
-		// containing a backslash was read as an escape here and as a literal there.
-		parts[i] = "lower(" + col + ") LIKE $1 ESCAPE ''"
+		// The escape is named, and it is the same on both backends. PostgreSQL's default escape is
+		// a backslash, which SQLite's LIKE does not have, so a term holding a backslash once matched
+		// different rows on the two. With no escape at all a % or _ in a term was a wildcard, which
+		// matched rows the term does not hold.
+		parts[i] = "lower(" + col + ") LIKE $1 ESCAPE '!'"
 	}
-	return "(" + strings.Join(parts, " OR ") + ")", []any{"%" + term + "%"}
+	return "(" + strings.Join(parts, " OR ") + ")", []any{"%" + likeEscaper.Replace(term) + "%"}
 }
 
 // RunStatusCounts tallies top-level runs by status with a single grouped query.

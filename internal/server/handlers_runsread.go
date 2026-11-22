@@ -15,6 +15,7 @@ import (
 	"github.com/kordloom/switchtender/internal/review"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
+	"github.com/kordloom/switchtender/internal/scrub"
 	"github.com/kordloom/switchtender/internal/template"
 )
 
@@ -238,6 +239,25 @@ func walkRuns(ctx context.Context, store run.Store, filter run.ListFilter, limit
 	return page, false, true, nil
 }
 
+// shownMaskByte stands in for each mask marker when a search term is matched against what a caller
+// is shown. A term never holds it, so a term matches neither the marker's own letters nor text that
+// straddles a masked value.
+const shownMaskByte = "\x00"
+
+// matchesShown reports whether a lowercased search term matches the run as the response would show
+// it to the caller in ctx, built by the same functions the response uses, across run.SearchFields.
+func matchesShown(ctx context.Context, rn *run.Run, term string) bool {
+	if strings.Contains(term, shownMaskByte) {
+		return false
+	}
+	for _, field := range run.SearchFields(scrubbedRun(ctx, maskRun(rn))) {
+		if strings.Contains(strings.ToLower(strings.ReplaceAll(field, scrub.Marker, shownMaskByte)), term) {
+			return true
+		}
+	}
+	return false
+}
+
 // listRunsHandler returns a page of runs newest first, bounded even when no limit is given.
 //
 // The page is filtered to what the caller may read. Fetching one run already checked that, but the
@@ -291,14 +311,27 @@ func listRunsHandlerWalk(store run.Store, authz *authorizer, log *zap.Logger,
 			respondError(w, log, http.StatusInternalServerError, "could not list runs")
 			return
 		}
+		// A caller below admin is shown each run's command masked, so a free-text term has to match
+		// what that caller is shown, not the stored text, or a run's presence answers whether its
+		// secret starts with the letters in the term. The store still narrows by the raw term first:
+		// masking replaces a value and leaves every other byte alone, so a term that matches the
+		// shown text outside a mask matches the raw text too.
+		term := strings.ToLower(strings.TrimSpace(filter.Query))
+		searchShown := term != "" && !isAdmin(r.Context())
 		var (
 			runs       []*run.Run
 			hasMore    bool
 			partial    bool
 			nextOffset int
 		)
-		if restricted {
-			runs, hasMore, partial, err = walkRuns(r.Context(), store, filter, limit, offset, walk, keep)
+		if restricted || searchShown {
+			test := keep
+			if searchShown {
+				test = func(rn *run.Run) bool {
+					return keep(rn) && matchesShown(r.Context(), rn, term)
+				}
+			}
+			runs, hasMore, partial, err = walkRuns(r.Context(), store, filter, limit, offset, walk, test)
 			nextOffset = offset + len(runs)
 		} else {
 			// Nothing is filtered out of this caller's list, so one store page is the answer and its

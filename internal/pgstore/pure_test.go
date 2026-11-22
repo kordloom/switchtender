@@ -38,6 +38,8 @@ func TestRunSearchClauseBuildsOneBoundTerm(t *testing.T) {
 		Query: "x'; DROP TABLE runs; --", WantClause: true, WantArg: "%x'; drop table runs; --%",
 	}, { // Test 6: Unicode is lowercased by the same rule and bound whole.
 		Query: "ÉLÈVE", WantClause: true, WantArg: "%élève%",
+	}, { // Test 7: A percent sign, an underscore, and the escape itself are escaped to literals.
+		Query: "50%_off!", WantClause: true, WantArg: "%50!%!_off!!%",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -83,16 +85,16 @@ func TestRunSearchClauseCoversEverySearchedColumn(t *testing.T) {
 	for testNum, col := range runSearchColumns {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			want := "lower(" + col + ") LIKE $1 ESCAPE ''"
+			want := "lower(" + col + ") LIKE $1 ESCAPE '!'"
 			if !strings.Contains(clause, want) {
 				t.Errorf("clause does not search %s as %q:\n%s", col, want, clause)
 			}
 		})
 	}
-	// ESCAPE '' disables PostgreSQL's backslash escape so a backslash is literal, the way SQLite's
-	// LIKE already treats it. Without this the two backends match different rows for one term.
-	if n := strings.Count(clause, "ESCAPE ''"); n != len(runSearchColumns) {
-		t.Errorf("ESCAPE '' appears %d times, want once per column (%d): a column without it reads "+
+	// The escape is named on every column, so a backslash is literal the way SQLite reads it and a
+	// % or _ in a term is escaped. Without it the two backends match different rows for one term.
+	if n := strings.Count(clause, "ESCAPE '!'"); n != len(runSearchColumns) {
+		t.Errorf("ESCAPE '!' appears %d times, want once per column (%d): a column without it reads "+
 			"a backslash as an escape here and as a literal on SQLite", n, len(runSearchColumns))
 	}
 }

@@ -330,10 +330,9 @@ func (m *memStore) runRanTask(runID, task string) bool {
 	return false
 }
 
-// matchesQuery reports whether the run matches a lowercased search term across the fields the runs
-// view shows: id, playbook, command, tool, status, step name, and inventory.
+// matchesQuery reports whether the run matches a lowercased search term across SearchFields.
 func matchesQuery(r *Run, term string) bool {
-	for _, field := range []string{r.ID, r.Playbook, r.Command, r.Tool, string(r.Status), r.StepName, r.Inventory} {
+	for _, field := range SearchFields(r) {
 		if strings.Contains(strings.ToLower(field), term) {
 			return true
 		}

@@ -611,12 +611,11 @@ func TestRunSearchIsCaseInsensitiveOverEveryColumnItClaims(t *testing.T) {
 	}
 }
 
-// TestRunSearchTreatsLikeMetacharactersAsPatterns records what a search containing a LIKE
-// metacharacter does today. The term is interpolated into a LIKE pattern without escaping, so a
-// percent sign matches every run and an underscore matches any single character. It is recorded
-// rather than asserted as correct: an operator pasting a run id like run_0001 is matching a pattern
-// they did not write, and a literal search for a percentage in a command finds everything.
-func TestRunSearchTreatsLikeMetacharactersAsPatterns(t *testing.T) {
+// TestRunSearchTreatsLikeMetacharactersAsLiterals pins that a percent sign or an underscore in a
+// search term matches only that character. Interpolated into a LIKE pattern unescaped, a percent
+// sign matched every run and an underscore matched any character, so an operator pasting a run id
+// matched a pattern they did not write, and the run list's own match in Go disagreed with the store.
+func TestRunSearchTreatsLikeMetacharactersAsLiterals(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := openStore(t).Runs()
@@ -627,25 +626,27 @@ func TestRunSearchTreatsLikeMetacharactersAsPatterns(t *testing.T) {
 		&run.Run{ID: "runB0001", Status: run.StatusSucceeded, CreatedAt: baseTime,
 			Tool: "bash", Command: "df -h | grep 50%"},
 	)
-
-	// A percent sign is a wildcard, so a literal search for it returns everything rather than the
-	// one run whose command contains it.
-	pct, err := store.ListPage(ctx, run.ListFilter{Query: "50%"}, 0, 0)
-	if err != nil {
-		t.Fatalf("ListPage(percent) error = %v", err)
+	tests := []struct {
+		Query  string
+		WantID []string
+	}{ // Test 0: A percent sign finds only the run whose command holds one.
+		{"50%", []string{"runB0001"}},
+		// Test 1: An underscore is not any character, so an id with one in place of a digit misses.
+		{"runA_001", nil},
+		// Test 2: The id itself still matches.
+		{"runa0001", []string{"runA0001"}},
 	}
-	if len(pct) != 1 {
-		t.Logf("searching for %q matched %v: the term is a LIKE pattern, not literal text",
-			"50%", runIDs(pct))
-	}
-
-	// An underscore matches any single character, so an id-shaped term is a pattern too.
-	under, err := store.ListPage(ctx, run.ListFilter{Query: "runA_001"}, 0, 0)
-	if err != nil {
-		t.Fatalf("ListPage(underscore) error = %v", err)
-	}
-	if len(under) == 0 {
-		t.Error("an underscore term matched nothing at all, which is neither literal nor a pattern")
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			got, err := store.ListPage(ctx, run.ListFilter{Query: test.Query}, 0, 0)
+			if err != nil {
+				t.Fatalf("ListPage(%q) error = %v", test.Query, err)
+			}
+			if diff := cmp.Diff(test.WantID, runIDs(got), cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("search %q (-want +got):\n%s", test.Query, diff)
+			}
+		})
 	}
 }
 
