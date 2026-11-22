@@ -22,6 +22,11 @@ import (
 // and is refused here with 413.
 const maxImportBody = 25 << 20
 
+// importSlots is how many imports the server reads at once. Reading one holds the whole body and
+// the plan it maps to in memory, and the preview needs no sign-in on the public demo, so a crowd of
+// previews was a crowd of 25 MiB bodies with nothing to stop them. Tests lower it.
+var importSlots = 2
+
 // importResponse summarizes an import plan, and the result when it is applied.
 type importResponse struct {
 	// Projects names the git projects the import creates.
@@ -121,7 +126,11 @@ func applyRequested(r *http.Request) bool {
 // CLI reads the file whole and only the archive readers' own limits bound it. A Rundeck project
 // archive from a busy project carries every execution log alongside the definitions this reads, so
 // one can exceed this limit and still import from the command line.
+//
+// At most importSlots imports are read at once. One past that is answered 429 before its body is
+// read, with a sentence saying to try again.
 func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
+	slots := make(chan struct{}, importSlots)
 	return func(w http.ResponseWriter, r *http.Request) {
 		var mapper func([]byte, time.Time) (*importer.Plan, error)
 		switch r.PathValue("format") {
@@ -150,6 +159,14 @@ func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 				"format must be awx, semaphore, chef, puppet, rundeck, or jenkins")
 			return
 		}
+		select {
+		case slots <- struct{}{}:
+			defer func() { <-slots }()
+		default:
+			respondError(w, log, http.StatusTooManyRequests, "the server is already reading as many "+
+				"imports as it reads at once. Try again when one has finished")
+			return
+		}
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxImportBody))
 		if err != nil {
 			respondError(w, log, http.StatusRequestEntityTooLarge, "export too large")
@@ -163,10 +180,12 @@ func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
-		if errors.Is(err, importer.ErrArchive) || errors.Is(err, importer.ErrNotText) {
-			// An archive reader's refusal, or a body that is not whole text, is a sentence written
-			// for the person who sent it, and the command line prints it to them. It names nothing
-			// of the server: the archive's own member names, its counts, and its sizes. It goes
+		if errors.Is(err, importer.ErrArchive) || errors.Is(err, importer.ErrNotText) ||
+			errors.Is(err, importer.ErrExpansion) {
+			// An archive reader's refusal, a body that is not whole text, or YAML aliases that expand
+			// past the import's budget, is a sentence written for the person who sent it, and the
+			// command line prints it to them. It names nothing of the server: the archive's own
+			// member names, its counts, and its sizes, or the export's own field names. It goes
 			// back as written, because a line about the format would tell a reader whose zip holds
 			// too many entries that the export is the wrong kind. It is logged as a warning with no
 			// stack trace, because the input failed and the server did not.

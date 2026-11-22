@@ -616,7 +616,7 @@ func fromAWX(data []byte, now time.Time, ids *awxTemplateIDs) (*Plan, error) {
 	if err := refuseJSONTail(data); err != nil {
 		return nil, err
 	}
-	plan := &Plan{awxIDs: ids}
+	plan := &Plan{awxIDs: ids, budget: newExpansionBudget(len(data))}
 	// A skipped entry counts as refused, so an export whose every entry was malformed reports each
 	// one and why, rather than claiming nothing in it was recognized.
 	ungrouped := export.dropSkippedHosts(skipped)
@@ -709,7 +709,7 @@ func fromAWX(data []byte, now time.Time, ids *awxTemplateIDs) (*Plan, error) {
 			Content: buildInventoryINI(plan, inv.Name,
 				plan.convertHosts(hosts, "inventory "+quoteName(inv.Name)),
 				plan.convertGroups(flattenGroups(groups), "inventory "+quoteName(inv.Name)),
-				decodeVars(inv.Variables)),
+				plan.decodeVars(inv.Variables, "the variables of inventory "+quoteName(inv.Name))),
 			CreatedAt: now,
 		}
 		if inventoryIDs.set(inv.Organization.Name, inv.Name, obj.ID) {
@@ -921,6 +921,11 @@ func fromAWX(data []byte, now time.Time, ids *awxTemplateIDs) (*Plan, error) {
 	// What the struct never had a field for, which reportUnmapped cannot see: it names the kinds this
 	// importer knows it drops, and a field it does not know about is exactly the one nobody wrote down.
 	reportUnread(plan, data, export)
+	// A value past the expansion budget refuses the whole import, wherever in it the value was,
+	// since every value read after it was left out and the plan no longer says what the export does.
+	if err := plan.budget.err; err != nil {
+		return nil, err
+	}
 	if err := plan.requireObjects("projects, inventories, credentials, job templates, " +
 		"workflows, schedules, or notification templates"); err != nil {
 		return nil, err
@@ -1033,7 +1038,7 @@ func (p *Plan) addTemplate(jt awxJobTemplate, name string, now time.Time,
 			p.warn("template %q references unknown credential %s", name, credentialIDs.unresolved(ref))
 		}
 	}
-	if vars, err := parseExtraVars(jt.ExtraVars); err != nil {
+	if vars, err := p.parseExtraVars(jt.ExtraVars, "the extra_vars of template "+quoteName(jt.Name)); err != nil {
 		p.warn("template %q extra_vars could not be parsed: %v", jt.Name, err)
 	} else {
 		tpl.ExtraVars = vars
@@ -1325,7 +1330,8 @@ func (p *Plan) scheduleTemplate(owner string, s awxSchedule, templateID string, 
 	if idx >= 0 {
 		survey = p.Templates[idx].Survey
 	}
-	answers, vars := splitScheduleAnswers(decodeVars(s.ExtraData), survey)
+	answers, vars := splitScheduleAnswers(p.decodeVars(s.ExtraData, "the extra_data of schedule "+
+		quoteName(s.Name)), survey)
 	var changes []string
 	if len(answers) > 0 {
 		changes = append(changes, "its answers to the survey ("+
@@ -1490,7 +1496,8 @@ func (p *Plan) convertHosts(hosts []awxHost, where string) []importHost {
 			off = append(off, h.Name)
 			continue
 		}
-		out = append(out, importHost{Name: h.Name, Variables: decodeVars(h.Variables)})
+		out = append(out, importHost{Name: h.Name,
+			Variables: p.decodeVars(h.Variables, where+", the variables of host "+quoteName(h.Name))})
 	}
 	if len(off) > 0 {
 		p.warn("%s: %d host%s disabled in AWX %s left out, since AWX runs nothing against %s and "+
@@ -1507,7 +1514,8 @@ func (p *Plan) convertGroups(groups []awxGroup, where string) []importGroup {
 	for _, g := range groups {
 		out = append(out, importGroup{
 			Name: g.Name, Hosts: p.convertHosts(g.hosts(), where+", group "+quoteName(g.Name)),
-			Variables: decodeVars(g.Variables), Children: g.childNames(),
+			Variables: p.decodeVars(g.Variables, where+", the variables of group "+quoteName(g.Name)),
+			Children:  g.childNames(),
 		})
 	}
 	return out
@@ -1527,8 +1535,9 @@ func quoteName(name string) string {
 	return strconv.Quote(oneLine(name))
 }
 
-// decodeVars decodes host variables from either a JSON object or a YAML or JSON string.
-func decodeVars(raw json.RawMessage) map[string]any {
+// decodeVars decodes host variables from either a JSON object or a YAML or JSON string. field names
+// the value for the refusal when its YAML spends the plan's expansion budget, which fromAWX returns.
+func (p *Plan) decodeVars(raw json.RawMessage, field string) map[string]any {
 	if len(raw) == 0 {
 		return nil
 	}
@@ -1540,7 +1549,7 @@ func decodeVars(raw json.RawMessage) map[string]any {
 	}
 	var asString string
 	if err := json.Unmarshal(raw, &asString); err == nil {
-		if vars, err := parseExtraVars(asString); err == nil {
+		if vars, err := p.parseExtraVars(asString, field); err == nil {
 			return vars
 		}
 	}

@@ -75,6 +75,8 @@ type Plan struct {
 	Warnings []string
 	// suppressed counts the warnings past the cap, so the total is still knowable.
 	suppressed int
+	// budget bounds how far YAML aliases may expand this import, across every YAML value in it.
+	budget *expansionBudget
 	// gates names the workflows refused because an approval node in them could not be carried, so
 	// an assessment can say which approvals the estate has today that an import does not carry.
 	gates []string
@@ -302,14 +304,19 @@ func secretQuestions(survey []template.SurveyField, vars []string) []string {
 }
 
 // parseExtraVars decodes AWX or Semaphore extra vars, which arrive as a YAML or JSON string, into a
-// map. An empty value yields nil; an unparseable one yields nil and is reported by the caller.
-func parseExtraVars(raw string) (map[string]any, error) {
+// map. An empty value yields nil; an unparseable one yields nil and is reported by the caller. The
+// value is charged to the plan's expansion budget before it is decoded, and field names it in the
+// refusal when the budget runs out.
+func (p *Plan) parseExtraVars(raw, field string) (map[string]any, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || raw == "---" {
 		return nil, nil
 	}
 	var node yaml.Node
 	if err := yaml.Unmarshal([]byte(raw), &node); err != nil {
+		return nil, err
+	}
+	if err := p.expansion(len(raw)).charge(&node, field); err != nil {
 		return nil, err
 	}
 	resolveYAML11Bools(&node)

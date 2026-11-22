@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -223,5 +224,74 @@ func TestImportCronSaysWhereCronImportsFrom(t *testing.T) {
 	// Naming the command is the whole point. Without it this is the generic refusal again.
 	if !strings.Contains(rec.Body.String(), "switchtender import cron") {
 		t.Errorf("refusal does not name the command that works: %s", rec.Body.String())
+	}
+}
+
+// TestImportReadsAtMostItsSlotsAtOnce proves the server reads no more imports at once than it has
+// slots for: with one slot, a second import while the first is still being read is answered 429,
+// and one sent after the first finishes is read as usual. The preview needs no sign-in on the
+// public demo, so nothing else bounded how many 25 MiB bodies it held in memory at once.
+func TestImportReadsAtMostItsSlotsAtOnce(t *testing.T) {
+	// Not parallel: it lowers the package-level slot count before the handler is built.
+	prev := importSlots
+	importSlots = 1
+	t.Cleanup(func() { importSlots = prev })
+	handler := importHandler(func() (importer.ApplyStores, bool) { return importer.ApplyStores{}, false },
+		zap.NewNop())
+	const export = `{"inventory": [{"name": "fleet", "related": {"hosts": [{"name": "web1"}]}}]}`
+	send := func(body io.Reader) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/import/awx", body)
+		req.SetPathValue("format", "awx")
+		handler.ServeHTTP(rec, req)
+		return rec
+	}
+
+	pr, pw := io.Pipe()
+	first := make(chan *httptest.ResponseRecorder, 1)
+	go func() { first <- send(pr) }()
+	// A pipe write returns only once the handler has read it, which it does after taking the slot.
+	if _, err := pw.Write([]byte(export[:1])); err != nil {
+		t.Fatalf("start the first import: %v", err)
+	}
+	if rec := send(strings.NewReader(export)); rec.Code != http.StatusTooManyRequests {
+		t.Errorf("second import during the first: status = %d, want %d (%s)", rec.Code,
+			http.StatusTooManyRequests, rec.Body.String())
+	}
+	if _, err := pw.Write([]byte(export[1:])); err != nil {
+		t.Fatalf("finish the first import: %v", err)
+	}
+	_ = pw.Close()
+	if rec := <-first; rec.Code != http.StatusOK {
+		t.Fatalf("first import: status = %d, want %d (%s)", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if rec := send(strings.NewReader(export)); rec.Code != http.StatusOK {
+		t.Errorf("import after the first finished: status = %d, want %d (%s)", rec.Code,
+			http.StatusOK, rec.Body.String())
+	}
+}
+
+// TestImportPassesTheExpansionRefusalOn proves an export whose YAML aliases expand past the budget
+// is answered 400 with the importer's own sentence, which names the value, rather than the generic
+// line about the format.
+func TestImportPassesTheExpansionRefusalOn(t *testing.T) {
+	t.Parallel()
+	handler := importHandler(func() (importer.ApplyStores, bool) { return importer.ApplyStores{}, false },
+		zap.NewNop())
+	vars := "s: &s " + strings.Repeat("a", 64) + "\nl: &l [" +
+		strings.TrimSuffix(strings.Repeat("*s,", 100), ",") + "]\nbig: [" +
+		strings.TrimSuffix(strings.Repeat("*l,", 1960), ",") + "]\n"
+	quoted, err := json.Marshal(vars)
+	if err != nil {
+		t.Fatalf("quote the variables: %v", err)
+	}
+	body := `{"inventory": [{"name": "fleet", "variables": ` + string(quoted) + `}]}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/import/awx", strings.NewReader(body))
+	req.SetPathValue("format", "awx")
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `inventory \"fleet\"`) {
+		t.Errorf("status = %d, body %s; want %d naming the inventory's variables", rec.Code,
+			rec.Body.String(), http.StatusBadRequest)
 	}
 }

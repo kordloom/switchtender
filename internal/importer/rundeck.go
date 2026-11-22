@@ -234,7 +234,8 @@ func FromRundeck(inventory string) func([]byte, time.Time) (*Plan, error) {
 // decodeRundeck reads the job list from either export shape, a bare list or one wrapped under jobs.
 // Each job is decoded on its own, so a job with a field that will not read is left out with a
 // sentence saying which and why, and the other jobs import. One bad threadcount used to refuse the
-// whole export.
+// whole export. Each job is charged to one expansion budget for the export before it is decoded,
+// and a job past it refuses the import.
 func decodeRundeck(data []byte) ([]rundeckJob, []string, error) {
 	var root yaml.Node
 	if err := yaml.Unmarshal(data, &root); err != nil {
@@ -261,7 +262,11 @@ func decodeRundeck(data []byte) ([]rundeckJob, []string, error) {
 	}
 	var jobs []rundeckJob
 	var skipped []string
+	budget := newExpansionBudget(len(data))
 	for i, item := range list.Content {
+		if err := budget.charge(item, "job "+yamlJobLabel(item, i)); err != nil {
+			return nil, nil, err
+		}
 		var job rundeckJob
 		if err := item.Decode(&job); err != nil {
 			skipped = append(skipped, fmt.Sprintf("job %s was skipped because %s, and the rest of "+
