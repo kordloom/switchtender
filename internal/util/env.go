@@ -34,8 +34,11 @@ var ambientCredentialEnv = []string{
 // The server reads its master encryption key, its salt, its worker token, and every provider secret
 // from the environment. Passing that environment through to a run handed all of it to whatever the
 // run executes: an operator with permission to submit a one-line shell run could print the master
-// key, and with the key and salt they could decrypt every stored credential and any backup. The run
-// is the thing the key protects, so the key does not belong in it.
+// key, and with the key and salt they could decrypt every stored credential and any backup. This
+// filter covers the run's own environment and nothing more. A run with no execution image runs as
+// the server's account, so the server's environ and the files that account can read are a separate
+// question, answered on Linux by the server marking itself non-dumpable and by an environment file
+// only root reads.
 //
 // Removing the whole prefix covers everything SwitchTender names for itself, and a secret added to
 // the configuration later is stripped by having the prefix, which is the property a denylist lacks.

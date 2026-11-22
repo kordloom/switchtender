@@ -484,14 +484,18 @@ func TestInitWritesTheConfigWithNoGroupOrWorldAccess(t *testing.T) {
 			"can read it and open every sealed secret", perm)
 	}
 
-	// The unit has to name the config it was told to write, or the server starts with no key.
+	// The unit loads the key from the root-owned file and from no file this account can read, since
+	// a run with no execution image runs as this account.
 	unit, err := os.ReadFile(initSystemd)
 	if err != nil {
 		t.Fatalf("ReadFile(unit) error = %v", err)
 	}
-	if !strings.Contains(string(unit), "EnvironmentFile="+cfg) {
-		t.Errorf("the generated unit does not load %s, so the server it starts has no encryption "+
-			"key:\n%s", cfg, unit)
+	if !strings.Contains(string(unit), "EnvironmentFile="+systemEnvFile+"\n") {
+		t.Errorf("the generated unit does not load %s:\n%s", systemEnvFile, unit)
+	}
+	if strings.Contains(string(unit), cfg) {
+		t.Errorf("the generated unit names %s, a file the service's own account can read:\n%s", cfg,
+			unit)
 	}
 	if !strings.Contains(string(unit), "--addr "+defaultServeAddr) {
 		t.Errorf("the generated unit does not bind %s:\n%s", defaultServeAddr, unit)

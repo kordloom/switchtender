@@ -71,8 +71,8 @@ func TestShippedSystemdUnits(t *testing.T) {
 		units[test.File] = serviceSettings(t, filepath.Join("..", "deploy", "systemd", test.File))
 	}
 	units["init --systemd"] = unitServiceSettings(t, systemdUnit(unitSpec{DB: "/var/lib/st/st.db",
-		Addr: "127.0.0.1:8080", Config: "/etc/st.env", Exe: "/usr/local/bin/switchtender",
-		WorkDir: "/var/lib/st", User: "st", Group: "st"}))
+		Addr: "127.0.0.1:8080", Exe: "/usr/local/bin/switchtender", WorkDir: "/var/lib/st",
+		User: "st", Group: "st"}))
 	server, worker := units[tests[0].File], units[tests[1].File]
 	if a, b := server["RuntimeDirectory"], worker["RuntimeDirectory"]; a == b {
 		t.Errorf("the server and the worker share the runtime directory %q, so stopping one would "+
@@ -113,5 +113,49 @@ func TestShippedSystemdUnits(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestSystemdUnitsKeepTheKeyFileFromRuns holds every unit to loading its key from a file only root
+// reads. systemd reads EnvironmentFile as root before it starts the service, and a run with no
+// execution image runs as the service's account, so a key file that account could read, as the
+// shipped headers once installed it at 0640 for the service group, was one cat away from any run.
+func TestSystemdUnitsKeepTheKeyFileFromRuns(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// File is the unit file name under deploy/systemd.
+		File string
+		// WantEnvFile is the environment file the unit loads.
+		WantEnvFile string
+	}{{ // Test 0: The server.
+		File: "switchtender.service", WantEnvFile: "/etc/switchtender/switchtender.env",
+	}, { // Test 1: The worker.
+		File: "switchtender-worker.service", WantEnvFile: "/etc/switchtender/worker.env",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.File), func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join("..", "deploy", "systemd", test.File)
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			if got := serviceSettings(t, path)["EnvironmentFile"]; got != test.WantEnvFile {
+				t.Errorf("%s EnvironmentFile = %q, want %q", test.File, got, test.WantEnvFile)
+			}
+			want := "#   install -m 0600 -o root -g root /dev/null " + test.WantEnvFile + "\n"
+			if !strings.Contains(string(raw), want) {
+				t.Errorf("%s header does not install its environment file root-owned at 0600, "+
+					"want the line %q", test.File, strings.TrimSpace(want))
+			}
+			if strings.Contains(string(raw), "0640") {
+				t.Errorf("%s still names mode 0640, which lets the service group read the key", test.File)
+			}
+		})
+	}
+	unit := unitServiceSettings(t, systemdUnit(unitSpec{DB: "/var/lib/st/st.db", Addr: "127.0.0.1:8080",
+		Exe: "/usr/local/bin/switchtender", WorkDir: "/var/lib/st", User: "st", Group: "st"}))
+	if got := unit["EnvironmentFile"]; got != systemEnvFile {
+		t.Errorf("the unit init writes loads %q, want the root-owned %q", got, systemEnvFile)
 	}
 }

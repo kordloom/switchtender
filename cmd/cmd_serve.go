@@ -1429,7 +1429,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("init logger: %w", err)
 	}
 	defer func() { _ = log.Sync() }()
-	protectProcess(log)
+	if err := protectProcess(log); err != nil {
+		return err
+	}
 	if err := applyEgressProxy(log); err != nil {
 		return err
 	}
@@ -2163,10 +2165,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 // These were flag-only. A run executes as a child of this process under the same uid, so an
 // operator-role user could read the server's argv from inside a bash run and lift a third-party
 // credential their role was never granted: the ntfy bearer, the Grafana API token, the Twilio auth
-// token. The environment is already closed against exactly that, because filterRunEnv drops every
-// SWITCHTENDER_ variable before a run sees it, so moving the secret there puts it behind the boundary
-// the rest of the configuration already sits behind. The flag stays for compatibility and for a
-// deployment that does not care, and its help now says which channel is safe.
+// token. Any account can read a process's argv, and the non-dumpable flag does not change that. The
+// environment is narrower: filterRunEnv keeps every SWITCHTENDER_ variable out of the run's own
+// environment, and on Linux protectProcess closes this process's environ to its own account, so the
+// secret sits where the encryption key does. On macOS a run can still read this process's
+// environment. The flag stays for compatibility and for a deployment that does not care, and its
+// help now says which channel is safe.
 func notifySecret(flagValue, env string) string {
 	if v := os.Getenv(env); v != "" {
 		return v
