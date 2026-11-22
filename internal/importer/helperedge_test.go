@@ -477,7 +477,7 @@ func TestParseExtraVarsAcceptsBothEncodingsAndRefusesTheRest(t *testing.T) {
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
 			t.Parallel()
-			got, err := parseExtraVars(test.In)
+			got, err := (&Plan{}).parseExtraVars(test.In, "test")
 			if (err != nil) != test.WantErr {
 				t.Fatalf("parseExtraVars(%q) error = %v, want error %v", test.In, err, test.WantErr)
 			}
@@ -522,7 +522,7 @@ func TestDecodeVarsNeverFailsAndNeverGuesses(t *testing.T) {
 			if test.In != "" {
 				raw = json.RawMessage(test.In)
 			}
-			got := decodeVars(raw)
+			got := (&Plan{}).decodeVars(raw, "test")
 			if diff := cmp.Diff(test.WantVars, got, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("decodeVars(%s) mismatch (-want +got):\n%s", test.In, diff)
 			}
@@ -535,7 +535,7 @@ func TestDecodeVarsNeverFailsAndNeverGuesses(t *testing.T) {
 // notation is a host variable that no longer matches the thing it names.
 func TestDecodeVarsKeepsBigIntegersExact(t *testing.T) {
 	t.Parallel()
-	got := decodeVars(json.RawMessage(`{"account":90071992547409931}`))
+	got := (&Plan{}).decodeVars(json.RawMessage(`{"account":90071992547409931}`), "test")
 	if diff := cmp.Diff("90071992547409931", jsonScalarString(got["account"])); diff != "" {
 		t.Errorf("decodeVars() big integer mismatch (-want +got):\n%s", diff)
 	}
@@ -715,7 +715,8 @@ func TestNodeKeyForIDIsTheOneSpelling(t *testing.T) {
 // conditional that tested it read as true, so a feature somebody had switched off came back on.
 func TestExtraVarsReadYesAndNoAsAWXDoes(t *testing.T) {
 	t.Parallel()
-	got, err := parseExtraVars("a: yes\nb: 'no'\nc: Off\nd: [on, NO]\nyes: kept\ne: \"yes\"\n")
+	got, err := (&Plan{}).parseExtraVars("a: yes\nb: 'no'\nc: Off\nd: [on, NO]\nyes: kept\ne: \"yes\"\n",
+		"test")
 	if err != nil {
 		t.Fatalf("parseExtraVars() error = %v", err)
 	}

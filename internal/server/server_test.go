@@ -1497,6 +1497,7 @@ func TestAuthGate(t *testing.T) {
 
 	get := func(path, bearer string) int {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Host = "127.0.0.1:8080"
 		if bearer != "" {
 			req.Header.Set("Authorization", "Bearer "+bearer)
 		}

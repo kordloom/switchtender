@@ -120,8 +120,9 @@ the run's spec.
 The cached facts of an inventory are readable at `GET /v1/inventories/{id}/facts` and per host at
 `GET /v1/inventories/{id}/facts/{host}`, and on the Inventories page. Reading them takes the
 operator role and read on the inventory, and a host is listed only when the caller may also read
-the run that gathered its facts. Values whose keys look like secrets are masked for anyone below
-admin. A server started with `--fact-cache-admin-only` restricts reading cached facts to admins,
+the run that gathered its facts. Facts are stored with the run's own secret values masked, so a
+credential injected into a local play does not come back through `ansible_env`. Values whose keys
+look like secrets are also masked for anyone below admin. A server started with `--fact-cache-admin-only` restricts reading cached facts to admins,
 for an install where even masked facts are more than operators should see. Clearing a host's cached
 facts, `DELETE /v1/inventories/{id}/facts/{host}`, takes the admin role and manage on the inventory
 whatever that setting says. A container run mounts the cache directory writable, so an execution

@@ -3,12 +3,14 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/auth"
@@ -343,5 +345,71 @@ func TestNotificationAttachmentRBAC(t *testing.T) {
 	if code := f.do(t, http.MethodPut, "/v1/notifications/"+id, f.operator,
 		map[string]any{"name": "renamed"}).Code; code != http.StatusForbidden {
 		t.Errorf("an operator with use of a target edited it: %d", code)
+	}
+}
+
+// TestGrafanaTokenDoesNotFollowANewAddress proves an edit that points a Grafana target at a new
+// address must send the API token again. Keeping the stored token beside an address the editor chose
+// sent it there with the next annotation. The stored address with a blank or masked token, and a new
+// address with a new token, still save, and a PagerDuty key, whose destination is fixed, is kept.
+func TestGrafanaTokenDoesNotFollowANewAddress(t *testing.T) {
+	t.Parallel()
+	const storedURL = "https://grafana.corp/api/annotations"
+	tests := []struct {
+		// Kind is the stored target's kind.
+		Kind string
+		// Body is the edit.
+		Body map[string]any
+		// WantCode is the response status.
+		WantCode int
+		// WantURL and WantKey are the target stored afterward.
+		WantURL, WantKey string
+	}{{ // Test 0: A new address with a blank token is refused and nothing changes.
+		Kind: run.NotifyGrafana, Body: map[string]any{"name": "g", "url": "https://other.example/api"},
+		WantCode: http.StatusBadRequest, WantURL: storedURL, WantKey: "K-stored",
+	}, { // Test 1: A new address with the masked token is refused the same way.
+		Kind:     run.NotifyGrafana,
+		Body:     map[string]any{"name": "g", "url": "https://other.example/api", "key": "glsa…"},
+		WantCode: http.StatusBadRequest, WantURL: storedURL, WantKey: "K-stored",
+	}, { // Test 2: The stored address with a blank token keeps the token.
+		Kind: run.NotifyGrafana, Body: map[string]any{"name": "g", "url": storedURL},
+		WantCode: http.StatusOK, WantURL: storedURL, WantKey: "K-stored",
+	}, { // Test 3: A new address with a new token saves both.
+		Kind:     run.NotifyGrafana,
+		Body:     map[string]any{"name": "g", "url": "https://other.example/api", "key": "K-new"},
+		WantCode: http.StatusOK, WantURL: "https://other.example/api", WantKey: "K-new",
+	}, { // Test 4: A PagerDuty rename with a blank key keeps the key.
+		Kind: run.NotifyPagerDuty, Body: map[string]any{"name": "pd"},
+		WantCode: http.StatusOK, WantKey: "K-stored",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			f := newNotifyFixture(t, true)
+			create := map[string]any{"name": "target", "kind": test.Kind, "key": "K-stored"}
+			if test.Kind == run.NotifyGrafana {
+				create["url"] = storedURL
+			}
+			id := f.create(t, create)
+			rec := f.do(t, http.MethodPut, "/v1/notifications/"+id, f.admin, test.Body)
+			if rec.Code != test.WantCode {
+				t.Fatalf("PUT = %d, want %d: %s", rec.Code, test.WantCode, rec.Body.String())
+			}
+			if test.WantCode != http.StatusOK && !strings.Contains(rec.Body.String(), "API token again") {
+				t.Errorf("refusal = %s, want it to ask for the token again", rec.Body.String())
+			}
+			after, err := f.store.Get(context.Background(), id)
+			if err != nil {
+				t.Fatalf("Get() error = %v", err)
+			}
+			opened, err := after.Target(f.sealer)
+			if err != nil {
+				t.Fatalf("Target() error = %v", err)
+			}
+			if diff := cmp.Diff([]string{test.WantURL, test.WantKey},
+				[]string{opened.URL, opened.Key}); diff != "" {
+				t.Errorf("stored url and key (-want +got):\n%s", diff)
+			}
+		})
 	}
 }

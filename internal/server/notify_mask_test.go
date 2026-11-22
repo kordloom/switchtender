@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -172,5 +173,52 @@ func TestAnUndecidableMaskedEditIsRefused(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].URL != same[0].URL {
 		t.Errorf("restore = %+v, want the shared address restored", got)
+	}
+}
+
+// TestRestoreKeepsAGrafanaTokenOnlyBesideItsAddress proves a template's inline Grafana row gets its
+// stored token back only when its address is masked or is the stored one. A masked token beside a
+// new address would carry the token to a host the editor chose. A PagerDuty key is restored as
+// before.
+func TestRestoreKeepsAGrafanaTokenOnlyBesideItsAddress(t *testing.T) {
+	t.Parallel()
+	const storedURL = "https://grafana.corp/api/annotations"
+	mask := "https://grafana.corp/" + util.MaskMarker
+	stored := []run.NotifyTarget{{Kind: run.NotifyGrafana, URL: storedURL, Key: "K"},
+		{Kind: run.NotifyPagerDuty, Key: "PD"}}
+	tests := []struct {
+		// In is the submitted row.
+		In run.NotifyTarget
+		// WantErr reports whether the restore is refused.
+		WantErr bool
+		// WantKey is the restored key when it is not.
+		WantKey string
+	}{{ // Test 0: A new address beside the masked token is refused.
+		In:      run.NotifyTarget{Kind: run.NotifyGrafana, URL: "https://other.example", Key: util.MaskMarker},
+		WantErr: true,
+	}, { // Test 1: The masked address and masked token restore both.
+		In:      run.NotifyTarget{Kind: run.NotifyGrafana, URL: mask, Key: util.MaskMarker},
+		WantKey: "K",
+	}, { // Test 2: The stored address with the masked token restores the token.
+		In:      run.NotifyTarget{Kind: run.NotifyGrafana, URL: storedURL, Key: util.MaskMarker},
+		WantKey: "K",
+	}, { // Test 3: A PagerDuty row with the masked key restores the key.
+		In:      run.NotifyTarget{Kind: run.NotifyPagerDuty, Key: util.MaskMarker},
+		WantKey: "PD",
+	}}
+	for testNum, test := range tests {
+		t.Run(strconv.Itoa(testNum), func(t *testing.T) {
+			t.Parallel()
+			got, err := restoreMaskedNotifications([]run.NotifyTarget{test.In}, stored)
+			if test.WantErr {
+				if err == nil {
+					t.Fatalf("restore = %+v, want a refusal", got)
+				}
+				return
+			}
+			if err != nil || len(got) != 1 || got[0].Key != test.WantKey {
+				t.Fatalf("restore = %+v, %v; want one row with key %q", got, err, test.WantKey)
+			}
+		})
 	}
 }

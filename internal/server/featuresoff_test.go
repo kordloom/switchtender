@@ -37,7 +37,9 @@ func TestPagesNameTheFeaturesTheServerRunsWithout(t *testing.T) {
 				zap.NewNop(), test.Opts...).Handler()
 			for _, path := range []string{"/ui/users", "/ui/credentials", "/ui/held"} {
 				rec := httptest.NewRecorder()
-				handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+				req := httptest.NewRequest(http.MethodGet, path, nil)
+				req.Host = "127.0.0.1:8080"
+				handler.ServeHTTP(rec, req)
 				if rec.Code != http.StatusOK {
 					t.Fatalf("GET %s status = %d, want 200", path, rec.Code)
 				}

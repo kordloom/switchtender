@@ -599,7 +599,7 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	<-tailed
 	// Read back after the tailer has stopped, so the fold's recap is complete, and before the run is
 	// finalized, so a warning the collection raises lands on the run's terminal record.
-	d.collectFactCache(r, facts, spec.Inventory, fold)
+	d.collectFactCache(r, facts, spec.Inventory, fold, mask)
 	staged.removeAll()
 
 	status := finish(res, runErr, mask, fold, lost)

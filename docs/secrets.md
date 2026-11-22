@@ -42,7 +42,9 @@ the image is pulled and its tag resolved with. A pull credential must be a `regi
 Any other kind named there is refused when the project or template is saved and when the run is
 submitted, because the login is handed to the registry the image names.
 
-The login goes only to the registry its `registry_host` names. An image on any other registry is
+The login goes only to the registry its `registry_host` names. Changing the host needs the login in
+the same request, so a stored login is never carried to a new host. Below admin, an update that
+changes `registry_host` with no secret is refused. An image on any other registry is
 looked up and pulled with no login, so a submitter who names an image on a host of their choosing
 gets nothing from the credential. A registry that answers with a token service is sent the login
 only when the bound registry named that service itself, over https. The digest lookup also refuses

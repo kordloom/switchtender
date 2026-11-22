@@ -11,6 +11,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/federation"
+	"github.com/kordloom/switchtender/internal/imageref"
 	"github.com/kordloom/switchtender/internal/user"
 )
 
@@ -39,6 +40,29 @@ func denyNonAdminCommandSource(w http.ResponseWriter, r *http.Request, log *zap.
 		return true
 	}
 	return false
+}
+
+// denyRegistryRebind refuses an edit that moves a stored registry login to another host without the
+// login itself, and reports true when it has already answered the request. A registry credential's
+// login goes only to the host it is bound to, so a caller with manage on the credential and no
+// knowledge of its secret could point it at a server they run and collect the login on the next
+// pull. A new host needs the secret in the same request, or an admin. Hosts compare the way a pull
+// compares them, so Docker Hub's names are one host at write as at use.
+func denyRegistryRebind(w http.ResponseWriter, r *http.Request, log *zap.Logger, c *credential.Credential,
+	finalKind credential.Kind, settings map[string]string, secret string) bool {
+	if c.Kind != credential.KindRegistry || finalKind != credential.KindRegistry || secret != "" {
+		return false
+	}
+	stored, next := c.RegistryHost(), settings[credential.SettingRegistryHost]
+	if stored == "" || imageref.SameRegistry(stored, next) {
+		return false
+	}
+	if actor, ok := actorFrom(r.Context()); !ok || actor.Role == user.RoleAdmin {
+		return false
+	}
+	respondError(w, log, http.StatusBadRequest, "changing "+credential.SettingRegistryHost+" needs "+
+		"the login in the same request, so a stored login is never carried to a new host")
+	return true
 }
 
 // denyPullKind refuses a request that names a credential of any kind but registry as a pull
@@ -609,6 +633,9 @@ func updateCredentialHandler(store credential.Store, types credential.TypeStore,
 		// change that drops the old settings, and not a rename of one stored before the rule.
 		if err := credential.ValidateSettings(finalKind, settings); err != nil {
 			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		}
+		if denyRegistryRebind(w, r, log, c, finalKind, settings, secret) {
 			return
 		}
 		if req.Settings != nil && credential.Federated(finalKind) {

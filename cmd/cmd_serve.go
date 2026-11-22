@@ -1260,7 +1260,7 @@ const (
 // promise the API was open until the first token. Minting the token instead keeps the bind
 // authenticated from the first request and lets the documented command work as written.
 func tokenCountGuard(count int, countErr error, accounts int, readOnly, externalAuth, loopback bool,
-	addr string) (servePosture, error) {
+	proxies []*net.IPNet, addr string) (servePosture, error) {
 	if countErr != nil {
 		return postureReady, fmt.Errorf("refusing to serve on %s: cannot determine whether any API "+
 			"tokens exist, so the API cannot be safely exposed: %w", addr, countErr)
@@ -1281,9 +1281,20 @@ func tokenCountGuard(count int, countErr error, accounts int, readOnly, external
 	if externalAuth {
 		return postureReady, nil
 	}
-	// Read-only serves no mutation, and loopback is reachable only from the host, so both are
-	// allowed to run open. Everything else gets a token minted for it.
-	if readOnly || loopback {
+	// Read-only serves no mutation, so it may run open wherever it is reached from, its proxy
+	// included.
+	if readOnly {
+		return postureWarn, nil
+	}
+	// A declared proxy says strangers reach this install through something in front of it, which
+	// a loopback bind does not stop, and an open install refuses every request a proxy relays. So
+	// it starts authenticated, with a token minted for it.
+	if len(proxies) > 0 {
+		return postureBootstrap, nil
+	}
+	// Loopback is reachable only from the host, so it may run open. Everything else gets a token
+	// minted for it.
+	if loopback {
 		return postureWarn, nil
 	}
 	return postureBootstrap, nil
@@ -1596,7 +1607,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		log.Warn("cannot count accounts, so the startup authentication notice may be wrong: " + uerr.Error())
 	}
 	posture, gerr := tokenCountGuard(n, cerr, accounts, serveReadOnly, externalAuthConfigured(),
-		isLoopbackAddr(serveAddr), serveAddr)
+		isLoopbackAddr(serveAddr), proxies, serveAddr)
 	if gerr != nil {
 		return gerr
 	}

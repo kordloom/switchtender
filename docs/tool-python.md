@@ -14,7 +14,8 @@ is more comfortable in Python than a shell: calling an API, reconciling state, o
 
 The script is written to a temporary file and run with `python3`, so multi-line scripts work
 unchanged. The working directory is the project checkout when the run sources a project. A dry run
-runs `python3 -m py_compile`, which checks syntax without executing the script.
+runs `python3 -I -m py_compile`, which checks syntax in Python's isolated mode, so no file in the
+project is imported and the script is not executed.
 
 ## How values reach the script
 

@@ -919,7 +919,7 @@ func (p *Plan) workflowVars(wf awxWorkflow, nodes []awxWorkflowNode,
 		return nil
 	}
 
-	own, err := parseExtraVars(wf.ExtraVars)
+	own, err := p.parseExtraVars(wf.ExtraVars, "the extra_vars of workflow "+quoteName(wf.Name))
 	if err != nil {
 		return nil, fmt.Errorf("its own extra_vars could not be parsed: %w", err)
 	}
@@ -928,7 +928,7 @@ func (p *Plan) workflowVars(wf awxWorkflow, nodes []awxWorkflowNode,
 	}
 	for _, n := range nodes {
 		jt := jobs.of(n.UnifiedJobTemplate)
-		tv, err := parseExtraVars(jt.ExtraVars)
+		tv, err := p.parseExtraVars(jt.ExtraVars, "the extra_vars of template "+quoteName(jt.Name))
 		if err != nil {
 			return nil, fmt.Errorf("the extra_vars of job template %q could not be parsed: %w",
 				jt.Name, err)

@@ -153,7 +153,9 @@ func TestSSOInstallEnforcesBeforeAnyoneSignsIn(t *testing.T) {
 	open := New(run.NewMemStore(), &fakeSubmitter{run: &run.Run{ID: "run_x"}}, zap.NewNop(),
 		WithTokens(auth.NewMemStore()), WithUsers(user.NewMemStore())).Handler()
 	rec := httptest.NewRecorder()
-	open.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/runs", nil))
+	fresh := httptest.NewRequest(http.MethodGet, "/v1/runs", nil)
+	fresh.Host = "127.0.0.1:8080"
+	open.ServeHTTP(rec, fresh)
 	if rec.Code != http.StatusOK {
 		t.Errorf("a fresh unconfigured install answered %d, want 200: first run must still work", rec.Code)
 	}

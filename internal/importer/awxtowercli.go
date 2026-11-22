@@ -33,7 +33,17 @@ func refuseTowerCLI(data []byte) error {
 		// the error does not decide whether any entry carried the tag.
 		_ = json.Unmarshal(trimmed, &assets)
 	case bytes.HasPrefix(trimmed, []byte("-")):
-		if yaml.Unmarshal(trimmed, &assets) != nil {
+		// The YAML is charged to an expansion budget before it is decoded, since an asset_type of
+		// any type decodes whatever an alias names, and a file this importer refuses anyway must
+		// not cost the server its memory on the way.
+		var node yaml.Node
+		if yaml.Unmarshal(trimmed, &node) != nil {
+			return nil
+		}
+		if err := newExpansionBudget(len(trimmed)).charge(&node, "the tower-cli asset list"); err != nil {
+			return err
+		}
+		if node.Decode(&assets) != nil {
 			return nil
 		}
 	default:

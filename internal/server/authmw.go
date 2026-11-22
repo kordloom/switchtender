@@ -72,38 +72,39 @@ type authGate struct {
 	secretVars secretSurveyVarsFunc
 }
 
-// reboundRequest reports whether a browser sent this request for a host name that no loopback
-// install answers to, with no declared proxy in front. Only requests carrying the browser's own
-// fetch metadata count: curl, the CLI, and server-to-server senders name no Sec-Fetch-Site and are
-// unaffected.
-func reboundRequest(r *http.Request) bool {
-	if r.Header.Get("Sec-Fetch-Site") == "" {
-		return false
+// openRequestFromAfar returns what shows a request did not come from the install's own machine, or
+// empty when nothing does: a Host that is not a loopback name, or a forwarding header a proxy or a
+// tunnel adds. An open install is loopback-bound by construction, so either one means something
+// between a stranger and the server is relaying them in, whoever sent the request, browser or not.
+// A forward that adds no header and rewrites Host to a loopback name cannot be told from the owner,
+// which is why the docs say an install with no account must not sit behind one.
+func openRequestFromAfar(r *http.Request) string {
+	if !loopbackHost(r.Host) {
+		return "host " + r.Host
 	}
-	if len(trustedProxies) > 0 {
-		return false
+	headers := []string{"X-Forwarded-For", "Forwarded", "X-Forwarded-Host", "X-Real-IP"}
+	if clientIPHeader != "" {
+		headers = append(headers, clientIPHeader)
 	}
-	host := r.Host
+	for _, h := range headers {
+		if r.Header.Get(h) != "" {
+			return "a " + h + " header"
+		}
+	}
+	return ""
+}
+
+// loopbackHost reports whether host, with or without a port, is a loopback name or address.
+func loopbackHost(host string) bool {
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
 	host = strings.Trim(strings.ToLower(host), "[]")
 	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
-		return false
+		return true
 	}
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-		return false
-	}
-	return true
-}
-
-// isWrite reports whether a request changes state.
-func isWrite(r *http.Request) bool {
-	switch r.Method {
-	case http.MethodGet, http.MethodHead, http.MethodOptions:
-		return false
-	}
-	return true
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // crossSiteWrite reports whether a request is a state-changing one a browser sent from another site.
@@ -168,24 +169,25 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 				"a state-changing request from another site is refused")
 			return
 		}
-		if reboundRequest(r) && (isWrite(r) || !g.publicReads) && !g.enforcing(r.Context()) {
-			// DNS rebinding walks around the cross-site check: the attacker's page flips its own
-			// hostname's A record to 127.0.0.1, so the browser sends Sec-Fetch-Site: same-origin
-			// and a matching Origin, and every header lies in unison. What cannot lie is the Host
-			// itself, which necessarily names the attacker's domain. An install that runs open is
-			// loopback-bound by construction, so a browser request whose Host is not a loopback
-			// name did not come from the operator's own machine, unless a declared reverse proxy
-			// fronts the install, which is what --trusted-proxy states.
-			//
-			// Reads are refused too. Only writes were, and an open install answers every read,
-			// so the rebound page could not change anything but could read every run, its script
-			// and log, the inventories, and the audit list, and send them wherever it liked. A
-			// read-only public server is the exception: reading it from any host is its purpose.
-			respondError(w, g.log, http.StatusForbidden,
-				"refused a browser request for host "+r.Host+" on an open install: a loopback "+
-					"server answers loopback names. Fronting it with a proxy? Declare it with "+
-					"--trusted-proxy.")
-			return
+		if !g.publicReads && !g.enforcing(r.Context()) {
+			if why := openRequestFromAfar(r); why != "" {
+				// An open install answers anyone who reaches it, so it is meant to be reached only
+				// from its own machine. DNS rebinding walks around the cross-site check: the
+				// attacker's page flips its own hostname's A record to 127.0.0.1, so the browser
+				// sends Sec-Fetch-Site: same-origin and a matching Origin, and every header lies in
+				// unison. What cannot lie is the Host, which names the attacker's domain. A proxy or
+				// a tunnel in front of an open install is the same hole with no browser in it: curl
+				// through the tunnel reached every run and every write. So a foreign Host or a
+				// forwarding header is refused from any sender, and declaring a proxy no longer
+				// switches the check off, since a declared proxy starts the install authenticated.
+				// A read-only public server is the exception: reading it from any host is its
+				// purpose, and it takes no writes.
+				respondError(w, g.log, http.StatusForbidden,
+					"refused a request carrying "+why+" on an install with no account or token: "+
+						"it answers its own machine only. Run switchtender init or mint a token "+
+						"before putting it behind a proxy or a tunnel.")
+				return
+			}
 		}
 		if !g.protects(r) || !g.enforcing(r.Context()) {
 			// A webhook trigger starts real runs without a token, so it is recorded. Sign-in is

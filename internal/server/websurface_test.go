@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -167,8 +168,8 @@ func TestCrossSiteWritesAreRefused(t *testing.T) {
 // DNS rebinding makes every browser header lie in unison: the attacker's page rebinds its own
 // hostname to 127.0.0.1, so the fetch is same-origin by every signal a browser sends. The Host is
 // the one thing that cannot lie, because the page can only reach the server through the attacker's
-// own name. A writable install that runs open is loopback-bound by construction, so a browser
-// write for any other name is refused unless a declared proxy fronts the install.
+// own name. A writable install that runs open is loopback-bound by construction, so a write for any
+// other name is refused, from a browser or not, and declaring a proxy does not switch that off.
 func TestARebindingWriteIsRefusedOnAnOpenInstall(t *testing.T) {
 	store := run.NewMemStore()
 	// The token store is what turns the auth gate on at all; a server built without one skips
@@ -204,10 +205,10 @@ func TestARebindingWriteIsRefusedOnAnOpenInstall(t *testing.T) {
 		}
 	}
 
-	// Test 2: A non-browser client carries no fetch metadata and is untouched, whatever its Host:
-	// curl through an SSH tunnel legitimately names anything.
-	if got := send("evil.example:8080", ""); got != http.StatusNotFound {
-		t.Errorf("non-browser write = %d, want it through the gate on Host alone", got)
+	// Test 2: A non-browser client for a foreign Host is refused too: a proxy or a tunnel in front
+	// of an open install relays strangers in with no browser involved.
+	if got := send("evil.example:8080", ""); got != http.StatusForbidden {
+		t.Errorf("non-browser write for a foreign host = %d, want 403", got)
 	}
 }
 
@@ -241,14 +242,92 @@ func TestARebindingReadIsRefusedOnAnOpenInstall(t *testing.T) {
 			t.Errorf("loopback browser read on %q = %d, want 200", host, got)
 		}
 	}
-	// Test 2: A non-browser client is untouched, whatever its Host.
-	if got := get(open, "evil.example:8080", ""); got != http.StatusOK {
-		t.Errorf("non-browser read = %d, want 200", got)
+	// Test 2: A non-browser read for a foreign Host is refused: a proxy or a tunnel relays it.
+	if got := get(open, "evil.example:8080", ""); got != http.StatusForbidden {
+		t.Errorf("non-browser read for a foreign host = %d, want 403", got)
 	}
 	// Test 3: A read-only public server is read from its own public name.
 	public := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
 		WithTokens(auth.NewMemStore()), WithReadOnly(true)).Handler()
 	if got := get(public, "demo.example.com", "same-origin"); got != http.StatusOK {
 		t.Errorf("read-only public read = %d, want 200", got)
+	}
+}
+
+// TestAnOpenInstallRefusesAProxyOrATunnel proves an install with no account or token answers its
+// own machine only. A forwarding header on a loopback Host is a proxy or a tunnel relaying a
+// stranger, and a declared trusted proxy no longer switches the Host check off, since an install
+// declared to sit behind one starts authenticated. An enforced install reached by any Host with a
+// valid token, and a read-only public server read through its proxy, are unchanged.
+func TestAnOpenInstallRefusesAProxyOrATunnel(t *testing.T) {
+	// Not parallel: it sets the package's trusted proxy list.
+	get := func(handler http.Handler, host string, header http.Header) int {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/v1/runs", nil)
+		req.Host = host
+		for k, v := range header {
+			req.Header[k] = v
+		}
+		handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	open := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+		WithTokens(auth.NewMemStore())).Handler()
+	forwarded := http.Header{"X-Forwarded-For": {"203.0.113.9"}}
+	for testNum, test := range []struct {
+		// Header is set on the request.
+		Header http.Header
+		// Host is the request's Host.
+		Host string
+		// WantCode is the response status.
+		WantCode int
+	}{{ // Test 0: A plain request on loopback is the owner.
+		Host: "127.0.0.1:8080", WantCode: http.StatusOK,
+	}, { // Test 1: A forwarding header on a loopback Host is a relay.
+		Host: "127.0.0.1:8080", Header: forwarded, WantCode: http.StatusForbidden,
+	}, { // Test 2: The standard Forwarded header is the same.
+		Host: "localhost", Header: http.Header{"Forwarded": {"for=203.0.113.9"}},
+		WantCode: http.StatusForbidden,
+	}, { // Test 3: X-Real-IP is the same.
+		Host: "localhost", Header: http.Header{"X-Real-Ip": {"203.0.113.9"}},
+		WantCode: http.StatusForbidden,
+	}} {
+		if got := get(open, test.Host, test.Header); got != test.WantCode {
+			t.Errorf("test %d: open install = %d, want %d", testNum, got, test.WantCode)
+		}
+	}
+
+	// A declared proxy does not reopen the Host check for a browser.
+	_, nets, err := net.ParseCIDR("10.0.0.0/8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	SetTrustedProxies([]*net.IPNet{nets})
+	t.Cleanup(func() { SetTrustedProxies(nil) })
+	browser := http.Header{"Sec-Fetch-Site": {"same-origin"}}
+	if got := get(open, "evil.example", browser); got != http.StatusForbidden {
+		t.Errorf("browser read for a foreign host behind a declared proxy = %d, want 403", got)
+	}
+
+	// An enforced install takes a valid token from any Host.
+	tokens := auth.NewMemStore()
+	token, tok, err := auth.New("ops")
+	if err != nil {
+		t.Fatalf("auth.New() error = %v", err)
+	}
+	if err := tokens.Save(context.Background(), tok); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	enforced := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithTokens(tokens)).Handler()
+	bearer := http.Header{"Authorization": {"Bearer " + token}, "X-Forwarded-For": {"203.0.113.9"}}
+	if got := get(enforced, "switchtender.example.com", bearer); got != http.StatusOK {
+		t.Errorf("enforced install with a valid token and a foreign host = %d, want 200", got)
+	}
+
+	// A read-only public server is read on its public name through its proxy.
+	public := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+		WithTokens(auth.NewMemStore()), WithReadOnly(true)).Handler()
+	if got := get(public, "demo.example.com", forwarded); got != http.StatusOK {
+		t.Errorf("read-only public read through its proxy = %d, want 200", got)
 	}
 }
