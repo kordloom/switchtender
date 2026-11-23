@@ -154,7 +154,7 @@ func TestMountSetDeduplicatesAndFailsClosed(t *testing.T) {
 	t.Parallel()
 	m := newMountSet()
 	for _, path := range []string{"", "/srv/checkout", "/srv/checkout", "/srv/other"} {
-		if err := m.add(path, true); err != nil {
+		if err := m.add(path, true, false); err != nil {
 			t.Fatalf("add(%q) error = %v", path, err)
 		}
 	}
@@ -165,7 +165,7 @@ func TestMountSetDeduplicatesAndFailsClosed(t *testing.T) {
 
 	// A writable mount drops the read-only suffix, which is what a Terraform working directory needs.
 	rw := newMountSet()
-	if err := rw.add("/srv/infra", false); err != nil {
+	if err := rw.add("/srv/infra", false, false); err != nil {
 		t.Fatalf("add() error = %v", err)
 	}
 	if got := strings.Join(rw.args(), " "); got != "-v /srv/infra:/srv/infra" {
@@ -174,7 +174,7 @@ func TestMountSetDeduplicatesAndFailsClosed(t *testing.T) {
 
 	// A refused path is not recorded, so nothing downstream can mount it anyway.
 	blocked := newMountSet()
-	if err := blocked.add("/etc/shadow", true); !errors.Is(err, ErrForbiddenMount) {
+	if err := blocked.add("/etc/shadow", true, false); !errors.Is(err, ErrForbiddenMount) {
 		t.Errorf("add(/etc/shadow) error = %v, want ErrForbiddenMount", err)
 	}
 	if len(blocked.args()) != 0 {

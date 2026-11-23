@@ -32,6 +32,9 @@ type planMount struct {
 	path string
 	// writable mounts the path read-write instead of read-only.
 	writable bool
+	// named marks a path the run named rather than one the dispatcher staged, which is judged
+	// against every protected path with no pass inside the run-files root.
+	named bool
 }
 
 // buildContainerPlan produces the container plan for spec, writing any temp file the tool needs and
@@ -104,10 +107,14 @@ func toolContainerPlan(spec Spec) (containerPlan, func(), error) {
 			limitCleanup()
 			return containerPlan{}, noCleanup, err
 		}
+		// With no project the playbook and the inventory are paths the run named on this host. With
+		// one they were contained in the checkout, and a stored inventory is a file the dispatcher
+		// wrote, so neither is.
+		noProject := spec.Dir == ""
 		mounts := []planMount{
 			{path: spec.Dir},
-			{path: filepath.Dir(spec.Playbook)},
-			{path: spec.Inventory},
+			{path: filepath.Dir(spec.Playbook), named: noProject},
+			{path: spec.Inventory, named: noProject && !spec.InventoryStaged},
 			{path: spec.PrivateKeyPath},
 		}
 		for _, vp := range spec.VaultPasswords {
@@ -152,7 +159,9 @@ func toolContainerPlan(spec Spec) (containerPlan, func(), error) {
 		// executor chose, never input, and each is quoted for the shell.
 		script := bin + " " + shellJoin(terraformInitArgs(spec.ModulesInstalled)) + " && " +
 			bin + " " + shellJoin(terraformActionArgs(spec))
-		mounts := []planMount{{path: dir, writable: true}}
+		// With no project the directory is a path the run named on this host. With one it was
+		// contained in the checkout by toolWorkDir.
+		mounts := []planMount{{path: dir, writable: true, named: spec.Dir == ""}}
 		// A plan saves its plan file into the run's private directory and an apply reads one from it,
 		// so that directory's plan location is mounted for the tool: writable for the plan that saves
 		// it, read-only for the apply that carries it out.
@@ -235,7 +244,7 @@ func buildShowPlan(spec Spec, planFile string) (containerPlan, func(), error) {
 	if tool == run.ToolOpenTofu {
 		bin = "tofu"
 	}
-	mounts := []planMount{{path: dir}, {path: planFile}}
+	mounts := []planMount{{path: dir, named: spec.Dir == ""}, {path: planFile}}
 	for _, f := range spec.CredentialFiles {
 		mounts = append(mounts, planMount{path: f})
 	}

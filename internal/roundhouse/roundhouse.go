@@ -169,6 +169,10 @@ type Spec struct {
 	// containerized run mounts an in-memory filesystem at the same path inside the container, so what
 	// the tool writes there stays in the container's memory. Empty keeps the temporary directory.
 	RunDir string
+	// InventoryStaged reports that Inventory is a file the dispatcher wrote for this run, a stored
+	// inventory, rather than a path the run named. A named inventory is judged against every
+	// protected path when it is mounted into an image.
+	InventoryStaged bool
 	// RunFilesRoot is the private root every run directory lives under. A containerized run may bind
 	// mount a path inside it even where the root sits under a directory the mount guard otherwise
 	// refuses, such as a systemd runtime directory under /run, because the root holds nothing but
@@ -256,16 +260,8 @@ type pluginCache struct {
 // container. It removes the persistent implant, which is the version of this that survives restarts
 // and shows up in no log.
 func (p *pluginCache) ensure() (string, error) {
-	p.once.Do(func() {
-		dir, err := os.MkdirTemp("", "switchtender-plugin-")
-		if err != nil {
-			p.err = err
-			return
-		}
-		p.dir = dir
-	})
-	if p.err != nil {
-		return "", p.err
+	if _, err := p.create(); err != nil {
+		return "", err
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -287,6 +283,21 @@ func (p *pluginCache) ensure() (string, error) {
 	return p.dir, nil
 }
 
+// create makes the directory that holds the callback plugin, once, and returns it. A server makes it
+// at start so the directory exists to be protected before any run could mount it, where ensure alone
+// made it on the first Ansible run.
+func (p *pluginCache) create() (string, error) {
+	p.once.Do(func() {
+		dir, err := os.MkdirTemp("", "switchtender-plugin-")
+		if err != nil {
+			p.err = err
+			return
+		}
+		p.dir = dir
+	})
+	return p.dir, p.err
+}
+
 // log writes a line about the plugin copy. It goes to standard error rather than through a logger
 // because the cache is shared by both runners and holds no logger of its own, and this is a line an
 // operator greps for after the fact rather than something a caller handles.
@@ -305,6 +316,9 @@ type ansibleRunner struct {
 	baseEnv []string
 	// plugin materializes the callback plugin on first use.
 	plugin pluginCache
+	// protected are the executor's own paths, handed to the container runner. Nil when none were
+	// registered.
+	protected *ProtectedPaths
 }
 
 // Option configures an ansibleRunner.
@@ -435,6 +449,13 @@ func NewSelectiveRunner(allowContainer bool, runtime, pullPolicy string, require
 func newToolRouter(allowContainer bool, runtime, pullPolicy string, requireDigest bool,
 	limits ContainerLimits, opts ...Option) *toolRouter {
 	host := newAnsibleRunner(opts...)
+	container := newContainerRunner(runtime, pullPolicy, requireDigest, host.baseEnv, &host.plugin, limits)
+	container.protected = host.protected
+	if host.protected != nil {
+		// Made now so the directory exists to be judged before the first run. A failure here is
+		// met again when a container run checks its mounts, which then refuses the run.
+		_, _ = host.plugin.create()
+	}
 	return &toolRouter{
 		ansibleRunner:  host,
 		bash:           newBashRunner(host.baseEnv),
@@ -443,7 +464,7 @@ func newToolRouter(allowContainer bool, runtime, pullPolicy string, requireDiges
 		python:         newPythonRunner(host.baseEnv),
 		powershell:     newPwshRunner(host.baseEnv),
 		golang:         newGoRunner(host.baseEnv),
-		container:      newContainerRunner(runtime, pullPolicy, requireDigest, host.baseEnv, &host.plugin, limits),
+		container:      container,
 		allowContainer: allowContainer,
 	}
 }
