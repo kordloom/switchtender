@@ -442,6 +442,7 @@ jobs:
         env:
           SWITCHTENDER_REQUIRE_FULL_SUITE: "1"
           SWITCHTENDER_ANSIBLE_CORE: ${{ matrix.ansible-core }}
+          SWITCHTENDER_PYYAML: ${{ matrix.pyyaml }}
         run: go test -count=1 -run 'TestConformance' ./internal/inventory/
       # A secret survey answer is written to the vars file marked as text Ansible never renders. This
       # is the proof that every pinned release honors the mark: an answer holding a lookup prints as

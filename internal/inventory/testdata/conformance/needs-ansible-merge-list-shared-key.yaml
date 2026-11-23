@@ -1,0 +1,12 @@
+# A merge key listing two maps that both set size. PyYAML 6.0.3 gives w1 the first map's size and
+# 6.0.4 the second's, so the native engine leaves this to the user's own Ansible.
+base_vars: &base
+  region: us-east-1
+  size: small
+extra_vars: &extra
+  size: large
+  backup: true
+all:
+  hosts:
+    w1:
+      <<: [*extra, *base]

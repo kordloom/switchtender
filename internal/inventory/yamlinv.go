@@ -348,6 +348,7 @@ func (b *yamlBuilder) flatten(n *yaml.Node, depth int) ([][2]*yaml.Node, error) 
 		return nil, needsAnsible("the YAML merges too deeply")
 	}
 	var merged, own [][2]*yaml.Node
+	var sources [][][2]*yaml.Node
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		k, v := n.Content[i], n.Content[i+1]
 		if !isMergeKey(k) {
@@ -362,6 +363,7 @@ func (b *yamlBuilder) flatten(n *yaml.Node, depth int) ([][2]*yaml.Node, error) 
 				return nil, err
 			}
 			merged = append(merged, sub...)
+			sources = append(sources, sub)
 		case yaml.SequenceNode:
 			var parts [][][2]*yaml.Node
 			for _, c := range target.Content {
@@ -378,11 +380,51 @@ func (b *yamlBuilder) flatten(n *yaml.Node, depth int) ([][2]*yaml.Node, error) 
 			for i := len(parts) - 1; i >= 0; i-- {
 				merged = append(merged, parts[i]...)
 			}
+			sources = append(sources, parts...)
 		default:
 			return nil, invalidf("a merge key's value is not a mapping or a list of mappings")
 		}
 	}
+	if err := b.sharedMergeKey(sources); err != nil {
+		return nil, err
+	}
 	return append(merged, own...), nil
+}
+
+// sharedMergeKey returns ErrNeedsAnsible naming the key when two maps merged into one mapping set
+// the same key. PyYAML releases disagree on which of them wins: under 6.0.3 the first map listed in
+// a merge key wins and under 6.0.4 another can, and ansible-core leaves PyYAML unpinned, so the host
+// gets whichever value the user's own Ansible picks. Keys are compared as constructed, so yes and
+// true are one key. A key the mapping sets itself still wins over every merged one in every release,
+// so it is not compared.
+func (b *yamlBuilder) sharedMergeKey(sources [][][2]*yaml.Node) error {
+	if len(sources) < 2 {
+		return nil
+	}
+	seen := map[string]bool{}
+	for _, src := range sources {
+		mine := map[string]bool{}
+		for _, p := range src {
+			k, err := b.key(p[0])
+			if err != nil {
+				return err
+			}
+			id := fmt.Sprintf("%T:%v", k, k)
+			if mine[id] {
+				continue
+			}
+			mine[id] = true
+			if seen[id] {
+				return needsAnsible(fmt.Sprintf("a merge key lists maps that both set %s, and PyYAML "+
+					"releases pick different winners. Write the key once, on the host or in one map",
+					resolveAlias(p[0]).Value))
+			}
+		}
+		for id := range mine {
+			seen[id] = true
+		}
+	}
+	return nil
 }
 
 // key constructs a mapping key. A plain = is the string "=" as a key, as PyYAML reads it there.

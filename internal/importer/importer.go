@@ -320,6 +320,7 @@ func (p *Plan) parseExtraVars(raw, field string) (map[string]any, error) {
 		return nil, err
 	}
 	resolveYAML11Bools(&node)
+	p.warnSharedMergeKeys(&node, field)
 	var out map[string]any
 	if err := node.Decode(&out); err != nil {
 		return nil, err
@@ -328,6 +329,86 @@ func (p *Plan) parseExtraVars(raw, field string) (map[string]any, error) {
 		return nil, nil
 	}
 	return out, nil
+}
+
+// warnSharedMergeKeys warns once for each key that two maps listed under one merge key both set,
+// naming the field, the key, and the value the import stored. PyYAML releases disagree on which map
+// wins, so the value AWX or Ansible used depends on the release it ran, and the decoder here keeps
+// the first map's value. The warning says to set the key on the host itself, which every release
+// reads the same way.
+func (p *Plan) warnSharedMergeKeys(n *yaml.Node, field string) {
+	seen := map[*yaml.Node]bool{}
+	var walk func(*yaml.Node)
+	walk = func(n *yaml.Node) {
+		if n == nil || seen[n] {
+			return
+		}
+		seen[n] = true
+		if n.Kind == yaml.AliasNode {
+			walk(n.Alias)
+			return
+		}
+		if n.Kind == yaml.MappingNode {
+			p.warnMergeSources(n, field)
+		}
+		for _, c := range n.Content {
+			walk(c)
+		}
+	}
+	walk(n)
+}
+
+// warnMergeSources warns for each key two of mapping n's merged maps set.
+func (p *Plan) warnMergeSources(n *yaml.Node, field string) {
+	var sources []*yaml.Node
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		k := n.Content[i]
+		quoted := k.Style&(yaml.SingleQuotedStyle|yaml.DoubleQuotedStyle) != 0
+		if k.Kind != yaml.ScalarNode || k.Value != "<<" || quoted {
+			continue
+		}
+		v := n.Content[i+1]
+		for v.Kind == yaml.AliasNode && v.Alias != nil {
+			v = v.Alias
+		}
+		items := []*yaml.Node{v}
+		if v.Kind == yaml.SequenceNode {
+			items = v.Content
+		}
+		for _, it := range items {
+			for it.Kind == yaml.AliasNode && it.Alias != nil {
+				it = it.Alias
+			}
+			if it.Kind == yaml.MappingNode {
+				sources = append(sources, it)
+			}
+		}
+	}
+	if len(sources) < 2 {
+		return
+	}
+	first := map[string]string{}
+	warned := map[string]bool{}
+	for _, src := range sources {
+		for i := 0; i+1 < len(src.Content); i += 2 {
+			k, v := src.Content[i], src.Content[i+1]
+			if k.Kind != yaml.ScalarNode || k.Value == "<<" {
+				continue
+			}
+			stored, ok := first[k.Value]
+			if !ok {
+				first[k.Value] = v.Value
+				continue
+			}
+			if warned[k.Value] {
+				continue
+			}
+			warned[k.Value] = true
+			p.warn("%s: a merge key lists maps that both set %s, and PyYAML releases pick different "+
+				"winners. Set %s on the host itself. The import stored %s, the first map's value.",
+				field, quoteName(k.Value), quoteName(k.Value), quoteName(stored))
+		}
+	}
 }
 
 // yaml11Bools are the plain scalars PyYAML reads as booleans and YAML 1.2 reads as strings.
