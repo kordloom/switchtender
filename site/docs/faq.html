@@ -137,7 +137,7 @@
    "name": "Can an AI agent operate SwitchTender?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Yes, through the API, holding one credential: a token bound to an operator account. The agent submits and manages runs like any operator, every mutation it makes is chained before it executes, and a run held for approval waits for a human admin, since an operator token cannot approve. Every run an agent token asks for is held that way by default, its dry runs included, and its Terraform or OpenTofu apply is held twice: before anything plans, and again for the apply its plan proposes. A rule with effect: exempt lifts the hold for routine work, and one that names the agent's actor label must also name the account its token is bound to, as agent runs are held by default describes. Run an AI agent through the gate covers the setup."
+    "text": "Yes, through the API, holding one credential: a token bound to an operator account. The agent submits and manages runs like any operator, every mutation it makes is chained before it executes, and a run held for approval waits for a human admin, since an operator token cannot approve. Every run an agent token asks for is held that way by default, its dry runs included, and its Terraform or OpenTofu apply is held twice: before anything plans, and again for the apply its plan proposes. A rule with effect: exempt lifts the hold for routine work saved as a template the agent launches, never for a run the agent composed itself, and one that names the agent's actor label must also name the account its token is bound to, as agent runs are held by default describes. Run an AI agent through the gate covers the setup."
    }
   },
   {
@@ -370,7 +370,8 @@ submits and manages runs like any operator, every mutation it makes is chained b
 and a run held for approval waits for a human admin, since an operator token cannot approve. Every
 run an agent token asks for is held that way by default, its dry runs included, and its Terraform or
 OpenTofu apply is held twice: before anything plans, and again for the apply its plan proposes. A
-rule with <code>effect: exempt</code> lifts the hold for routine work, and one that names the agent's <code>actor</code>
+rule with <code>effect: exempt</code> lifts the hold for routine work saved as a template the agent launches,
+never for a run the agent composed itself, and one that names the agent's <code>actor</code>
 label must also name the <code>account</code> its token is bound to, as <a href="/docs/policy#agent-runs-are-held-by-default">agent runs are held by
 default</a> describes. <a href="/docs/agents">Run an AI agent through the
 gate</a> covers the setup.</p>
