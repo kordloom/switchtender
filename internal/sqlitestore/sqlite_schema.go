@@ -122,6 +122,9 @@ CREATE TABLE IF NOT EXISTS runs (
 	-- Whether a Terraform or OpenTofu apply's own submission asked for approval, so the apply its
 	-- plan proposes is held. Set when the run is created and never cleared.
 	approval_requested INTEGER NOT NULL DEFAULT 0,
+	-- Set when an admin in person named the paths this row runs, so a run in an execution image may
+	-- take them from the control node rather than from a project.
+	paths_by_admin INTEGER NOT NULL DEFAULT 0,
 	-- The username of the account the requesting credential is bound to, which a policy's account
 	-- criterion matches. Copied to every run derived from the request.
 	account TEXT NOT NULL DEFAULT '',
@@ -339,6 +342,9 @@ CREATE TABLE IF NOT EXISTS schedules (
 	-- fire whose inventory matched no hosts is skipped rather than failed.
 	last_skip     TEXT NOT NULL DEFAULT '',
 	skipped_fires INTEGER NOT NULL DEFAULT 0,
+	-- Set when an admin in person named the paths this row runs, so a run in an execution image may
+	-- take them from the control node rather than from a project.
+	paths_by_admin INTEGER NOT NULL DEFAULT 0,
 	-- The occurrence a claim took for a fire whose run is not yet known to exist, and when it was
 	-- marked, by the database clock in Unix milliseconds. A sweep fires it again once it has been
 	-- marked too long, so a server that stops mid-fire leaves the occurrence late rather than lost.
@@ -423,7 +429,10 @@ CREATE TABLE IF NOT EXISTS templates (
 	allow_callbacks INTEGER NOT NULL DEFAULT 0,
 	host_config_key TEXT NOT NULL DEFAULT '',
 	callback_limit TEXT NOT NULL DEFAULT '',
-	awx_callback   INTEGER NOT NULL DEFAULT 0
+	awx_callback   INTEGER NOT NULL DEFAULT 0,
+	-- Set when an admin in person named the paths this row runs, so a run in an execution image may
+	-- take them from the control node rather than from a project.
+	paths_by_admin INTEGER NOT NULL DEFAULT 0
 );
 -- awx_callback_bindings ties an AWX job template id to the template an import created from that AWX
 -- job template, so a host's boot script that still posts to AWX's callback address reaches it. Only
