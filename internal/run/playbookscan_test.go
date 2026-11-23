@@ -565,6 +565,142 @@ func TestTheScanDeniesEveryLookupItCannotClear(t *testing.T) {
 	}
 }
 
+// TestTheScanDeniesConnectionVariables covers a play, role, task, or set_fact that sets an Ansible
+// connection or interpreter variable. Each names a program the controller starts, under --check as
+// much as without it, so the dry run is not change free. The variables that only say who and where
+// stay allowed.
+func TestTheScanDeniesConnectionVariables(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Files          map[string]string
+		WantChangeFree bool
+		WantFinding    string
+	}{{ // Test 0: A play var naming the shell.
+		Files: map[string]string{"site.yml": "- hosts: all\n  vars:\n    ansible_shell_executable: /tmp/sh\n" +
+			"  tasks:\n    - ansible.builtin.ping:\n"},
+		WantFinding: `sets "ansible_shell_executable"`,
+	}, { // Test 1: A task var naming the interpreter.
+		Files: map[string]string{"site.yml": checkPlay + "    - name: Probe\n      ansible.builtin.ping:\n" +
+			"      vars:\n        ansible_python_interpreter: /tmp/py\n"},
+		WantFinding: `task "Probe" sets "ansible_python_interpreter"`,
+	}, { // Test 2: A fact set for the tasks after it.
+		Files: map[string]string{"site.yml": checkPlay + "    - name: Switch\n      ansible.builtin.set_fact:\n" +
+			"        ansible_connection: local\n"},
+		WantFinding: `task "Switch" sets "ansible_connection"`,
+	}, { // Test 3: A role parameter.
+		Files: map[string]string{
+			"site.yml":                 "- hosts: all\n  roles:\n    - role: web\n      ansible_ssh_common_args: -o x\n",
+			"roles/web/tasks/main.yml": "- ansible.builtin.ping:\n",
+		},
+		WantFinding: `role "web" sets "ansible_ssh_common_args"`,
+	}, { // Test 4: Control, who and where on the play.
+		Files: map[string]string{"site.yml": "- hosts: all\n  vars:\n    ansible_user: deploy\n" +
+			"    ansible_port: 2222\n  tasks:\n    - ansible.builtin.ping:\n"},
+		WantChangeFree: true,
+	}, { // Test 5: Control, an ordinary fact.
+		Files:          map[string]string{"site.yml": checkPlay + "    - ansible.builtin.set_fact:\n        tier: web\n"},
+		WantChangeFree: true,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			scan := scanned(t, test.Files, "site.yml").DryRunScan()
+			if diff := cmp.Diff(test.WantChangeFree, scan.ChangeFree()); diff != "" {
+				t.Errorf("ChangeFree() mismatch (-want +got):\n%s\nfindings=%q", diff, scan.Findings)
+			}
+			if test.WantFinding != "" && !strings.Contains(strings.Join(scan.Findings, "\n"), test.WantFinding) {
+				t.Errorf("findings %q, want one naming %q", scan.Findings, test.WantFinding)
+			}
+		})
+	}
+}
+
+// TestTheScanReadsVariableFilesAndTemplates covers the variable files and templates a playbook's
+// tasks reach. A variable is templated on the controller where a task uses it, and a template is
+// rendered whole there, so a lookup in a role's defaults, a vars_files entry, group_vars, or a
+// template source runs under --check as much as one written in the task. The scan read only tasks
+// and play vars, so each of these was classified change free. A file it cannot read as plain data
+// leaves the scan incomplete.
+//
+//nolint:funlen // Test function.
+func TestTheScanReadsVariableFilesAndTemplates(t *testing.T) {
+	t.Parallel()
+	const lookup = "\"{{ lookup('pipe', 'id') }}\""
+	cleanSite := "- hosts: all\n  roles:\n    - web\n"
+	webTasks := "- ansible.builtin.debug:\n    msg: \"{{ banner }}\"\n"
+	manyGroupVars := map[string]string{"site.yml": checkPlay + "    - ansible.builtin.ping:\n"}
+	for i := range maxScanFiles + 4 {
+		manyGroupVars[fmt.Sprintf("group_vars/g%03d.yml", i)] = "tier: web\n"
+	}
+	tests := []struct {
+		Files          map[string]string
+		WantChangeFree bool
+		WantFinding    string
+		WantUnread     string
+	}{{ // Test 0: A role's defaults set the variable a task prints to a pipe lookup.
+		Files: map[string]string{"site.yml": cleanSite, "roles/web/tasks/main.yml": webTasks,
+			"roles/web/defaults/main.yml": "banner: " + lookup + "\n"},
+		WantFinding: `roles/web/defaults/main.yml: a variable file calls the lookup plugin "pipe"`,
+	}, { // Test 1: A vars_files entry holds the lookup.
+		Files: map[string]string{"site.yml": "- hosts: all\n  vars_files:\n    - vars/extra.yml\n" +
+			"  tasks:\n    - ansible.builtin.debug:\n        msg: \"{{ banner }}\"\n",
+			"vars/extra.yml": "banner: " + lookup + "\n"},
+		WantFinding: `vars/extra.yml: a variable file calls the lookup plugin "pipe"`,
+	}, { // Test 2: A template task's source holds the lookup.
+		Files: map[string]string{"site.yml": cleanSite,
+			"roles/web/tasks/main.yml":    "- ansible.builtin.template:\n    src: motd.j2\n    dest: /etc/motd\n",
+			"roles/web/templates/motd.j2": "Welcome {{ lookup('pipe', 'id') }}\n"},
+		WantFinding: `roles/web/templates/motd.j2: a template calls the lookup plugin "pipe"`,
+	}, { // Test 3: group_vars that set the interpreter.
+		Files: map[string]string{"site.yml": checkPlay + "    - ansible.builtin.ping:\n",
+			"group_vars/all.yml": "ansible_python_interpreter: /tmp/py\n"},
+		WantFinding: `group_vars/all.yml: a variable file sets "ansible_python_interpreter"`,
+	}, { // Test 4: A vault-encrypted group_vars file cannot be read.
+		Files: map[string]string{"site.yml": checkPlay + "    - ansible.builtin.ping:\n",
+			"group_vars/all/vault.yml": "$ANSIBLE_VAULT;1.1;AES256\n6162636465\n"},
+		WantUnread: `variable file "group_vars/all/vault.yml" (vault encrypted`,
+	}, { // Test 5: One vault-encrypted value in a plain file cannot be read either.
+		Files: map[string]string{"site.yml": checkPlay + "    - ansible.builtin.ping:\n",
+			"host_vars/web1.yml": "db_password: !vault |\n  $ANSIBLE_VAULT;1.1;AES256\n  6162\n"},
+		WantUnread: `variable file "host_vars/web1.yml" (holds a vault-encrypted value`,
+	}, { // Test 6: Past the read cap the rest is unread.
+		Files:      manyGroupVars,
+		WantUnread: "past the 256 files",
+	}, { // Test 7: An include_vars target holds the lookup.
+		Files: map[string]string{"site.yml": checkPlay + "    - ansible.builtin.include_vars: more.yml\n",
+			"vars/more.yml": "x: " + lookup + "\n"},
+		WantFinding: `vars/more.yml: a variable file calls the lookup plugin "pipe"`,
+	}, { // Test 8: Control, a plain with_items playbook with a plain role.
+		Files: map[string]string{"site.yml": cleanSite,
+			"roles/web/tasks/main.yml": "- ansible.builtin.debug:\n    msg: \"{{ item }}\"\n" +
+				"  with_items:\n    - one\n    - two\n",
+			"roles/web/defaults/main.yml": "banner: hello\n",
+			"roles/web/templates/motd.j2": "Welcome {{ banner }}\n"},
+		WantChangeFree: true,
+	}, { // Test 9: Control, the word query in a name and lookup in a comment.
+		Files: map[string]string{"site.yml": checkPlay + "    - ansible.builtin.ping:\n",
+			"group_vars/all.yml": "# lookup the timeout below\nquery_timeout: 30\n" +
+				"ansible_user: deploy\n"},
+		WantChangeFree: true,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			scan := scanned(t, test.Files, "site.yml").DryRunScan()
+			if diff := cmp.Diff(test.WantChangeFree, scan.ChangeFree()); diff != "" {
+				t.Errorf("ChangeFree() mismatch (-want +got):\n%s\nfindings=%q\nunread=%q", diff,
+					scan.Findings, scan.Unread)
+			}
+			if test.WantFinding != "" && !strings.Contains(strings.Join(scan.Findings, "\n"), test.WantFinding) {
+				t.Errorf("findings %q, want one naming %q", scan.Findings, test.WantFinding)
+			}
+			if test.WantUnread != "" && !strings.Contains(strings.Join(scan.Unread, "\n"), test.WantUnread) {
+				t.Errorf("unread %q, want one naming %q", scan.Unread, test.WantUnread)
+			}
+		})
+	}
+}
+
 // TestTheScanDeniesWhatTheTreeLoads covers what Ansible loads from the tree without any playbook
 // naming it. A plugin directory, a module directory, an ansible.cfg, or a requirements file that
 // installs collections can bring code onto the controller that no task names, so wherever one sits

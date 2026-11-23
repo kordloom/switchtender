@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -365,15 +364,19 @@ func (w *dagWalk) settle(i int, status run.Status, out map[string]any) {
 // each step; a transitive dependency's outputs are layered on top in declaration order, so a
 // published output overrides a parent var of the same name and the result does not depend on which
 // branch finished first.
-func (w *dagWalk) inputsFor(i int) map[string]any {
-	vars := baseStepVars(w.parent)
+//
+// from names the step that published each key, so outputRefusal can judge what a step published
+// apart from what the workflow was approved with. A finished step's outputs read back from its
+// stored row on a resume land here the same way, so a resumed walk is judged as a fresh one is.
+func (w *dagWalk) inputsFor(i int) (vars map[string]any, from map[string]string) {
+	vars, from = baseStepVars(w.parent), map[string]string{}
 	for j := range w.steps {
 		if !w.closures[i][j] || len(w.outputs[j]) == 0 {
 			continue
 		}
-		maps.Copy(vars, w.outputs[j])
+		layerOutputs(vars, from, w.steps[j].Name, w.outputs[j])
 	}
-	return vars
+	return vars, from
 }
 
 // depSettled reports whether the step at j is finished for good.
@@ -491,11 +494,15 @@ func (w *dagWalk) launch(ctx context.Context, i int) {
 		w.refuse(i, RefusalText(err))
 		return
 	}
+	step := w.steps[i]
+	vars, from := w.inputsFor(i)
+	if reason := outputRefusal(step, vars, from); reason != "" {
+		w.refuse(i, reason)
+		return
+	}
 	w.states[i] = stepRunning
 	w.running++
 	idx := i
-	step := w.steps[i]
-	vars := w.inputsFor(i)
 	go func() {
 		status, published, reason := w.d.runStepAttempts(ctx, w.parent, step, idx, vars, roots)
 		w.done <- stepResult{idx: idx, status: status, outputs: published, reason: reason}

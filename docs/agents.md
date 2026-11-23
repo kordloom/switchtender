@@ -255,6 +255,10 @@ The person who decides is told when the run is held: the chat channels and webho
 sends finished runs to also carry each hold, naming the rule that held it and who asked, and so
 does email when `--notify-on` is `finish`, since an install set to email failures alone is not
 sent approval requests it never asked for.
+An agent cannot name who is mailed or texted: a run it submits with an email or Twilio target is
+refused with 403, and so is its rerun of a person's run that carries one. Its notices go to the
+targets an admin saved, on a template or as named targets. One email target lists at most ten
+addresses, for every caller.
 The same channels carry how it ended, whether it ran, was rejected, or was canceled while it waited.
 They decide on the run's page in the interface, or with `POST /v1/runs/{id}/approve` or
 `POST /v1/runs/{id}/reject` under an admin token, so a chat bot or a script can carry the decision

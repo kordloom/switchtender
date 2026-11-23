@@ -292,6 +292,8 @@ func (s *playbookScan) scanPlays(file string, plays []map[string]any, depth int)
 				s.controllerExec(file, playLabel(play), map[string]any{key: play[key]})
 			}
 		}
+		s.connectionVars(file, playLabel(play), play["vars"])
+		s.followVarsFiles(basedir, play["vars_files"], depth+1)
 		for _, key := range sortedKeys(play) {
 			// An imported playbook is a play-level entry naming another playbook, resolved against
 			// the directory of the one importing it.
@@ -304,6 +306,8 @@ func (s *playbookScan) scanPlays(file string, plays []map[string]any, depth int)
 		for _, entry := range asList(play["roles"]) {
 			if args, ok := entry.(map[string]any); ok {
 				s.checkMode(file, label("role", roleName(entry)), args)
+				s.connectionVars(file, label("role", roleName(entry)), args)
+				s.connectionVars(file, label("role", roleName(entry)), args["vars"])
 			}
 			s.followRole(ctx, "role", roleName(entry), "", "")
 		}
@@ -338,6 +342,16 @@ func (s *playbookScan) scanTree() {
 		}
 		if why := treeLoads(name, base, d); why != "" {
 			s.treeFinding(name, why)
+		}
+		// Variables beside an inventory or a playbook load with nothing naming them, and a template
+		// source is rendered whole on the controller, so both are read wherever they sit.
+		if d.Type().IsRegular() {
+			switch {
+			case inVarsTree(name) && varFileName(name):
+				s.judgeVarFile(name)
+			case inTemplatesDir(name):
+				s.judgeTemplate(name)
+			}
 		}
 		return nil
 	})
@@ -450,6 +464,8 @@ func (s *playbookScan) followRole(ctx scanContext, how, name, tasksFrom, handler
 			depth: ctx.depth + 1}
 		s.scanRoleFile(inner, what, path.Join(dir, "tasks"), tasksFrom)
 		s.scanRoleFile(inner, what, path.Join(dir, "handlers"), handlersFrom)
+		s.judgeVarDir(path.Join(dir, "defaults"))
+		s.judgeVarDir(path.Join(dir, "vars"))
 		s.followDependencies(inner, what, dir)
 	}
 }
@@ -616,6 +632,7 @@ func (s *playbookScan) scanTask(ctx scanContext, task map[string]any) {
 	// Every value on the task, its module arguments, its vars, and its loop are templated on the
 	// controller, so a controller-side lookup anywhere in it runs for real under --check.
 	s.controllerExec(ctx.file, taskLabel(task), task)
+	s.connectionVars(ctx.file, taskLabel(task), task["vars"])
 	for _, key := range sortedKeys(task) {
 		if taskKeywords[key] {
 			continue
@@ -633,6 +650,14 @@ func (s *playbookScan) scanTask(ctx scanContext, task map[string]any) {
 			s.followRole(ctx, module, stringArg(args, "name"), stringArg(args, "tasks_from"),
 				stringArg(args, "handlers_from"))
 			continue
+		case "include_vars":
+			s.followIncludeVars(ctx, value)
+			continue
+		case "template", "win_template":
+			s.followTemplate(ctx, value)
+		case "set_fact":
+			// set_fact runs under --check, so a fact it names takes effect for the tasks after it.
+			s.connectionVars(ctx.file, taskLabel(task), moduleArgs(value))
 		case "command", "shell", "raw", "script":
 			// The module's own text is a command, so the shared command scanner judges it. A third
 			// private copy of that judgment is how the graders drifted apart the first time.
@@ -767,6 +792,28 @@ func qPassedOn(before, next string) bool {
 		return false
 	}
 	return next == "" || strings.ContainsAny(next[:1], ")]}%|,.[=")
+}
+
+// connectionVars records a finding for each key of vars, a mapping of variables a play, role,
+// task, or set_fact defines, that ConnectionVar names. Anything that is not a mapping sets no
+// variable by name and is left to the other passes.
+func (s *playbookScan) connectionVars(file, where string, vars any) {
+	m, ok := vars.(map[string]any)
+	if !ok {
+		return
+	}
+	for _, key := range sortedKeys(m) {
+		if !ConnectionVar(key) {
+			continue
+		}
+		finding := util.Clip(util.SafeText(file), 2*maxScanLabel) + ": " + where + " sets " +
+			strconv.Quote(util.Clip(util.SafeText(key), maxScanLabel)) + ", " + connectionVarWhy
+		if s.listed[finding] {
+			continue
+		}
+		s.listed[finding] = true
+		s.out.Forced = append(s.out.Forced, finding)
+	}
 }
 
 // forceControllerExec records one controller-execution finding, deduped like every other, so a

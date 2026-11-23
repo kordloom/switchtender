@@ -244,7 +244,7 @@ Yes, and that sequence is the reason pipelines exist here rather than a workarou
 A pipeline is an ordered set of steps or a dependency graph with parallel branches, built on a
 drag-and-drop canvas or posted as JSON. Steps can mix tools freely, so a Terraform plan, an
 approval, and an Ansible play are three steps of one run. A failure skips exactly the steps that
-depended on it, and `set_stats` output flows to dependent steps as extra vars.
+depended on it, and `set_stats` output flows to dependent steps as extra vars. A value one step publishes reaches later steps as data. A value that holds template code, or a name that begins with `ansible_`, stops the workflow at that step.
 
 The approval is not a convention someone can skip. A policy decides which runs are held, the hold
 is enforced in the core, and the approval is bound to the exact plan that was reviewed, so a run

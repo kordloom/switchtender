@@ -222,7 +222,7 @@ A step can retry a set number of times. Each attempt is a fresh child run, so ev
 log and matrix and none overwrite each other. Retries run back to back with no built-in delay, so a
 step that should pause between attempts sets that in its own logic. Values a step publishes with
 `set_stats` flow to the steps that depend on it, merged in dependency order, so a later step reads
-what an earlier one produced.
+what an earlier one produced. A value one step publishes reaches later steps as data. A value that holds template code, or a name that begins with `ansible_`, stops the workflow at that step.
 
 ## Cancellation reaches the whole tree
 

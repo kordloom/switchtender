@@ -16,6 +16,7 @@ import (
 	"github.com/kordloom/switchtender/internal/invsource"
 	"github.com/kordloom/switchtender/internal/notification"
 	"github.com/kordloom/switchtender/internal/project"
+	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
 )
@@ -329,4 +330,79 @@ func TestAWXNotificationApplySealsTargets(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "notification targets not enabled") {
 		t.Errorf("Apply() with no notification store = %v, want a refusal before writing", err)
 	}
+}
+
+// TestAWXEmailListSplitsAtTheTargetCap pins an AWX email template whose recipients pass the ten an
+// email target may list. It comes across as several targets that each pass validation and together
+// mail every address, where one target would have failed the whole import.
+func TestAWXEmailListSplitsAtTheTargetCap(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Recipients []string
+		WantNames  []string
+		WantCount  []int
+	}{{ // Test 0: Twelve addresses become ten and two.
+		Recipients: mailList(0, 12),
+		WantNames:  []string{"big list (part 1 of 2)", "big list (part 2 of 2)"},
+		WantCount:  []int{10, 2},
+	}, { // Test 1: Exactly ten stays one target under its own name.
+		Recipients: mailList(0, 10),
+		WantNames:  []string{"big list"},
+		WantCount:  []int{10},
+	}, { // Test 2: An entry that itself lists addresses counts as each of them.
+		Recipients: append(mailList(0, 9), "x@example.com, y@example.com"),
+		WantNames:  []string{"big list (part 1 of 2)", "big list (part 2 of 2)"},
+		WantCount:  []int{10, 1},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			recipients, err := json.Marshal(test.Recipients)
+			if err != nil {
+				t.Fatalf("quote the recipients: %v", err)
+			}
+			export := `{"notification_templates": [{"name": "big list", "notification_type": "email",
+			 "notification_configuration": {"recipients": ` + string(recipients) + `}}]}`
+			plan, err := FromAWX([]byte(export), importNow)
+			if err != nil {
+				t.Fatalf("FromAWX() error = %v", err)
+			}
+			var names []string
+			var counts []int
+			seen := map[string]bool{}
+			for _, n := range plan.Notifications {
+				names = append(names, n.Name)
+				addrs := strings.Split(n.To, ", ")
+				counts = append(counts, len(addrs))
+				for _, a := range addrs {
+					seen[a] = true
+				}
+				if err := run.ValidateNotifyTarget(run.NotifyTarget{Kind: n.Kind, To: n.To}); err != nil {
+					t.Errorf("target %q does not validate: %v", n.Name, err)
+				}
+			}
+			if diff := cmp.Diff(test.WantNames, names); diff != "" {
+				t.Errorf("names (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(test.WantCount, counts); diff != "" {
+				t.Errorf("addresses per target (-want +got):\n%s", diff)
+			}
+			for _, r := range test.Recipients {
+				for _, a := range strings.Split(r, ", ") {
+					if !seen[a] {
+						t.Errorf("address %q was dropped", a)
+					}
+				}
+			}
+		})
+	}
+}
+
+// mailList returns the addresses u<from>@example.com through u<to-1>@example.com.
+func mailList(from, to int) []string {
+	var out []string
+	for i := from; i < to; i++ {
+		out = append(out, fmt.Sprintf("u%d@example.com", i))
+	}
+	return out
 }

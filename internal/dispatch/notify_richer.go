@@ -24,8 +24,14 @@ func (d *Dispatcher) notifyRicherTargets(r *run.Run, targets []run.NotifyTarget)
 		// recipient and never pages, texts, or annotates a dashboard. A skipped schedule fire is
 		// not an incident either, so it follows the same rule. An attention alert does report a
 		// problem, and only a target attached for it reaches here with a pager or text kind.
-		if ((r.Status == run.StatusPendingApproval && r.Attention == nil) || isSkip(r)) &&
-			t.Kind != run.NotifyEmail {
+		hold := r.Status == run.StatusPendingApproval && r.Attention == nil
+		if (hold || isSkip(r)) && t.Kind != run.NotifyEmail {
+			continue
+		}
+		// A hold mails a run's own recipients only when --notify-on asks for holds, the rule the
+		// server-wide recipients follow. Without it the hold mail went out on every install, so a run
+		// that named recipients was mailed to them before any person had looked at it.
+		if hold && d.emailOnFailureOnly {
 			continue
 		}
 		switch t.Kind {

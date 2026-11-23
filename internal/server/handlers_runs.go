@@ -239,6 +239,10 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		if req.Timeout > 0 {
 			opts = append(opts, run.WithTimeout(req.Timeout))
 		}
+		if agentNamesRecipients(r, req.Notifications) {
+			respondError(w, log, http.StatusForbidden, agentRecipientRefusal)
+			return
+		}
 		if err := run.ValidateNotifyTargets(req.Notifications); err != nil {
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
@@ -629,6 +633,30 @@ func rerunOptions(rn *run.Run) []run.SubmitOption {
 	return opts
 }
 
+// agentRecipientRefusal is the answer to an agent whose run would mail or text a recipient.
+const agentRecipientRefusal = "an agent cannot name mail or text recipients. Its notices go to the " +
+	"targets an admin saved."
+
+// agentNamesRecipients reports whether the caller is an agent and targets hold an email or Twilio
+// target, the two kinds whose recipient the target itself names.
+//
+// The server sends those through its own SMTP transport and Twilio account, so an agent that named
+// the recipient chose who the install mails, with the install's sender and the run's output, and a
+// hold mail went out before any person looked at the run. A chat or webhook target is not refused:
+// it names an address the agent could post to without the server.
+func agentNamesRecipients(r *http.Request, targets []run.NotifyTarget) bool {
+	a, ok := actorFrom(r.Context())
+	if !ok || !a.Agent {
+		return false
+	}
+	for _, t := range targets {
+		if t.Kind == run.NotifyEmail || t.Kind == run.NotifyTwilio {
+			return true
+		}
+	}
+	return false
+}
+
 // rerunRefusal reports why a finished run must not be replayed, or an empty string when it may be.
 //
 // The two cases are decisions rather than outcomes. A rejected run was denied by an approver, which
@@ -693,6 +721,13 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 		// the denied command ran from a one-click button on the denied run's own page.
 		if reason := rerunRefusal(rn); reason != "" {
 			respondError(w, log, http.StatusConflict, reason)
+			return
+		}
+		// A rerun replays the run's targets, so an agent rerunning a person's run that mails someone
+		// would send its own run's output to recipients it could not have named itself. A template
+		// launch's targets were saved by an admin, so a rerun of one replays only what an admin chose.
+		if rn.TemplateID == "" && agentNamesRecipients(r, rn.Notifications) {
+			respondError(w, log, http.StatusForbidden, agentRecipientRefusal)
 			return
 		}
 		// Access to the run is not enough to fire its spec again, and what re-execution requires is

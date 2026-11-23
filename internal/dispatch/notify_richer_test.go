@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -247,5 +249,84 @@ func TestPerTemplateEmailReachesTargetRecipient(t *testing.T) {
 			t.Fatalf("recipients = %v, want the template's list %v", got, want)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// sendToCounter counts SendTo calls, a run's own email targets, apart from the server-wide Send.
+type sendToCounter struct {
+	// mu guards to.
+	mu sync.Mutex
+	// to holds the recipients of each SendTo call.
+	to [][]string
+}
+
+// Send ignores the server-wide recipients' mail.
+func (c *sendToCounter) Send(context.Context, string, string) error { return nil }
+
+// SendTo records one send to a run's own recipients.
+func (c *sendToCounter) SendTo(_ context.Context, to []string, _, _ string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.to = append(c.to, append([]string(nil), to...))
+	return nil
+}
+
+// TestNotifyRicherHoldEmailFollowsNotifyOn holds a run that names an email target, under each
+// --notify-on setting. A hold mailed a run's own recipients on every install, where the server-wide
+// recipients hear of a hold only when the install asked for it. The failure row also shows that a
+// failed run still mails, so the setting gates holds and not the target.
+func TestNotifyRicherHoldEmailFollowsNotifyOn(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		OnFailureOnly bool
+		WantSends     int
+	}{{ // Test 0: failure, the default. The hold sends nothing.
+		OnFailureOnly: true, WantSends: 0,
+	}, { // Test 1: finish. The hold mails the target once.
+		OnFailureOnly: false, WantSends: 1,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			emailer := &sendToCounter{}
+			store := run.NewMemStore()
+			d := New(store, dispatchtest.OKRunner(), nil, WithPolicies(holdEverything(t)),
+				WithEmail(emailer, test.OnFailureOnly), WithNotifyClient(http.DefaultClient))
+			held, err := d.Submit(context.Background(), "", "", run.WithTool(run.ToolBash),
+				run.WithCommand("echo hi"), run.WithNotifications([]run.NotifyTarget{
+					{Kind: run.NotifyEmail, To: "a@x.example, b@y.example"}}))
+			if err != nil {
+				t.Fatalf("Submit() error = %v", err)
+			}
+			if held.Status != run.StatusPendingApproval {
+				t.Fatalf("status = %s, want held", held.Status)
+			}
+			d.Close()
+			emailer.mu.Lock()
+			defer emailer.mu.Unlock()
+			if len(emailer.to) != test.WantSends {
+				t.Errorf("hold mailed the run's recipients %d times (%v), want %d",
+					len(emailer.to), emailer.to, test.WantSends)
+			}
+		})
+	}
+	// Control: a failed run mails its target under failure, the setting that skips holds.
+	emailer := &sendToCounter{}
+	store := run.NewMemStore()
+	d := New(store, roundhouse.RunnerFunc(
+		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
+			return roundhouse.Result{ExitCode: 2}, nil
+		}), nil, WithEmail(emailer, true), WithNotifyClient(http.DefaultClient))
+	created, err := d.Submit(context.Background(), "play.yml", "inv", run.WithNotifications(
+		[]run.NotifyTarget{{Kind: run.NotifyEmail, To: "a@x.example"}}))
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	dispatchtest.WaitTerminal(t, store, created.ID)
+	d.Close()
+	emailer.mu.Lock()
+	defer emailer.mu.Unlock()
+	if len(emailer.to) != 1 {
+		t.Errorf("a failed run mailed its target %d times, want 1", len(emailer.to))
 	}
 }

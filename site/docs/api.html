@@ -1567,8 +1567,12 @@ before its first fire.</p>
 terminal state in addition to the server-wide channels, and hear when a rule holds it for approval.
 Each target names a <code>kind</code> and the field that kind is addressed by, plus an optional <code>on_failure</code>
 that limits the target to failed runs, which also leaves it out of holds. A hold reaches webhook,
-chat, ntfy, and email targets, and never a PagerDuty, Grafana, or Twilio one: a hold asks for a
+chat, and ntfy targets, and email targets when <code>--notify-on</code> is <code>finish</code>, the rule the server-wide
+recipients follow. It never reaches a PagerDuty, Grafana, or Twilio one: a hold asks for a
 decision, and those report incidents.</p>
+<p>An email target lists at most ten addresses. An agent's token names no recipients: a run submission
+it sends with an email or Twilio target is refused with 403, and so is its rerun of a run that
+carries one and was not launched from a template. Its notices go to the targets an admin saved.</p>
 <table>
 <thead>
 <tr>
