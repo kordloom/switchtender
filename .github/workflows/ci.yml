@@ -436,6 +436,14 @@ jobs:
           SWITCHTENDER_REQUIRE_FULL_SUITE: "1"
           SWITCHTENDER_ANSIBLE_CORE: ${{ matrix.ansible-core }}
         run: go test -count=1 -run 'TestConformance' ./internal/inventory/
+      # A secret survey answer is written to the vars file marked as text Ansible never renders. This
+      # is the proof that every pinned release honors the mark: an answer holding a lookup prints as
+      # typed and the lookup does not run. The log reports which of the two forms each release holds.
+      - name: Prove secret answers reach Ansible unrendered
+        env:
+          SWITCHTENDER_REQUIRE_FULL_SUITE: "1"
+          SWITCHTENDER_ANSIBLE_CORE: ${{ matrix.ansible-core }}
+        run: go test -count=1 -v -run 'TestUntemplated' ./internal/roundhouse/
 
   crossverify:
     runs-on: ubuntu-24.04

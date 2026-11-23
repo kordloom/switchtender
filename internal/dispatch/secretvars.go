@@ -86,3 +86,14 @@ func secretValues(secrets map[string]string) []string {
 	}
 	return out
 }
+
+// secretNames returns the names of a run's opened secret answers, sorted, or nil when there are
+// none. Every route to execution joins here, a launch, a schedule's or a webhook's sealed default, a
+// callback, a relaunch, a split child, and a worker's run, so the names the vars file marks as text
+// Ansible never renders are the same on all of them.
+func secretNames(secrets map[string]string) []string {
+	if len(secrets) == 0 {
+		return nil
+	}
+	return slices.Sorted(maps.Keys(secrets))
+}
