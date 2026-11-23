@@ -138,8 +138,8 @@ var agentHoldPlaybooks = map[string]string{
 
 // newAgentHoldServer serves db with a dispatcher whose runner succeeds at once. With policyStore
 // false the dispatcher has no policy store at all, the shape of an install with no rules, which the
-// built-in hold must cover as well.
-func newAgentHoldServer(t *testing.T, db agentHoldDB, policyStore bool) *agentHoldServer {
+// built-in hold must cover as well. extra adds dispatcher options, such as a recording emailer.
+func newAgentHoldServer(t *testing.T, db agentHoldDB, policyStore bool, extra ...dispatch.Option) *agentHoldServer {
 	t.Helper()
 	ctx := context.Background()
 	runner := roundhouse.RunnerFunc(
@@ -154,6 +154,7 @@ func newAgentHoldServer(t *testing.T, db agentHoldDB, policyStore bool) *agentHo
 	if policyStore {
 		opts = append(opts, dispatch.WithPolicies(db.policies))
 	}
+	opts = append(opts, extra...)
 	d := dispatch.New(db.runs, runner, zap.NewNop(), opts...)
 	t.Cleanup(d.Close)
 

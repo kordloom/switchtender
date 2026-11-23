@@ -9,6 +9,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/kordloom/switchtender/internal/idgen"
@@ -638,13 +639,36 @@ func ValidateNotifyTarget(t NotifyTarget) error {
 			return fmt.Errorf("grafana target needs an annotation url and an api token")
 		}
 	case t.Kind == NotifyTwilio, t.Kind == NotifyEmail:
-		if t.To == "" {
+		if strings.TrimSpace(t.To) == "" || (t.Kind == NotifyEmail && emailRecipients(t.To) == 0) {
 			return fmt.Errorf("%s target needs a recipient", t.Kind)
+		}
+		if n := emailRecipients(t.To); t.Kind == NotifyEmail && n > MaxEmailRecipients {
+			return fmt.Errorf("an email target may list at most %d addresses, not %d",
+				MaxEmailRecipients, n)
 		}
 	default:
 		return fmt.Errorf("unknown notification kind %q", t.Kind)
 	}
 	return nil
+}
+
+// MaxEmailRecipients bounds the addresses one email target lists.
+//
+// The server mails every address through its own transport and sender, so a target's list is how
+// many people one run reaches with nobody's approval. A team's routing names an on-call alias and a
+// lead or two, and a list longer than this is a mailing, not a notice.
+const MaxEmailRecipients = 10
+
+// emailRecipients counts the addresses in a comma-separated list the way the sender splits it, so
+// an empty entry between two commas is not counted.
+func emailRecipients(to string) int {
+	n := 0
+	for _, addr := range strings.Split(to, ",") {
+		if strings.TrimSpace(addr) != "" {
+			n++
+		}
+	}
+	return n
 }
 
 // ValidNotifyKind reports whether k names a supported per-run notification channel.

@@ -2,6 +2,8 @@ package importer
 
 import (
 	"encoding/json"
+	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -138,7 +140,10 @@ func (p *Plan) addNotificationTemplates(templates []awxNotificationTemplate, now
 				To: t.target.To, URLHint: util.MaskURL(t.target.URL), KeySet: t.target.Key != "",
 				NeedsSecret: t.needsSecret, CreatedAt: now,
 			}
-			if len(targets) > 1 {
+			switch {
+			case len(targets) > 1 && t.target.Kind == run.NotifyEmail:
+				n.Name = fmt.Sprintf("%s (part %d of %d)", label, i+1, len(targets))
+			case len(targets) > 1:
 				n.Name = label + " (" + t.target.To + ")"
 			}
 			// Every part the export carried is held for the apply to seal, including the parts of a
@@ -241,8 +246,9 @@ func (p *Plan) awxTargets(label string, nt awxNotificationTemplate) ([]awxTarget
 		return []awxTarget{{target: run.NotifyTarget{Kind: run.NotifyGrafana, URL: url},
 			needsSecret: true}}, true
 	case "email":
-		to := strings.Join(stringList(cfg["recipients"]), ", ")
-		if to == "" {
+		// Joined and split again, so an entry that itself lists several addresses counts as them.
+		recipients := stringList(strings.Join(stringList(cfg["recipients"]), ","))
+		if len(recipients) == 0 {
 			p.warn("notification template %q names no recipients, so it was not imported", label)
 			return nil, false
 		}
@@ -251,7 +257,14 @@ func (p *Plan) awxTargets(label string, nt awxNotificationTemplate) ([]awxTarget
 				"across: mail here goes through the server's own transport, set with --smtp-addr",
 				label, host)
 		}
-		return []awxTarget{{target: run.NotifyTarget{Kind: run.NotifyEmail, To: to}}}, true
+		// One email target lists at most run.MaxEmailRecipients addresses, so a longer AWX list
+		// comes across as several targets that together mail everyone it did.
+		var out []awxTarget
+		for chunk := range slices.Chunk(recipients, run.MaxEmailRecipients) {
+			out = append(out, awxTarget{target: run.NotifyTarget{Kind: run.NotifyEmail,
+				To: strings.Join(chunk, ", ")}})
+		}
+		return out, true
 	case "twilio":
 		numbers := stringList(cfg["to_numbers"])
 		if len(numbers) == 0 {

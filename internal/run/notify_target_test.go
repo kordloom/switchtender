@@ -1,6 +1,19 @@
 package run
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
+
+// addresses returns a comma-separated list of n distinct addresses.
+func addresses(n int) string {
+	list := make([]string, n)
+	for i := range list {
+		list[i] = fmt.Sprintf("u%d@example.com", i)
+	}
+	return strings.Join(list, ", ")
+}
 
 // TestValidateNotifyTarget covers what each channel needs to be deliverable, since a target that
 // would reach no one is refused when saved rather than dropped silently at run time.
@@ -21,6 +34,13 @@ func TestValidateNotifyTarget(t *testing.T) {
 		{"twilio without recipient", NotifyTarget{Kind: NotifyTwilio}, false},
 		{"email with recipients", NotifyTarget{Kind: NotifyEmail, To: "a@b.co,c@d.co"}, true},
 		{"email without recipients", NotifyTarget{Kind: NotifyEmail}, false},
+		{"email of commas alone", NotifyTarget{Kind: NotifyEmail, To: " , ,"}, false},
+		{"email with ten addresses", NotifyTarget{Kind: NotifyEmail, To: addresses(10)}, true},
+		{"email with eleven addresses", NotifyTarget{Kind: NotifyEmail, To: addresses(11)}, false},
+		{"email with ten addresses and empty entries", NotifyTarget{Kind: NotifyEmail,
+			To: addresses(10) + ", ,"}, true},
+		{"twilio with commas is not counted as mail", NotifyTarget{Kind: NotifyTwilio,
+			To: addresses(11)}, true},
 		{"unknown kind", NotifyTarget{Kind: "carrier-pigeon", URL: "x"}, false},
 	}
 	for _, test := range tests {
