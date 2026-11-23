@@ -21,6 +21,7 @@ import (
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/relay"
+	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -204,8 +205,7 @@ func runWorker(cmd *cobra.Command, _ []string) error {
 
 	// The daemon is Team code a Community build does not carry, so there it refuses naming Team
 	// before Open runs, and the worker opens no database and dials no control node.
-	runner := newSelectiveRunnerFromFlags(workerAllowContainerEE, workerRequireImageDigest,
-		ansibleLocator(workerDB))
+	runner := newWorkerRunner(runFilesReport.Root)
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	return dispatch.CurrentDaemon().Run(ctx, dispatch.DaemonConfig{
@@ -370,4 +370,12 @@ func loadDeliveryKeys(paths []string) (*handoff.KeyRing, error) {
 		return nil, fmt.Errorf("--delivery-key: %w", err)
 	}
 	return ring, nil
+}
+
+// newWorkerRunner builds the worker's run executor from its flags, with the roots it stages runs
+// and checkouts under protected from every container mount. A worker that opens the database itself
+// protects the database's files too, the way serve does, and a relay worker opens none.
+func newWorkerRunner(runFilesRoot string) roundhouse.Runner {
+	return newSelectiveRunnerFromFlags(workerAllowContainerEE, workerRequireImageDigest,
+		ansibleLocator(workerDB), protectedPathsFor(workerDB, runFilesRoot, workerServer == ""))
 }

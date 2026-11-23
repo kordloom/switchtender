@@ -204,7 +204,7 @@ func TestMountGuardLetsTheRunFilesRootThrough(t *testing.T) {
 			t.Parallel()
 			m := newMountSet()
 			m.private = test.Private
-			if err := m.add(test.Path, true); !errors.Is(err, test.Want) {
+			if err := m.add(test.Path, true, false); !errors.Is(err, test.Want) {
 				t.Errorf("add(%s) with root %q error = %v, want %v", test.Path, test.Private, err, test.Want)
 			}
 		})

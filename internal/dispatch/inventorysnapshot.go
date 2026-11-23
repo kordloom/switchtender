@@ -358,7 +358,7 @@ func (d *Dispatcher) materializeSnapshot(r *run.Run, content string,
 		remove()
 		return func() {}, nil, fmt.Errorf("materialize the inventory snapshot: %w", err)
 	}
-	spec.Inventory = path
+	spec.Inventory, spec.InventoryStaged = path, true
 	return remove, inventorySecrets(content), nil
 }
 

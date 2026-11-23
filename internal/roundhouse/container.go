@@ -51,6 +51,23 @@ type containerRunner struct {
 	plugin *pluginCache
 	// limits caps the memory, CPU, process count, and network of every container run.
 	limits ContainerLimits
+	// protected are the executor's own paths, which no mount may be, sit below, or hold. Nil
+	// protects only the callback plugin directory and the system directories every runner refuses.
+	protected *ProtectedPaths
+}
+
+// protectedEntries returns the paths every mount of a run is judged against: the executor's own and
+// the callback plugin directory, created here if no run has needed it yet so it can be judged.
+func (c *containerRunner) protectedEntries() ([]protectedEntry, error) {
+	plugin := ""
+	if c.plugin != nil {
+		dir, err := c.plugin.create()
+		if err != nil {
+			return nil, fmt.Errorf("create the callback plugin directory: %w", err)
+		}
+		plugin = dir
+	}
+	return c.protected.entries(plugin), nil
 }
 
 // newContainerRunner builds a container runner for the given container CLI (docker or podman),
@@ -374,14 +391,21 @@ func (c *containerRunner) runArgs(spec Spec, plan containerPlan, name, envFile s
 
 	mounts := newMountSet()
 	mounts.private = spec.RunFilesRoot
+	entries, err := c.protectedEntries()
+	if err != nil {
+		return nil, err
+	}
+	mounts.protected = entries
 	var addErr error
 	addMount := func(path string, ro bool) {
 		if addErr == nil {
-			addErr = mounts.add(path, ro)
+			addErr = mounts.add(path, ro, false)
 		}
 	}
 	for _, m := range plan.mounts {
-		addMount(m.path, !m.writable)
+		if addErr == nil {
+			addErr = mounts.add(m.path, !m.writable, m.named)
+		}
 	}
 	// The environment, credentials and all, is mounted and sourced inside the container rather than
 	// passed with --env-file. --env-file copies every value into the container's Config.Env, which
@@ -566,8 +590,10 @@ type mountSet struct {
 	seen map[string]bool
 	// specs holds the ordered docker -v arguments.
 	specs []string
-	// private is the run-files root, inside which a path is mountable wherever the root sits.
+	// private is the run-files root, inside which a staged path is mountable wherever the root sits.
 	private string
+	// protected are the executor's own paths, which no mount may be, sit below, or hold.
+	protected []protectedEntry
 }
 
 // newMountSet returns an empty mount set.
@@ -577,13 +603,25 @@ func newMountSet() *mountSet {
 
 // add records a bind mount for path at the same path inside the container, read-only when ro is
 // set. Empty and duplicate paths are ignored. It returns ErrForbiddenMount when the path would
-// expose a sensitive host location.
-func (m *mountSet) add(path string, ro bool) error {
-	if path == "" || m.seen[path] {
+// expose a sensitive host location or one of the executor's own paths.
+//
+// named marks a path the run named, such as the playbook's directory or a Terraform directory with
+// no project, as against one the dispatcher staged. A named path gets no pass inside the run-files
+// root, because another run's staged files sit there, and it is refused at or below every protected
+// tree. Every path is judged before the duplicate check, so a named path is never let through on the
+// strength of a staged mount of the same spelling.
+func (m *mountSet) add(path string, ro, named bool) error {
+	if path == "" {
 		return nil
 	}
-	if err := checkMountPath(path); err != nil && !insidePrivateRoot(m.private, path) {
+	if err := checkMountPath(path); err != nil && (named || !insidePrivateRoot(m.private, path)) {
 		return err
+	}
+	if err := checkProtected(path, named, m.protected); err != nil {
+		return err
+	}
+	if m.seen[path] {
+		return nil
 	}
 	m.seen[path] = true
 	spec := path + ":" + path

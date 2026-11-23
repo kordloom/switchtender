@@ -542,13 +542,46 @@ func containerPullPolicyFromFlags() string {
 
 // newSelectiveRunnerFromFlags builds the run executor shared by serve and worker. The container
 // flags decide the runtime, the pull policy, and the resource caps, while the caller passes the
-// command's own execution-environment and digest-pinning flags. Both commands go through here so a
-// cap or a policy can never reach one executor and miss the other.
-func newSelectiveRunnerFromFlags(allowContainer, requireDigest bool,
-	ansible *ansibleruntime.Locator) roundhouse.Runner {
+// command's own execution-environment and digest-pinning flags and the executor's own paths, which
+// no container mount may reach. Both commands go through here so a cap, a policy, or a protected
+// path can never reach one executor and miss the other.
+func newSelectiveRunnerFromFlags(allowContainer, requireDigest bool, ansible *ansibleruntime.Locator,
+	protected roundhouse.ProtectedPaths) roundhouse.Runner {
 	return roundhouse.NewSelectiveRunner(allowContainer, containerRuntimeFromFlags(),
 		containerPullPolicyFromFlags(), requireDigest, containerLimitsFromFlags(),
-		roundhouse.WithAnsibleLocator(ansible))
+		roundhouse.WithAnsibleLocator(ansible), roundhouse.WithProtectedPaths(protected))
+}
+
+// newServeRunner builds serve's run executor from its flags, with the server's own paths under
+// --db, the identity directory, and runFilesRoot protected from every container mount.
+func newServeRunner(ansible *ansibleruntime.Locator, runFilesRoot string) roundhouse.Runner {
+	return newSelectiveRunnerFromFlags(serveAllowContainerEE, serveRequireImageDigest, ansible,
+		protectedPathsFor(serveDB, runFilesRoot, true))
+}
+
+// protectedPathsFor returns the executor's own paths for a command pointed at db whose run files
+// live under runFilesRoot. withDatabase is false for a relay worker, which opens no database, so it
+// protects no database or identity directory. A SQLite database protects the files in its
+// directory, and a PostgreSQL DSN has no directory to protect.
+func protectedPathsFor(db, runFilesRoot string, withDatabase bool) roundhouse.ProtectedPaths {
+	p := roundhouse.ProtectedPaths{
+		License:      license.PathFor(db),
+		RunFiles:     runFilesRoot,
+		ProjectCache: projectCacheDir(),
+	}
+	if root, err := ansibleRoot(ansibleRuntimeDirFlag, db); err == nil {
+		p.AnsibleRoot = root
+	}
+	if !withDatabase {
+		return p
+	}
+	if !isPostgresDSN(db) {
+		p.DatabaseDir = filepath.Dir(db)
+	}
+	if dir, err := identityDir(db); err == nil {
+		p.IdentityDir = dir
+	}
+	return p
 }
 
 // galaxyServer holds the --galaxy-server flag: a private Ansible Galaxy or Automation Hub URL.
@@ -1646,7 +1679,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	hub := live.NewHub()
 	ansible := ansibleLocator(serveDB)
-	runner := newSelectiveRunnerFromFlags(serveAllowContainerEE, serveRequireImageDigest, ansible)
+	runner := newServeRunner(ansible, runFilesReport.Root)
 	syncer, err := project.NewSyncer(projectCacheDir(), galaxySyncerOpts(ansible)...)
 	if err != nil {
 		return fmt.Errorf("project cache: %w", err)
