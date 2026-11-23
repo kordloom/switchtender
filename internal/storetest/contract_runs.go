@@ -547,6 +547,36 @@ func testSaveGet(t *testing.T, store run.Store) {
 	}
 }
 
+// testPathsByAdminRoundTrip verifies the fact that an admin in person saved a run's paths survives
+// the store both ways, so a rerun and a dispatch decision read what the submit decided.
+func testPathsByAdminRoundTrip(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	tests := []struct {
+		// ID is the run identifier.
+		ID string
+		// PathsByAdmin is the fact stored.
+		PathsByAdmin bool
+	}{{ // Test 0: A run an admin saved.
+		ID: "run_by_admin", PathsByAdmin: true,
+	}, { // Test 1: A run anyone else saved.
+		ID: "run_by_other", PathsByAdmin: false,
+	}}
+	for testNum, test := range tests {
+		want := sampleRun(test.ID)
+		want.PathsByAdmin, want.IdempotencyKey = test.PathsByAdmin, "idem_"+test.ID
+		if err := store.Save(ctx, want); err != nil {
+			t.Fatalf("test %d: Save() error = %v", testNum, err)
+		}
+		got, err := store.Get(ctx, test.ID)
+		if err != nil {
+			t.Fatalf("test %d: Get() error = %v", testNum, err)
+		}
+		if got.PathsByAdmin != test.PathsByAdmin {
+			t.Errorf("test %d: PathsByAdmin = %t, want %t", testNum, got.PathsByAdmin, test.PathsByAdmin)
+		}
+	}
+}
+
 // testPlanDestroysRoundTrip verifies a proposed apply's destroy count survives the store, and that
 // a count of zero stays zero rather than reading back as no plan at all.
 //

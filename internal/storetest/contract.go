@@ -88,6 +88,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("pipeline steps ordered", func(t *testing.T) { testSteps(t, newStore()) })
 	t.Run("non-terminal runs", func(t *testing.T) { testNonTerminal(t, newStore()) })
 	t.Run("fleet health ranking", func(t *testing.T) { testFleetHealth(t, newStore()) })
+	t.Run("paths by admin round trips", func(t *testing.T) { testPathsByAdminRoundTrip(t, newStore()) })
 	t.Run("run summaries round trip", func(t *testing.T) { testRunSummaries(t, newStore()) })
 	t.Run("append summaries accumulate", func(t *testing.T) { testAppendSummaries(t, newStore()) })
 	t.Run("unrepresentable text in a summary stores the same on every backend", func(t *testing.T) {
