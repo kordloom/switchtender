@@ -161,7 +161,8 @@ submits and manages runs like any operator, every mutation it makes is chained b
 and a run held for approval waits for a human admin, since an operator token cannot approve. Every
 run an agent token asks for is held that way by default, its dry runs included, and its Terraform or
 OpenTofu apply is held twice: before anything plans, and again for the apply its plan proposes. A
-rule with `effect: exempt` lifts the hold for routine work, and one that names the agent's `actor`
+rule with `effect: exempt` lifts the hold for routine work saved as a template the agent launches,
+never for a run the agent composed itself, and one that names the agent's `actor`
 label must also name the `account` its token is bound to, as [agent runs are held by
 default](policy.md#agent-runs-are-held-by-default) describes. [Run an AI agent through the
 gate](agents.md) covers the setup.

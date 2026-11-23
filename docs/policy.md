@@ -62,8 +62,9 @@ is not a dry run, unless an exemption covers that step. The step is judged as th
 become, under the agent's label and account. The refusal names the step, is recorded on the chain
 under the name `an agent's workflow may not apply Terraform or OpenTofu`, and says what to do
 instead: ask for the apply as its own run, which plans first and waits for approval of the saved
-plan, or write an exemption that covers the step. An exemption that covers the step lifts the
-refusal and nothing more: the workflow is still held for a person as a whole, unless an exemption
+plan, or save the workflow and write an exemption that covers the step. An exemption covers a step
+only of a saved workflow the agent launches, never of a workflow it submitted whole. An exemption
+that covers the step lifts the refusal and nothing more: the workflow is still held for a person as a whole, unless an exemption
 also covers the workflow run itself. This holds however the workflow arrives: submitted
 whole, launched from a saved workflow, or launched through an MCP tool. A finished workflow is never
 rerun as such, by anybody, only launched again from its saved workflow, which faces the same check.
@@ -84,7 +85,7 @@ person with the admin role approves it, and an agent never can.
 ### Exempting an agent's routine work
 
 An exemption is a stored rule with `effect: exempt`. The agent runs it matches go ahead without the
-built-in hold:
+built-in hold, and only when the agent launched a saved template:
 
     policies:
       - name: release-agent-smoke-tests
@@ -94,6 +95,16 @@ built-in hold:
         tool: bash
         queue: staging
         command_contains: ./smoke.sh
+
+Save the smoke test as a job template, a bash template whose command is `./smoke.sh`, and the agent
+launches that template. An exemption never covers a run the agent composed itself through
+`POST /v1/runs` or a workflow it submitted whole. A rule matches a run's command text, tool, queue,
+and inventory, and none of the credentials, image, or variables the run carries, so an agent's own
+`./smoke.sh; env` with a production credential would match the rule above. A template was written
+by a person with the right to configure it, and an agent's launch pins the template's credentials,
+inventory, and variables, so what an exemption lets through is what a person wrote. An agent may
+not turn a template saved as a dry run into a real run. A saved workflow the agent launches is
+covered the same way, and each of its steps is judged under the workflow's template.
 
 An exemption matches on `tool`, `command_contains`, `inventory_id`, `queue`, `actor`, and
 `account`, and `actor_kind` may be left out or set to `agent`. `account` is the username of the
@@ -109,7 +120,8 @@ the same run still does.
 
 The account travels with every run derived from the agent's request: the apply its plan proposes,
 the shards of its split, the steps of its workflow, and a retry, a rerun, or a relaunch it asks
-for. A run whose account cannot be read is never exempt.
+for. So does the template, so a run derived from a template launch can be exempt and one derived
+from a composed run cannot. A run whose account cannot be read is never exempt.
 
 An exemption is a rule like any other. `GET /v1/policies` lists it, account included. The rule set
 every run records as in force covers it and describes it as "lets an agent's run proceed without the
@@ -126,11 +138,12 @@ What an exemption risks is everything it matches, which then runs with no person
 narrow.
 
 - `command_contains` matches text anywhere in the command, ignoring case, so an exemption for
-  `smoke` also matches `smoke; rm -rf /`. Pair it with `tool`, `queue`, or `inventory_id`.
+  `smoke` also matches every template whose command contains `smoke; rm -rf /`. Pair it with
+  `tool`, `queue`, or `inventory_id`, and keep who can save templates small.
 - An admin can mint a token for any account, so the exemption trusts whoever can mint tokens. Bind
   each agent to an account of its own, and an exemption naming that account covers that agent
   alone.
-- An exemption with no criteria exempts every agent run, which turns the default off.
+- An exemption with no criteria exempts every template an agent launches.
 
 Prefer a named `actor` and its `account` together with a queue or an inventory that reaches only
 what the agent's routine work needs.
@@ -152,8 +165,9 @@ one.
 
 An existing install gets the built-in hold when it upgrades. There is no migration and no setting.
 An agent whose runs went ahead unattended before the upgrade now waits for a person, its dry runs
-included, and its Terraform or OpenTofu applies take two approvals. Write an exemption for the
-routine work that should keep running unattended, and leave everything else held.
+included, and its Terraform or OpenTofu applies take two approvals. Save the routine work that
+should keep running unattended as templates, write an exemption that covers the agent's launches of
+them, and leave everything else held.
 
 ## YAML rules
 
@@ -180,8 +194,8 @@ A rule matches on `tool`, `command_contains` (ignoring case), `inventory_id`, `q
 the account the requesting credential is bound to: the person behind a token or a session, or the
 account an agent's token acts for. A run whose account cannot be read is matched by a rule that
 holds or refuses, and never by an exemption. A match holds the run, refuses it with
-`effect: deny`, or, with `effect: exempt`, lets an agent's run go ahead without the
-[built-in hold](#agent-runs-are-held-by-default). `require_distinct_approver` makes the release need
+`effect: deny`, or, with `effect: exempt`, lets an agent's launch of a saved template go ahead
+without the [built-in hold](#agent-runs-are-held-by-default). `require_distinct_approver` makes the release need
 someone other than the requester, and `max_destroy` plans a Terraform or OpenTofu apply first and
 holds it only when the plan destroys more than that many resources.
 
