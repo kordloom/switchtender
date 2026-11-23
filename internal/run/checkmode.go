@@ -90,7 +90,7 @@ func (s DryRunScan) WithExtraVars(vars map[string]any) DryRunScan {
 		if ConnectionVar(k) {
 			s.Findings = append(s.Findings, "the extra var "+name+" sets "+connectionVarWhy)
 		}
-		if holdsTemplate(vars[k]) {
+		if HoldsTemplate(vars[k]) {
 			s.Findings = append(s.Findings, "the extra var "+name+" carries template code, which "+
 				"Ansible renders on the controller during a dry run")
 		}
@@ -98,21 +98,21 @@ func (s DryRunScan) WithExtraVars(vars map[string]any) DryRunScan {
 	return s.Classified()
 }
 
-// holdsTemplate reports whether any string in value, a key of a nested mapping included, holds a
+// HoldsTemplate reports whether any string in value, a key of a nested mapping included, holds a
 // marker that starts template code.
-func holdsTemplate(value any) bool {
+func HoldsTemplate(value any) bool {
 	switch v := value.(type) {
 	case string:
 		return inventory.HasTemplateMarker(v)
 	case map[string]any:
 		for k, item := range v {
-			if inventory.HasTemplateMarker(k) || holdsTemplate(item) {
+			if inventory.HasTemplateMarker(k) || HoldsTemplate(item) {
 				return true
 			}
 		}
 	case []any:
 		for _, item := range v {
-			if holdsTemplate(item) {
+			if HoldsTemplate(item) {
 				return true
 			}
 		}
