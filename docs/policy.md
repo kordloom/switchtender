@@ -199,8 +199,8 @@ without the [built-in hold](#agent-runs-are-held-by-default). `require_distinct_
 someone other than the requester, and `max_destroy` plans a Terraform or OpenTofu apply first and
 holds it only when the plan destroys more than that many resources.
 
-The count is read from the plan file the plan saved, and the apply that follows carries out that
-saved plan, so the plan an approver releases is the plan that runs. If the infrastructure changed
+The count is read from the plan file the plan saved, and on a relay worker the worker that planned
+reports it. The apply that follows carries out that saved plan, so the plan an approver releases is the plan that runs. If the infrastructure changed
 since the plan was made, the tool refuses the stale plan rather than applying a different one, and the
 apply has to be proposed again. The
 [Terraform page](tool-terraform.md#a-gated-apply-carries-out-the-approved-plan) has the details.
