@@ -98,10 +98,12 @@ moves, nothing is downloaded and such a plan is held too. A `.terraform` the gat
 committed or left in a working directory, is never read, and no setting makes it trusted: vendor a
 module and call it by a local path to have it read from the repository. The get installs no
 provider and runs nothing the configuration names. A module it could not download is left unread.
-The run then executes exactly
+When the gate downloaded the modules, the run executes exactly
 the modules the gate read: their digest is in the scan evidence and the approval, the gate's copy is
 put in place, and `tofu init` runs with `-get=false`, so it resolves no version again. A run that
-cannot get the same modules is refused. Files ending in `.tofu` are read as well as `.tf`, and a
+cannot get the same modules is refused. The gate downloads no module for an agent's run, so
+`tofu init` resolves that run's modules when it starts, and the hold names each module nobody
+read. Files ending in `.tofu` are read as well as `.tf`, and a
 module source built from a variable, which OpenTofu evaluates at init, is left unread, since its
 value is only known when the run plans. The scan targets those three data sources and unreadable
 configuration only, so it does not prove a plan harmless, and a rule that exempts plans trusts the

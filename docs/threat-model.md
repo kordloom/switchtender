@@ -41,7 +41,7 @@ evaluates its options at preview and at launch. Only an admin writes those optio
 they read are checked by SwitchTender first, refused when they could carry template code, and handed
 to Ansible with every string marked as not to be templated. A
 Terraform or OpenTofu apply that a rule gates or holds, and a drift reconcile, carries out the saved
-plan file its approval bound, and the tool refuses that plan if the infrastructure changed since. Two inputs resolve at execution time.
+plan file its approval bound, and the tool refuses that plan if the infrastructure changed since. Three inputs resolve at execution time.
 Dynamic inventory is inherently resolved at runtime. Approval binds the inventory source definition,
 while the execution record captures the actual hosts reached. Galaxy roles and collections are
 installed from the project's `requirements.yml` when execution begins, and never before: the gate's
@@ -49,6 +49,11 @@ refresh of the project and the commit pin a held run gets move the checkout and 
 since a requirements file names code from anywhere. Approval binds that file, but
 an unpinned dependency may resolve to code the approver never reviewed. Pin each dependency to an
 exact version or commit to ensure execution uses the code that was approved.
+Registry and remote Terraform or OpenTofu modules, and providers the lock file does not hold, for a
+run the gate downloaded none for: every run an agent asks for, a plan sent to a worker queue, and a
+plan whose download failed. The run's own init resolves them when it starts. Approval binds the
+configuration at its commit, and the hold names each module nobody read. Pin each module to a full
+commit, or vendor it by local path.
 
 A held run must come from a project. A playbook or a Terraform root named by a path on the server
 is read when the run is claimed, so a held run naming one is refused at submission. A Terraform or
@@ -368,7 +373,9 @@ shown, and one that names its playbook by a path on the server is refused.
 **Isolation between runs on one executor.** A run without an execution image runs as the server's
 own user, so while two runs overlap, either one's code can read the other's materialized
 credentials. SwitchTender governs what runs. It does not sandbox mutually untrusted code on one
-executor. Give such work an execution image or a worker of its own.
+executor. Give such work an execution image or a worker of its own. A run with no execution image
+shares the server's account. The right to start one without a hold carries that account's reach:
+the database, the producer key, and the approval records.
 
 **Availability.** Fail-closed means exactly what it says: if the chain cannot be written or the
 policies cannot be read, changes stop. An attacker who can take down the database can halt

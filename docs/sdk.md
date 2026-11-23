@@ -143,8 +143,10 @@ locale variables, `SYSTEMROOT` and `USERPROFILE` on Windows, and every variable 
 variables apart. The plugin library adds its own handshake: `SWITCHTENDER_EXTENSION`, plus
 `PLUGIN_MIN_PORT`, `PLUGIN_MAX_PORT`, `PLUGIN_PROTOCOL_VERSIONS`, and `PLUGIN_CLIENT_CERT`, which
 carry the port range, the protocol versions, and SwitchTender's certificate for mutual TLS.
-`plugin.Serve` reads those, so a plugin never has to. Everything else the server holds is withheld,
-its encryption key and every secret it reads from its own environment included. Configure a plugin
+`plugin.Serve` reads those, so a plugin never has to. Everything else in the server's environment is
+withheld, its encryption key and every secret it reads from its own environment included. That
+covers the environment only: a plugin runs on the host as the server's account, whatever the run's
+image, so it can read what that account can, the database and the producer key file included. Configure a plugin
 through `SWITCHTENDER_PLUGIN_` variables. A plugin that reads any other name finds it empty, and
 one that exits for want of configuration is skipped like any plugin that fails to launch.
 

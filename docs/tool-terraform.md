@@ -96,10 +96,12 @@ environment setting moves, nothing is downloaded and such a plan is held too. A 
 gate did not install, committed or left in a working directory, is never read, and no setting
 makes it trusted: vendor a module and call it by a local path to have it read from the
 repository. The get installs no provider and runs nothing the configuration names. A module it
-could not download is left unread. The run then executes exactly
+could not download is left unread. When the gate downloaded the modules, the run executes exactly
 the modules the gate read: their digest is in the scan evidence and the approval, the gate's copy is
 put in place, and `terraform init` runs with `-get=false`, so it resolves no version again. A run
-that cannot get the same modules is refused. The scan targets those three data sources and
+that cannot get the same modules is refused. The gate downloads no module for an agent's run, so
+`terraform init` resolves that run's modules when it starts, and the hold names each module nobody
+read. The scan targets those three data sources and
 unreadable configuration only, so it does not prove a plan harmless, and a rule that exempts plans
 trusts the configurations it lets through. See [dry runs and
 `exclude_dry_run`](concepts.md#dry-runs-and-exclude-dry-run).

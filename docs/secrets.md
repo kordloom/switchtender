@@ -189,9 +189,19 @@ holds a key refuses to open one stored that way.
 
 ## What a run can reach on the host
 
-A run without an execution image runs as the SwitchTender server's own user. That user owns the
-scratch files of every other run on that host, so the 0600 mode above stops other accounts, not other
-runs: while two runs overlap, either one's code can read the other's materialized credentials, and a
+A run with no execution image runs as the server's own account. On the control node that account
+can read and write the SQLite database and read the producer key file beside it. Under systemd and
+in the container image the master key and salt are out of its reach: the server marks itself
+non-dumpable, and the environment file belongs to root. On a foreground start, and on macOS, the key
+file is readable by the account that started the server, so a host run can read it. Every plugin
+tool runs the same way, whatever the image. A run in an execution image is given its own project
+checkout, the files the server staged for it, and a path on the control node only when an admin
+named it. The server refuses to mount its database, its keys, its caches, and its credential files
+into an image, or any directory that holds them. Where operators must not reach the server's state,
+set `--default-image` and `--allow-container-ee`, or use a separate worker.
+
+That account also owns the scratch files of every other run on that host, so the 0600 mode above
+stops other accounts, not other runs: while two runs overlap, either one's code can read the other's materialized credentials, and a
 run can write to the directory the Ansible callback plugin lives in. SwitchTender checks that plugin
 against its embedded copy before every Ansible run and restores it when it differs, so nothing a run
 leaves behind survives to be imported by later runs, but that is repair, not isolation.
