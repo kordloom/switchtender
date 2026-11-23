@@ -76,7 +76,8 @@ func (c clockedAudit) Append(ctx context.Context, e *audit.Entry) error {
 // seedAgent shows the agent gate doing its work, all of it real. The agent asks to restart the app
 // on one web host and to apply the network root, and both wait for a person by default, the apply
 // before anything plans. Both are held, so each comes from the project that holds it, named in ids,
-// and is pinned to that project's commit. Its routine smoke test runs under an exemption. It asks
+// and is pinned to that project's commit. Its routine smoke test, a launch of a saved template, runs
+// under an exemption. It asks
 // for a workflow that would apply Terraform, and the dispatcher refuses it at submission. It tries
 // to approve its own held run, and the gate refuses it at the door. Both refusals are on the chain,
 // recorded the way every refused request is.
@@ -92,7 +93,7 @@ func seedAgent(ctx context.Context, d Deps, ids seededIDs, log *zap.Logger) {
 	exempt := seedAgentExemption(ctx, d, log)
 	api := server.New(d.Runs, d.Submitter, zap.NewNop(), server.WithTokens(d.Tokens),
 		server.WithUsers(d.Users), server.WithAudit(clockedAudit{Store: d.Audit, clock: d.Clock}),
-		server.WithPolicies(d.Policies)).Handler()
+		server.WithPolicies(d.Policies), server.WithTemplates(d.Templates)).Handler()
 	call := func(method, path string, body any) (int, *run.Run) {
 		return agentRequest(ctx, api, plain, method, path, body)
 	}
@@ -115,10 +116,13 @@ func seedAgent(ctx context.Context, d Deps, ids seededIDs, log *zap.Logger) {
 	expect(log, "the agent's apply", code, http.StatusAccepted)
 	stepClock(d)
 
-	// The routine check the exemption lets through, which runs and succeeds. Without the exemption
-	// it waits like the rest, which is what the gate does on an install that cannot hold the rule.
-	code, smoke := call(http.MethodPost, "/v1/runs", map[string]any{
-		"tool": run.ToolBash, "command": scriptSmoke, "labels": labels})
+	// The routine check the exemption lets through, a launch of the saved template an operator
+	// wrote, which runs and succeeds. An exemption covers only a run launched from a saved
+	// template, so the agent launches the check as written rather than composing it. Without the exemption it waits like the rest, which is what
+	// the gate does on an install that cannot hold the rule.
+	smokeTemplate := ids.id(ids.Templates, "Post-deploy smoke checks", "")
+	code, smoke := call(http.MethodPost, "/v1/templates/"+smokeTemplate+"/launch",
+		map[string]any{"labels": labels})
 	expect(log, "the agent's smoke test", code, http.StatusAccepted)
 	if smoke != nil && exempt {
 		settle(ctx, d, smoke.ID)

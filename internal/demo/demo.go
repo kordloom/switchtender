@@ -1191,6 +1191,7 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
 		{ID: template.NewID(), Name: "Provision network", ProjectID: projects[1].ID, Tool: run.ToolTerraform, Command: "infra/network", DryRun: true, CreatedAt: made(30)},
 		{ID: template.NewID(), Name: "Reconcile inventory", ProjectID: projects[0].ID, Tool: run.ToolPython, Command: scriptReconcile, CreatedAt: made(18)},
 		{ID: template.NewID(), Name: "Fleet capacity report", ProjectID: projects[0].ID, Tool: run.ToolGo, Command: scriptFleetGo, CreatedAt: made(12)},
+		{ID: template.NewID(), Name: "Post-deploy smoke checks", ProjectID: projects[0].ID, Tool: run.ToolBash, Command: scriptSmoke, CreatedAt: made(6)},
 	}
 	for _, t := range templates {
 		if err := d.Templates.Save(ctx, t); err != nil {
