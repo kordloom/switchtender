@@ -403,13 +403,20 @@ jobs:
   # minors are inventory.TestedAnsibleCore, the range doctor reports as tested. A test fails when this
   # matrix and those lists drift apart, so moving to a newer patch is a reviewed change.
   inventory-conformance:
-    name: inventory conformance (ansible-core ${{ matrix.ansible-core }})
+    name: inventory conformance (ansible-core ${{ matrix.ansible-core }}${{ matrix.pyyaml != '6.0.3' && format(', PyYAML {0}', matrix.pyyaml) || '' }})
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         ansible-core: ["2.16.19", "2.17.14", "2.18.19", "2.19.13", "2.20.9", "2.21.4"]
+        pyyaml: ["6.0.3"]
+        # One more job reads the corpus under PyYAML 6.0.4, which changed which map wins when a merge
+        # key lists several that set the same key. The native engine hands that shape to Ansible, and
+        # this job is the standing proof that the two releases still disagree on it.
+        include:
+          - ansible-core: "2.21.4"
+            pyyaml: "6.0.4"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -425,7 +432,7 @@ jobs:
         run: |
           python3 -m venv "$RUNNER_TEMP/ansible"
           "$RUNNER_TEMP/ansible/bin/pip" install --quiet "ansible-core==${{ matrix.ansible-core }}" \
-            "PyYAML==6.0.3"
+            "PyYAML==${{ matrix.pyyaml }}"
           mkdir -p "$RUNNER_TEMP/ansible-commands"
           ln -s "$RUNNER_TEMP"/ansible/bin/ansible* "$RUNNER_TEMP/ansible-commands/"
           echo "$RUNNER_TEMP/ansible-commands" >> "$GITHUB_PATH"
