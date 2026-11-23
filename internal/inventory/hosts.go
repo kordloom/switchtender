@@ -18,6 +18,36 @@ const MaxHosts = 100000
 var ErrTooManyHosts = fmt.Errorf("inventory names more than %d hosts, the most one inventory may "+
 	"name. Split it into several inventories", MaxHosts)
 
+// MaxContentBytes bounds the content of one stored inventory. The API save and the import share
+// it, and the inventory write route's body limit is derived from it, so content within it can always
+// be written back. Ten thousand hosts with a handful of variables each render to about 2 MiB, so the
+// bound refuses only an inventory carrying tens of cloud-sync variables per host, which belongs in a
+// dynamic inventory file in a project.
+const MaxContentBytes = 16 << 20
+
+// ErrContentTooLarge is returned when inventory content is longer than MaxContentBytes.
+var ErrContentTooLarge = errors.New("inventory content too large")
+
+// CheckContentSize returns ErrContentTooLarge, with the content's size and the limit in its text,
+// when content is longer than MaxContentBytes, and nil otherwise.
+func CheckContentSize(content string) error {
+	if len(content) <= MaxContentBytes {
+		return nil
+	}
+	return fmt.Errorf("%w: the inventory is %s (%d bytes), past the %s (%d bytes) a stored "+
+		"inventory may hold. Keep it as a dynamic inventory file in a project, or store it without "+
+		"the synced host variables", ErrContentTooLarge, FormatMiB(len(content)), len(content),
+		FormatMiB(MaxContentBytes), MaxContentBytes)
+}
+
+// FormatMiB renders a byte count in MiB, whole when exact and to one decimal place otherwise.
+func FormatMiB(n int) string {
+	if n%(1<<20) == 0 {
+		return fmt.Sprintf("%d MiB", n>>20)
+	}
+	return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20))
+}
+
 // Host is one host an inventory names, with the variables set on the host itself.
 type Host struct {
 	// Name is the inventory host name, the name Ansible addresses the host by in a limit.

@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"path"
 	"strings"
+
+	"github.com/kordloom/switchtender/internal/inventory"
 )
 
 // maxBodyBytes caps the request body every mutating endpoint accepts, so an oversized POST fails
@@ -14,12 +16,20 @@ import (
 const (
 	maxBodyBytes       = 1 << 20
 	maxUploadBodyBytes = 26 << 20
+	// maxInventoryBodyBytes is the body limit of an inventory write. JSON writes a quote or a
+	// newline in the content as two bytes, so twice the content limit plus room for the other fields
+	// lets any content within the limit be written back, and a person is told one number: the
+	// content limit.
+	maxInventoryBodyBytes = 2*inventory.MaxContentBytes + 1<<20
 )
 
 // requestBodyLimit returns the most body bytes r may carry. Both the cap on reading the body and the
 // audit gate's digest of it use it, so the two cannot disagree about what a route accepts.
 func requestBodyLimit(r *http.Request) int64 {
-	if uploadPath(r.URL.Path) || planFilePath(r.URL.Path) || inventoryWrite(r) {
+	if inventoryWrite(r) {
+		return maxInventoryBodyBytes
+	}
+	if uploadPath(r.URL.Path) || planFilePath(r.URL.Path) {
 		return maxUploadBodyBytes
 	}
 	return maxBodyBytes

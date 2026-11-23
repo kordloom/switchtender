@@ -24,12 +24,12 @@ func TestRequestBodyLimit(t *testing.T) {
 		// Want is the most body bytes the request may carry.
 		Want int64
 	}{
-		// Test 0: Creating an inventory takes the import cap.
-		{Method: http.MethodPost, Path: "/v1/inventories", Want: maxUploadBodyBytes},
-		// Test 1: Replacing an inventory takes the import cap.
-		{Method: http.MethodPut, Path: "/v1/inventories/inv_1", Want: maxUploadBodyBytes},
+		// Test 0: Creating an inventory takes the cap derived from the content limit.
+		{Method: http.MethodPost, Path: "/v1/inventories", Want: maxInventoryBodyBytes},
+		// Test 1: Replacing an inventory takes the same cap.
+		{Method: http.MethodPut, Path: "/v1/inventories/inv_1", Want: maxInventoryBodyBytes},
 		// Test 2: A case change does not escape or widen the match.
-		{Method: http.MethodPut, Path: "/V1/Inventories/inv_1", Want: maxUploadBodyBytes},
+		{Method: http.MethodPut, Path: "/V1/Inventories/inv_1", Want: maxInventoryBodyBytes},
 		// Test 3: Deleting an inventory keeps the ordinary cap.
 		{Method: http.MethodDelete, Path: "/v1/inventories/inv_1", Want: maxBodyBytes},
 		// Test 4: A preview keeps the ordinary cap.
@@ -76,9 +76,9 @@ func TestAnOversizedWriteNamesItsLimit(t *testing.T) {
 	}{
 		// Test 0: An inventory write a little over the ordinary cap is accepted.
 		{Method: http.MethodPost, Path: "/v1/inventories", Size: maxBodyBytes + 4096, WantStatus: http.StatusOK},
-		// Test 1: An inventory write past the import cap is refused with that cap named.
-		{Method: http.MethodPost, Path: "/v1/inventories", Size: maxUploadBodyBytes + 4096,
-			WantStatus: http.StatusRequestEntityTooLarge, WantMessage: "larger than the 26 MiB"},
+		// Test 1: An inventory write past its cap is refused with that cap named.
+		{Method: http.MethodPost, Path: "/v1/inventories", Size: maxInventoryBodyBytes + 4096,
+			WantStatus: http.StatusRequestEntityTooLarge, WantMessage: "larger than the 33 MiB"},
 		// Test 2: Another write a little over the ordinary cap is refused with that cap named.
 		{Method: http.MethodPost, Path: "/v1/templates", Size: maxBodyBytes + 4096,
 			WantStatus: http.StatusRequestEntityTooLarge, WantMessage: "larger than the 1 MiB"},

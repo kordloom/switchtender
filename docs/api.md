@@ -177,10 +177,10 @@ Two more are enforced somewhere other than the request:
 | POST   | `/v1/inventory-sources/{id}/refresh` | Refresh a source into its inventory now.      |
 | PUT    | `/v1/inventory-sources/{id}` | Update an inventory source.                           |
 | DELETE | `/v1/inventory-sources/{id}` | Delete an inventory source.                           |
-| POST   | `/v1/inventories`          | Store an inventory. Runs reference it by id anywhere. A body may be up to 26 MiB, the same as an import, so anything that imported can be edited; every other write is limited to 1 MiB, and a body over the limit answers 413 naming it. |
+| POST   | `/v1/inventories`          | Store an inventory. Runs reference it by id anywhere. Its content may be up to 16 MiB, and past that the write answers 400 naming both sizes. The body may be up to 33 MiB, twice the content limit plus room for the other fields, so any content within the limit writes back whatever its JSON encoding. Every other write is limited to 1 MiB, and a body over the limit answers 413 naming it. |
 | GET    | `/v1/inventories`          | List stored inventories as summaries: name, kind, owner and size in bytes, never the content. |
 | GET    | `/v1/inventories/{id}`     | Read one stored inventory with its content, secret-looking values masked below admin. |
-| PUT    | `/v1/inventories/{id}`     | Update a stored inventory. Creating, changing, or renaming a constructed inventory is for an admin only, whatever grant the caller holds, and anyone else is answered `403`. |
+| PUT    | `/v1/inventories/{id}`     | Update a stored inventory, under the same 16 MiB content limit and 33 MiB body limit as creating one. Creating, changing, or renaming a constructed inventory is for an admin only, whatever grant the caller holds, and anyone else is answered `403`. |
 | DELETE | `/v1/inventories/{id}`     | Delete a stored inventory, with every fact cached for its hosts. |
 | GET    | `/v1/inventories/{id}/facts` | List the inventory's hosts with cached facts: size, gathering run, and time. Operator role. |
 | GET    | `/v1/inventories/{id}/facts/{host}` | Read one host's cached facts. Secret-looking values are masked below admin. Operator role. |

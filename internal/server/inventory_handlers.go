@@ -95,6 +95,10 @@ func applyComposition(ctx context.Context, store inventory.Store, req createInve
 // inventory.MaxHosts. Every run against such an inventory is refused, so it is refused where it is
 // saved instead, with the bound named.
 func refuseOverBound(w http.ResponseWriter, log *zap.Logger, content string) bool {
+	if err := inventory.CheckContentSize(content); err != nil {
+		respondError(w, log, http.StatusBadRequest, err.Error())
+		return true
+	}
 	if err := inventory.CheckHostBound(content); err != nil {
 		respondError(w, log, http.StatusBadRequest, err.Error())
 		return true

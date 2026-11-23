@@ -388,6 +388,17 @@ expands to. Creating or replacing one past that is refused with the limit named,
 an import that would bring one in, before anything from the export is stored. Content fetched at
 launch from a command or a secret store is counted when a run launches, and a launch past the limit
 is refused with the same reason.</p>
+<h2 id="how-large-one-may-be">How large one may be</h2>
+<p>A stored inventory's content may be up to 16 MiB. Ten thousand hosts with a handful of variables each
+come to about 2 MiB, so the limit is reached only by an inventory carrying tens of synced cloud
+variables on every host. Creating or replacing one past it is refused with both sizes named. The
+request body may be larger than the content, so any content within the limit can be read and written
+back, even where its JSON encoding doubles every quote and newline.</p>
+<p>An import does not refuse the whole export for one inventory past the limit. It leaves that
+inventory out, with every composed inventory, dynamic source, template, workflow, and schedule that
+names it, and its preview says so in one line naming the inventory's size and each object skipped
+with it. Everything else applies. Keep an inventory that large as a dynamic inventory file in a
+project, or import it without the synced host variables.</p>
 <h2 id="creating-one-through-the-api">Creating one through the API</h2>
 <pre><code>POST /v1/inventories
 {&quot;name&quot;: &quot;web everywhere&quot;, &quot;kind&quot;: &quot;smart&quot;, &quot;host_filter&quot;: &quot;groups__name=web&quot;}
