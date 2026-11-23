@@ -120,7 +120,7 @@ func (d *Dispatcher) planFetcher(r *run.Run, goos string) (roundhouse.ModuleFetc
 // agentNotDownloaded is why the registry and remote modules of a run an agent asked for stay
 // unread.
 const agentNotDownloaded = "not downloaded, since an agent asked for this run and nothing is " +
-	"fetched for it before a person approves"
+	"fetched for it before a person approves, so the run's own init resolves it when the run starts"
 
 // windowsNotDownloaded is why the registry and remote modules of every plan stay unread on a
 // Windows server. It names no folder, since a scan's reasons reach a pull request's refusal
