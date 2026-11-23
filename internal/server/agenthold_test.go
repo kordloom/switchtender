@@ -256,6 +256,21 @@ func verdictOf(r run.Run, note string) agentHoldVerdict {
 		Noted: note != "" && slices.Contains(r.PolicyNotes, note)}
 }
 
+// agentHoldLaunch has an admin save the template in templateBody, then has the agent launch it with
+// launchBody, and returns the run the launch made.
+func agentHoldLaunch(t *testing.T, s *agentHoldServer, templateBody, launchBody string) run.Run {
+	t.Helper()
+	code, got := s.call(s.Admin, http.MethodPost, "/v1/templates", templateBody)
+	if code != http.StatusCreated {
+		t.Fatalf("admin saving the template = %d, want 201: %s", code, got)
+	}
+	var saved template.Template
+	if err := json.Unmarshal([]byte(got), &saved); err != nil {
+		t.Fatalf("decode template %q: %v", got, err)
+	}
+	return s.submit(t, s.Agent, http.MethodPost, "/v1/templates/"+saved.ID+"/launch", launchBody)
+}
+
 // exemptNote is the note a run carries when the named exemption let it proceed.
 func exemptNote(name string) string {
 	return fmt.Sprintf("requested by an agent bound to account %q, exempt from the default hold "+
@@ -308,25 +323,33 @@ func TestAgentHoldDirectSubmission(t *testing.T) {
 }
 
 // TestAgentHoldExemption proves an exemption is an explicit rule an admin writes, visible in the
-// policy list, that lets exactly the agent runs it matches proceed and names itself on them. The
-// controls are an agent run the exemption does not match, which is still held, and the agent
-// trying to write its own exemption, which is refused.
+// policy list, that lets exactly the agent launches of a saved template it matches proceed and
+// names itself on them. The controls are an agent launch the exemption does not match, which is
+// still held, the same command composed by the agent in a direct submission, which no exemption
+// covers and so is held, and the agent trying to write its own exemption, which is refused.
 func TestAgentHoldExemption(t *testing.T) {
 	t.Parallel()
 	const name = "agent smoke tests"
 	tests := []struct {
 		// Command is the agent's run.
 		Command string
+		// Composed has the agent submit the command itself rather than launch a template of it.
+		Composed bool
 		// WantVerdict is what the gate does with the exemption in force.
 		WantVerdict agentHoldVerdict
 		// WantNote is the note the run carries.
 		WantNote string
-	}{{ // Test 0: The run the exemption matches proceeds and names the exemption.
+	}{{ // Test 0: The saved template the exemption matches proceeds and names the exemption.
 		Command:     "./smoke-test.sh",
 		WantVerdict: agentHoldVerdict{Noted: true},
 		WantNote:    exemptNote(name),
-	}, { // Test 1: A run it does not match is still held by default, the control.
+	}, { // Test 1: A template it does not match is still held by default, the control.
 		Command: "./rotate-certs.sh",
+		WantVerdict: agentHoldVerdict{Held: true, HeldBy: policy.AgentDefaultName,
+			Noted: true},
+		WantNote: policy.AgentDefaultName,
+	}, { // Test 2: The matching command composed by the agent has no template, so it is held.
+		Command: "./smoke-test.sh", Composed: true,
 		WantVerdict: agentHoldVerdict{Held: true, HeldBy: policy.AgentDefaultName,
 			Noted: true},
 		WantNote: policy.AgentDefaultName,
@@ -352,8 +375,14 @@ func TestAgentHoldExemption(t *testing.T) {
 					!strings.Contains(listed, name) {
 					t.Fatalf("the exemption is not in the policy list (%d): %s", code, listed)
 				}
-				got := s.submit(t, s.Agent, http.MethodPost, "/v1/runs",
-					`{"tool":"bash","command":"`+test.Command+`"}`)
+				var got run.Run
+				if test.Composed {
+					got = s.submit(t, s.Agent, http.MethodPost, "/v1/runs",
+						`{"tool":"bash","command":"`+test.Command+`"}`)
+				} else {
+					got = agentHoldLaunch(t, s, `{"name":"tpl","tool":"bash","command":"`+
+						test.Command+`"}`, `{}`)
+				}
 				if diff := cmp.Diff(test.WantVerdict, verdictOf(got, test.WantNote)); diff != "" {
 					t.Errorf("verdict mismatch (-want +got):\n%s\nnotes: %q", diff,
 						got.PolicyNotes)
@@ -409,8 +438,9 @@ func TestAgentHoldExemptionIsCommunity(t *testing.T) {
 
 // TestAgentHoldDryRun proves every dry run an agent asks for waits for a person with no policy
 // written, clean or not, since a dry run still runs code with this server's credentials, and that
-// the hold says why. An exemption covering the dry run lets it through, and the controls are the
-// same dry runs from a person, which proceed.
+// the hold says why. An exemption covering the dry run lets an agent's launch of a saved dry-run
+// template through. The controls are the same dry run composed by the agent, which no exemption
+// covers and so is held, and the same dry runs from a person, which proceed.
 //
 //nolint:funlen // Test function.
 func TestAgentHoldDryRun(t *testing.T) {
@@ -425,6 +455,8 @@ func TestAgentHoldDryRun(t *testing.T) {
 		Body string
 		// Person submits as the person rather than the agent.
 		Person bool
+		// Template has an admin save Body as a template and the agent launch it.
+		Template bool
 		// Exemption is a policy the admin writes first, empty for none.
 		Exemption string
 		// WantHeld reports the run waits for a person.
@@ -440,8 +472,9 @@ func TestAgentHoldDryRun(t *testing.T) {
 	}, { // Test 2: A check whose playbook forces a real restart is held.
 		Body:     `{"playbook":"` + forced + `","inventory":"localhost,","dry_run":true}`,
 		WantHeld: true, WantNote: "check mode still runs lookups",
-	}, { // Test 3: An exemption covering the agent's dry run lets it through.
-		Body:      `{"tool":"bash","command":"./rotate-certs.sh","dry_run":true}`,
+	}, { // Test 3: An exemption covering the agent's launch of a dry-run template lets it through.
+		Body:      `{"name":"checks","tool":"bash","command":"./rotate-certs.sh","dry_run":true}`,
+		Template:  true,
 		Exemption: checks,
 	}, { // Test 4: A person's clean Ansible check proceeds, the control for test 1.
 		Body:   `{"playbook":"` + clean + `","inventory":"localhost,","dry_run":true}`,
@@ -449,6 +482,9 @@ func TestAgentHoldDryRun(t *testing.T) {
 	}, { // Test 5: A person's bash dry run proceeds, the control for test 0.
 		Body:   `{"tool":"bash","command":"./rotate-certs.sh","dry_run":true}`,
 		Person: true,
+	}, { // Test 6: The exemption does not cover the same dry run composed by the agent.
+		Body:      `{"tool":"bash","command":"./rotate-certs.sh","dry_run":true}`,
+		Exemption: checks, WantHeld: true, WantNote: "a dry run still runs code",
 	}}
 	for _, backend := range agentHoldBackends() {
 		for testNum, test := range tests {
@@ -465,7 +501,12 @@ func TestAgentHoldDryRun(t *testing.T) {
 				if test.Person {
 					token = s.Person
 				}
-				got := s.submit(t, token, http.MethodPost, "/v1/runs", test.Body)
+				var got run.Run
+				if test.Template {
+					got = agentHoldLaunch(t, s, test.Body, `{}`)
+				} else {
+					got = s.submit(t, token, http.MethodPost, "/v1/runs", test.Body)
+				}
 				if held := got.Status == run.StatusPendingApproval; held != test.WantHeld {
 					t.Fatalf("held = %t, want %t: held by %q", held, test.WantHeld,
 						got.HeldByPolicy)
@@ -559,7 +600,7 @@ func agentHoldSeed(t *testing.T, db agentHoldDB) {
 	person := func(id string, status run.Status) *run.Run {
 		return &run.Run{ID: id, Playbook: "site.yml", Inventory: "hosts.ini",
 			ProjectID: dispatchtest.LocalProjectID, Status: status, CreatedAt: at,
-			Actor: "dev-lead-cli", ActorType: "token"}
+			Actor: "dev-lead-cli", ActorType: "token", TemplateID: "tpl_deploy"}
 	}
 	if err := db.runs.Save(ctx, person("run_done", run.StatusSucceeded)); err != nil {
 		t.Fatalf("runs.Save(run_done) error = %v", err)

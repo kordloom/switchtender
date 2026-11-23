@@ -29,10 +29,10 @@ func humanRun(tool, command, account string) *run.Run {
 		Account: account, Tool: tool, Command: command}
 }
 
-// agentOn returns a run the named agent token submitted on account.
+// agentOn returns a run the named agent token launched from a saved template on account.
 func agentOn(name, account string) *run.Run {
 	return &run.Run{Actor: name, ActorType: policy.ActorKindAgent, ActorUserID: "usr_" + account,
-		Account: account, Tool: run.ToolBash, Command: "./deploy.sh"}
+		Account: account, Tool: run.ToolBash, Command: "./deploy.sh", TemplateID: "tpl_deploy"}
 }
 
 // TestTheCommunityEngineIsTheOneInForce pins that a build without the paid module evaluates every

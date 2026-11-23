@@ -20,12 +20,21 @@ const releaseOnDevLead = "release agent on dev-lead"
 // boundAgent returns the context and options a request from the agent token labeled release-agent
 // carries when the token is bound to account: the account on the context, by id and by name, the
 // way the auth gate places it, and the label, kind, and account id the handler stamps. Two teams
-// can each mint a token with that label, so the account is what tells their runs apart.
+// can each mint a token with that label, so the account is what tells their runs apart. The agent
+// launches a saved template, since only such a run can be exempt.
 func boundAgent(account string) (context.Context, []run.SubmitOption) {
 	id := "usr_" + account
 	ctx := run.WithAccountContext(context.Background(), id, account)
 	return ctx, []run.SubmitOption{run.WithActor("release-agent"),
-		run.WithActorType(policy.ActorKindAgent), run.WithActorAccount(id)}
+		run.WithActorType(policy.ActorKindAgent), run.WithActorAccount(id),
+		run.WithTemplate("tpl_release")}
+}
+
+// composedAgent returns what boundAgent does for a request the agent composed itself rather than
+// launched from a saved template, which no exemption covers.
+func composedAgent(account string) (context.Context, []run.SubmitOption) {
+	ctx, opts := boundAgent(account)
+	return ctx, opts[:len(opts)-1]
 }
 
 // accountRules returns a policy store holding the dev-lead exemption and any further rules.
@@ -96,9 +105,10 @@ func TestAnExemptionCoversOneAccountsAgentAndItsDerivedRuns(t *testing.T) {
 			d := New(store, &failingLister{hosts: []string{"web01", "web02"}}, zap.NewNop(),
 				WithNoJanitor(), WithPolicies(accountRules(t)), projects)
 			t.Cleanup(d.Close)
-			// A person's split fails, which is what makes a retry available.
+			// A person's launch of a saved template fails as a split, which is what makes a retry
+			// available. The retry carries the template, so the exemption can cover it.
 			parent, err := d.SubmitSplit(context.Background(), "site.yml", "inv", 2,
-				append(dispatchtest.PersonOpts(), from)...)
+				append(dispatchtest.PersonOpts(), from, run.WithTemplate("tpl_release"))...)
 			if err != nil {
 				t.Fatalf("SubmitSplit() error = %v", err)
 			}

@@ -19,6 +19,7 @@ import (
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/template"
 	"github.com/kordloom/switchtender/internal/user"
 )
 
@@ -72,8 +73,9 @@ func newStepHarness(t *testing.T) *stepHarness {
 			return roundhouse.Result{ExitCode: 0}, nil
 		},
 	)
-	// The agent's workflow is exempt from the default hold, so it runs to the approval step these
-	// tests decide on rather than waiting at submission.
+	// The agent's saved workflow is exempt from the default hold, so it runs to the approval step
+	// these tests decide on rather than waiting at launch. A workflow the agent submits whole is not
+	// covered by an exemption, which is why the agent launches a saved one.
 	policies := policy.NewMemStore()
 	if err := policies.Save(ctx, &policy.Policy{ID: policy.NewID(), Name: "workflow agent",
 		Actor: "deploy-bot", Account: owner.Username, Effect: policy.EffectExempt,
@@ -84,7 +86,7 @@ func newStepHarness(t *testing.T) *stepHarness {
 		dispatch.WithNoJanitor(), dispatch.WithPolicies(policies))
 	t.Cleanup(d.Close)
 	handler := New(store, d, zap.NewNop(), WithTokens(tokens), WithUsers(users), WithAudit(audits),
-		WithApprover(d)).Handler()
+		WithApprover(d), WithTemplates(template.NewMemStore())).Handler()
 	return &stepHarness{handler: handler, store: store, admin: mint("laptop", false),
 		agent: mint("deploy-bot", true), adminID: owner.ID, d: d}
 }
@@ -112,13 +114,33 @@ const gatedPipeline = `{"name":"release","steps":[
 	{"name":"gate","type":"approval","description":"Ship it?","depends_on":["build"]},
 	{"name":"deploy","tool":"bash","command":"ship","depends_on":["gate"]}]}`
 
-// submitGated submits the gated pipeline as token and waits until it waits at its step, returning
-// the workflow's id and the waiting step as GET /approvals describes it.
+// gatedTemplate is the same workflow saved as a template.
+const gatedTemplate = `{"name":"release","steps":[
+	{"name":"build","tool":"bash","command":"make"},
+	{"name":"gate","type":"approval","description":"Ship it?","depends_on":["build"]},
+	{"name":"deploy","tool":"bash","command":"ship","depends_on":["gate"]}]}`
+
+// submitGated starts the gated workflow as token and waits until it waits at its step, returning
+// the workflow's id and the waiting step as GET /approvals describes it. The person submits it
+// whole. The agent launches it as a saved workflow an admin wrote, since an exemption covers only a
+// run launched from a template.
 func (h *stepHarness) submitGated(t *testing.T, token string) (string, approvalStepView) {
 	t.Helper()
-	code, body := h.call(t, token, http.MethodPost, "/v1/pipelines", gatedPipeline)
+	path, payload := "/v1/pipelines", gatedPipeline
+	if token == h.agent {
+		code, saved := h.call(t, h.admin, http.MethodPost, "/v1/templates", gatedTemplate)
+		if code != http.StatusCreated {
+			t.Fatalf("POST /v1/templates = %d %s, want 201", code, saved)
+		}
+		var tpl template.Template
+		if err := json.Unmarshal([]byte(saved), &tpl); err != nil {
+			t.Fatalf("decode template: %v", err)
+		}
+		path, payload = "/v1/templates/"+tpl.ID+"/launch", `{}`
+	}
+	code, body := h.call(t, token, http.MethodPost, path, payload)
 	if code != http.StatusAccepted {
-		t.Fatalf("POST /v1/pipelines = %d %s, want 202", code, body)
+		t.Fatalf("POST %s = %d %s, want 202", path, code, body)
 	}
 	var created run.Run
 	if err := json.Unmarshal([]byte(body), &created); err != nil {

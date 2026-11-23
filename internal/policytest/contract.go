@@ -119,7 +119,8 @@ func testExemptionRoundTrip(t *testing.T, store policy.Store) {
 		t.Errorf("Get() = %+v, want the saved exemption", got)
 	}
 	covered := &run.Run{Actor: "triage-bot", ActorType: policy.ActorKindAgent, Account: "ops",
-		Tool: "bash", Command: "run smoke tests", InventoryID: "inv_lab", Queue: "staging"}
+		Tool: "bash", Command: "run smoke tests", InventoryID: "inv_lab", Queue: "staging",
+		TemplateID: "tpl_smoke"}
 	if held := policy.Requiring(listed, covered); held != nil {
 		t.Errorf("the loaded exemption left the agent's run held by %q", held.Label())
 	}

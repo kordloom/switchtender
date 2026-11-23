@@ -35,6 +35,12 @@ func smokeExemption(t *testing.T) policy.Store {
 	})
 }
 
+// launchedAgentOpts returns the options an agent's launch of a saved template stamps on its run.
+// Only such a run can be exempt.
+func launchedAgentOpts() []run.SubmitOption {
+	return append(dispatchtest.AgentOpts(), run.WithTemplate("tpl_smoke"))
+}
+
 // newAgentHoldDispatcher returns a dispatcher over store, with rules as its policy store when it
 // is not nil and with no policy store at all when it is.
 func newAgentHoldDispatcher(t *testing.T, store run.Store, rules policy.Store,
@@ -77,14 +83,17 @@ func TestAnAgentsRunIsHeldWithNoPolicyWritten(t *testing.T) {
 		Rules: func(*testing.T) policy.Store { return policy.NewMemStore() },
 		Opts:  dispatchtest.AgentOpts(), Command: "systemctl restart web", WantHeld: true,
 		WantNotes: []string{policy.AgentDefaultName},
-	}, { // Test 3: An exemption lets the agent's run it covers go ahead, named in the evidence.
-		Rules: smokeExemption, Opts: dispatchtest.AgentOpts(), Command: "./run smoke tests", WantHeld: false,
+	}, { // Test 3: An exemption lets the agent's template launch it covers go ahead, named in the evidence.
+		Rules: smokeExemption, Opts: launchedAgentOpts(), Command: "./run smoke tests", WantHeld: false,
 		WantNotes: []string{smokeExemptNote},
 	}, { // Test 4: The exemption covers nothing it does not name.
-		Rules: smokeExemption, Opts: dispatchtest.AgentOpts(), Command: "rm -rf /var/backups", WantHeld: true,
+		Rules: smokeExemption, Opts: launchedAgentOpts(), Command: "rm -rf /var/backups", WantHeld: true,
 		WantNotes: []string{policy.AgentDefaultName},
 	}, { // Test 5: The exemption never touches a person's run.
 		Rules: smokeExemption, Opts: dispatchtest.PersonOpts(), Command: "./run smoke tests", WantHeld: false,
+	}, { // Test 6: The exemption does not cover a run the agent composed itself, the control for test 3.
+		Rules: smokeExemption, Opts: dispatchtest.AgentOpts(), Command: "./run smoke tests", WantHeld: true,
+		WantNotes: []string{policy.AgentDefaultName},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -141,7 +150,7 @@ func TestTheEvidenceSaysWhyAnAgentsRunWaitedOrWent(t *testing.T) {
 		Opts: dispatchtest.AgentOpts(), Command: "systemctl restart web",
 		WantNotes: []string{policy.AgentDefaultName},
 	}, { // Test 1: An exempt agent run names its exemption.
-		Opts: dispatchtest.AgentOpts(), Command: "./run smoke tests", WantNotes: []string{smokeExemptNote},
+		Opts: launchedAgentOpts(), Command: "./run smoke tests", WantNotes: []string{smokeExemptNote},
 	}, { // Test 2: A person's run records nothing about the agent hold.
 		Opts: dispatchtest.PersonOpts(), Command: "systemctl restart web",
 	}}
@@ -237,7 +246,7 @@ func TestAnAgentsDryRunIsHeld(t *testing.T) {
 		Opts: dispatchtest.PersonOpts(),
 	}, { // Test 3: An exemption covering the agent's dry run lets it go ahead.
 		Tool: run.ToolAnsible, Files: map[string]string{"site.yml": forcedTaskPlaybook},
-		Rules: ansibleChecks, Opts: dispatchtest.AgentOpts(),
+		Rules: ansibleChecks, Opts: launchedAgentOpts(),
 	}, { // Test 4: A clean configuration's plan is held all the same, saying why.
 		Tool: run.ToolTerraform, Files: map[string]string{"main.tf": dispatchtest.CleanConfig},
 		Opts: dispatchtest.AgentOpts(), WantHeldBy: policy.AgentDefaultName,
@@ -484,7 +493,8 @@ func TestAnAgentsRelaunchOfFailedHostsIsHeld(t *testing.T) {
 
 // TestAnAgentsWorkflowIsHeld covers a workflow, submitted through a different path than a single
 // run. An agent's workflow waits for a person, a person's does not, and an exemption naming the
-// agent covers the workflow and every step it runs.
+// agent covers its launch of a saved workflow and every step it runs, and not a workflow it
+// submitted whole.
 func TestAnAgentsWorkflowIsHeld(t *testing.T) {
 	t.Parallel()
 	// Each case gets its own steps, since a submission sanitizes the steps it is handed in place.
@@ -510,8 +520,10 @@ func TestAnAgentsWorkflowIsHeld(t *testing.T) {
 		Opts: dispatchtest.AgentOpts(), WantHeld: true,
 	}, { // Test 1: A person's workflow runs, the control.
 		Opts: dispatchtest.PersonOpts(), WantHeld: false,
-	}, { // Test 2: An exemption naming the agent covers the workflow and its steps.
-		Rules: byName, Opts: dispatchtest.AgentOpts(), WantHeld: false,
+	}, { // Test 2: An exemption naming the agent covers its launch of a saved workflow and its steps.
+		Rules: byName, Opts: launchedAgentOpts(), WantHeld: false,
+	}, { // Test 3: The same exemption does not cover a workflow the agent submitted whole.
+		Rules: byName, Opts: dispatchtest.AgentOpts(), WantHeld: true,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -585,12 +597,15 @@ func TestAnAgentsApplyTakesTwoApprovals(t *testing.T) {
 		Config: dispatchtest.ExternalConfig, Opts: dispatchtest.AgentOpts(), WantTwoSteps: true,
 	}, { // Test 4: A person's apply applies as it always did, the control.
 		Config: dispatchtest.CleanConfig, Opts: dispatchtest.PersonOpts(),
-	}, { // Test 5: An exempt agent's apply applies as the exemption allows.
+	}, { // Test 5: An exempt agent's template launch applies as the exemption allows.
 		Rules:  func(t *testing.T) policy.Store { return dispatchtest.RulesHolding(t, exempt) },
-		Config: dispatchtest.CleanConfig, Opts: dispatchtest.AgentOpts(),
+		Config: dispatchtest.CleanConfig, Opts: launchedAgentOpts(),
 	}, { // Test 6: Under a destroy limit it plans first and its proposal goes ahead.
 		Rules:  func(t *testing.T) policy.Store { return dispatchtest.RulesHolding(t, exempt, limit) },
-		Config: dispatchtest.CleanConfig, Opts: dispatchtest.AgentOpts(), WantProposal: true,
+		Config: dispatchtest.CleanConfig, Opts: launchedAgentOpts(), WantProposal: true,
+	}, { // Test 7: The exemption does not cover an apply the agent composed, the control for test 5.
+		Rules:  func(t *testing.T) policy.Store { return dispatchtest.RulesHolding(t, exempt) },
+		Config: dispatchtest.CleanConfig, Opts: dispatchtest.AgentOpts(), WantTwoSteps: true,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

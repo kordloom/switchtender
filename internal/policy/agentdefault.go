@@ -42,7 +42,18 @@ func AgentRequested(r *run.Run) bool {
 // An exemption naming an agent's label without its account is refused where it is written, and
 // skipped here as well, so one that reached a store some other way still exempts nothing: a label
 // repeats across accounts, and an exemption keyed on it alone fails open.
+//
+// No exemption covers a run that no saved template launched. A rule matches a run's command text,
+// tool, queue, and inventory, and none of the credentials, image, or variables the run carries, so
+// an agent that composed its own run could pair a command the exemption names with any stored
+// credential and run with nobody looking. A saved template was written by a person with the right
+// to configure it, and a launch pins its credentials, inventory, and variables, so the run an
+// exemption lets through is one a person wrote. The condition sits here and not in MatchesPlain, so
+// a rule that holds still matches a run with no template.
 func Exempting(policies []*Policy, r *run.Run) *Policy {
+	if r == nil || r.TemplateID == "" {
+		return nil
+	}
 	for _, p := range policies {
 		if p == nil || p.Rego != nil || !p.Exempts() || (p.Actor != "" && p.Account == "") {
 			continue
@@ -163,8 +174,9 @@ func AgentNote(policies []*Policy, r *run.Run) string {
 		p.Label())
 }
 
-// validateExemption checks an exemption's shape. An exemption says which agent runs may go ahead
-// without the built-in hold, so it takes the criteria that pick runs out and nothing that only
+// validateExemption checks an exemption's shape. An exemption says which agent runs launched from a
+// saved template may go ahead without the built-in hold, so it takes the criteria that pick runs out
+// and nothing that only
 // means something on a rule that holds: a risk or reversibility floor would exempt the riskiest
 // runs and leave the routine ones held, and an approver requirement has no decision to apply to.
 func (p *Policy) validateExemption() error {
@@ -188,7 +200,8 @@ func (p *Policy) validateExemption() error {
 		p.RequireDistinctApprover || p.RequireReason != "" || p.MaxDestroy >= 0 {
 		return fmt.Errorf("an exemption takes only tool, command_contains, inventory_id, queue, " +
 			"account, and actor: min_risk, reversibility, exclude_dry_run, " +
-			"require_distinct_approver, require_reason, and max_destroy belong on a rule that holds")
+			"require_distinct_approver, require_reason, and max_destroy belong on a rule that " +
+			"holds. An exemption covers only an agent's runs launched from a saved template")
 	}
 	return nil
 }
