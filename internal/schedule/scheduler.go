@@ -627,7 +627,8 @@ func (s *Scheduler) fire(ctx context.Context, sc *Schedule) (string, error) {
 	// names no stored object for grants to reach, so an unstamped run is ownerless, which under strict
 	// grants means denied to every non-admin. The tenant that owns the schedule could see the schedule
 	// and none of the runs it produced.
-	base := []run.SubmitOption{run.WithSource("schedule", sc.ID), run.WithOrgID(sc.OrgID), key}
+	base := []run.SubmitOption{run.WithSource("schedule", sc.ID), run.WithOrgID(sc.OrgID), key,
+		run.WithPathsByAdmin(sc.PathsByAdmin)}
 
 	var created *run.Run
 	switch {

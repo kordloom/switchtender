@@ -122,6 +122,9 @@ CREATE TABLE IF NOT EXISTS runs (
 	-- Whether a Terraform or OpenTofu apply's own submission asked for approval, so the apply its
 	-- plan proposes is held. Set when the run is created and never cleared.
 	approval_requested INTEGER NOT NULL DEFAULT 0,
+	-- Set when an admin in person named the paths this row runs, so a run in an execution image may
+	-- take them from the control node rather than from a project.
+	paths_by_admin INTEGER NOT NULL DEFAULT 0,
 	-- The username of the account the requesting credential is bound to, which a policy's account
 	-- criterion matches. Copied to every run derived from the request.
 	account TEXT NOT NULL DEFAULT '',
@@ -339,6 +342,9 @@ CREATE TABLE IF NOT EXISTS schedules (
 	-- fire whose inventory matched no hosts is skipped rather than failed.
 	last_skip     TEXT NOT NULL DEFAULT '',
 	skipped_fires INTEGER NOT NULL DEFAULT 0,
+	-- Set when an admin in person named the paths this row runs, so a run in an execution image may
+	-- take them from the control node rather than from a project.
+	paths_by_admin INTEGER NOT NULL DEFAULT 0,
 	-- The occurrence a claim took for a fire whose run is not yet known to exist, and when it was
 	-- marked, by the database clock in Unix milliseconds. A sweep fires it again once it has been
 	-- marked too long, so a server that stops mid-fire leaves the occurrence late rather than lost.
@@ -423,7 +429,10 @@ CREATE TABLE IF NOT EXISTS templates (
 	allow_callbacks INTEGER NOT NULL DEFAULT 0,
 	host_config_key TEXT NOT NULL DEFAULT '',
 	callback_limit TEXT NOT NULL DEFAULT '',
-	awx_callback   INTEGER NOT NULL DEFAULT 0
+	awx_callback   INTEGER NOT NULL DEFAULT 0,
+	-- Set when an admin in person named the paths this row runs, so a run in an execution image may
+	-- take them from the control node rather than from a project.
+	paths_by_admin INTEGER NOT NULL DEFAULT 0
 );
 -- awx_callback_bindings ties an AWX job template id to the template an import created from that AWX
 -- job template, so a host's boot script that still posts to AWX's callback address reaches it. Only
@@ -1135,7 +1144,7 @@ func migrateRuns(db *sql.DB) error {
 		return fmt.Errorf("add queued_at column: %w", err)
 	}
 	for _, column := range []string{"verbosity", "forks", "diff_mode", "distinct_approver",
-		"use_fact_cache", "fact_cache_timeout", "approval_requested"} {
+		"use_fact_cache", "fact_cache_timeout", "approval_requested", "paths_by_admin"} {
 		if _, err := db.Exec(
 			"ALTER TABLE runs ADD COLUMN " + column + " INTEGER NOT NULL DEFAULT 0"); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {
@@ -1540,6 +1549,7 @@ func migrateTemplates(db *sql.DB) error {
 		"ALTER TABLE templates ADD COLUMN steps TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE templates ADD COLUMN limit_pattern TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE templates ADD COLUMN use_fact_cache INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE templates ADD COLUMN paths_by_admin INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE templates ADD COLUMN fact_cache_timeout INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE templates ADD COLUMN allow_callbacks INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE templates ADD COLUMN host_config_key TEXT NOT NULL DEFAULT ''",
@@ -1566,6 +1576,7 @@ func migrateSchedules(db *sql.DB) error {
 		"spring_forward TEXT NOT NULL DEFAULT ''",
 		"last_skip TEXT NOT NULL DEFAULT ''",
 		"skipped_fires INTEGER NOT NULL DEFAULT 0",
+		"paths_by_admin INTEGER NOT NULL DEFAULT 0",
 	} {
 		if _, err := db.Exec("ALTER TABLE schedules ADD COLUMN " + column); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {

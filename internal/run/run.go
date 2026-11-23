@@ -370,6 +370,12 @@ type Run struct {
 	// will execute in. When the registry answered at submission the reference carries the digest the
 	// tag resolved to, and the run executes by that digest.
 	Image string `json:"image,omitempty"`
+	// PathsByAdmin records that an admin acting in person named this run's paths, the playbook and
+	// inventory or the Terraform or OpenTofu directory of a run with no project. Below admin, a path a
+	// run named is never mounted into an execution image, so the executor refuses such a mount on a
+	// run without it. It is decided by the server from the caller, bound to the paths it was decided
+	// for, and copied from the stored row by a relaunch, a split child, and a callback.
+	PathsByAdmin bool `json:"paths_by_admin,omitempty"`
 	// PullCredentialID names a registry credential for pulling a private Image. Empty for public.
 	PullCredentialID string `json:"pull_credential_id,omitempty"`
 	// ImageDigest is the digest of the image the container runtime actually pulled and ran, recorded
@@ -884,6 +890,11 @@ func SealedVarNames(sealed map[string]string) []string {
 	return slices.Sorted(maps.Keys(sealed))
 }
 
+// WithPathsByAdmin records whether an admin acting in person named the run's paths.
+func WithPathsByAdmin(byAdmin bool) SubmitOption {
+	return func(r *Run) { r.PathsByAdmin = byAdmin }
+}
+
 // WithSealedVars attaches secret survey answers, each already sealed with the credential key, keyed
 // by variable name. SealedNames is set from the keys so a reader can see which answers were
 // supplied, and SealedDigests from the ciphertexts so the run's spec binds each one. Empty is a
@@ -1129,6 +1140,7 @@ func (r *Run) ExecutionOptions() []SubmitOption {
 		WithExtraVars(r.ExtraVars),
 		WithSealedVars(r.SealedVars),
 		withSealedDigests(r.SealedDigests),
+		WithPathsByAdmin(r.PathsByAdmin),
 		WithCredentialIDs(r.CredentialIDs),
 		WithTags(r.Tags...),
 		WithSkipTags(r.SkipTags...),

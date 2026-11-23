@@ -161,6 +161,8 @@ func TestContainerRunRefusalsHappenBeforeTheRuntimeIsCalled(t *testing.T) {
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
+			// The mount guard is judged for an admin in person, whose named paths may reach an image.
+			test.Spec.PathsByAdmin = true
 			bin, dir := stubRuntimeExits(t, 0, 0)
 			c := newContainerRunner(bin, "missing", test.RequireDigest, nil, &pluginCache{},
 				DefaultContainerLimits())

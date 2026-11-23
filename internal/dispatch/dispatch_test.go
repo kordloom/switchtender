@@ -1168,7 +1168,9 @@ func TestRunImageReachesSpec(t *testing.T) {
 	defer d.Close()
 
 	created, err := d.Submit(context.Background(), "play.yml", "inv.ini",
-		run.WithImage("ghcr.io/acme/ee:9", "cred_pull"))
+		run.WithImage("ghcr.io/acme/ee:9", "cred_pull"),
+		// An admin sent these paths, the one sender whose path run may execute in an image.
+		run.WithPathsByAdmin(true))
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -1213,7 +1215,8 @@ func TestDefaultImageFallback(t *testing.T) {
 	defer d.Close()
 
 	// Test 0: A run pinning no image falls back to the configured default.
-	created, err := d.Submit(context.Background(), "play.yml", "inv")
+	// An admin sent these paths, the one sender whose path run may execute in an image.
+	created, err := d.Submit(context.Background(), "play.yml", "inv", run.WithPathsByAdmin(true))
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -1224,7 +1227,7 @@ func TestDefaultImageFallback(t *testing.T) {
 
 	// Test 1: A run pinning its own image is not overridden by the default.
 	created, err = d.Submit(context.Background(), "play.yml", "inv",
-		run.WithImage("ghcr.io/acme/pinned:2", ""))
+		run.WithImage("ghcr.io/acme/pinned:2", ""), run.WithPathsByAdmin(true))
 	if err != nil {
 		t.Fatalf("Submit(pinned) error = %v", err)
 	}
@@ -1339,6 +1342,8 @@ func TestSplitShardsInheritExecution(t *testing.T) {
 		run.WithExtraVars(map[string]any{"env": "prod"}),
 		run.WithImage("ghcr.io/acme/ee:9", "cred_pull"),
 		run.WithTimeout(900),
+		// An admin sent these paths, the one sender whose path run may execute in an image.
+		run.WithPathsByAdmin(true),
 		run.WithDryRun(true),
 	)
 	if err != nil {
@@ -1385,6 +1390,8 @@ func TestRetryShardsInheritExecution(t *testing.T) {
 		run.WithExtraVars(map[string]any{"env": "prod"}),
 		run.WithImage("ghcr.io/acme/ee:9", "cred_pull"),
 		run.WithTimeout(900),
+		// An admin sent these paths, the one sender whose path run may execute in an image.
+		run.WithPathsByAdmin(true),
 		run.WithDryRun(true),
 	)
 	if err != nil {
@@ -1803,7 +1810,8 @@ func TestExecutedImageRecordedOnRun(t *testing.T) {
 			d := New(store, runner, nil, append(opts, WithNotifyClient(http.DefaultClient))...)
 			defer d.Close()
 
-			var submitOpts []run.SubmitOption
+			// An admin sent these paths, the one sender whose path run may execute in an image.
+			submitOpts := []run.SubmitOption{run.WithPathsByAdmin(true)}
 			if test.Pinned != "" {
 				submitOpts = append(submitOpts, run.WithImage(test.Pinned, ""))
 			}

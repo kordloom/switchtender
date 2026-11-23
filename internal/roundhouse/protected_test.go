@@ -88,6 +88,8 @@ const initialTokenName = "initial-admin-token"
 // protectedRunArgs builds spec's container plan and its docker arguments with envFile mounted, the
 // way a run does.
 func protectedRunArgs(c *containerRunner, spec Spec, envFile string) ([]string, error) {
+	// The guard is judged for an admin in person, whose named paths may reach an image at all.
+	spec.PathsByAdmin = true
 	plan, cleanup, err := buildContainerPlan(spec)
 	defer cleanup()
 	if err != nil {
@@ -234,5 +236,44 @@ func TestProtectedPathsMessageNamesTheFix(t *testing.T) {
 		"own directory, or name the subdirectory holding the configuration."
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("error = %v, want it to hold %q", err, want)
+	}
+}
+
+// TestNamedMountFactDecidesAnImageRun pins the caller rule where the image is known: a path the run
+// named reaches an image only when an admin in person named it, and a missing fact refuses with the
+// path, the image, and what to do. A path inside a project is not named, so it needs no fact.
+func TestNamedMountFactDecidesAnImageRun(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	named := Spec{Tool: run.ToolTerraform, Command: dir, Image: "registry.example/tf:1"}
+	_, cleanup, err := buildContainerPlan(named)
+	cleanup()
+	if !errors.Is(err, ErrNamedPathBelowAdmin) {
+		t.Fatalf("named path without the fact: error = %v, want ErrNamedPathBelowAdmin", err)
+	}
+	for _, want := range []string{dir, "registry.example/tf:1", "Add the repository as a project"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q does not hold %q", err, want)
+		}
+	}
+	named.PathsByAdmin = true
+	plan, cleanup, err := buildContainerPlan(named)
+	cleanup()
+	if err != nil {
+		t.Fatalf("named path with the fact: error = %v", err)
+	}
+	if len(plan.mounts) == 0 || plan.mounts[0].path != dir {
+		t.Errorf("mounts = %+v, want the named directory", plan.mounts)
+	}
+	inProject := Spec{Tool: run.ToolAnsible, Dir: dir, Playbook: filepath.Join(dir, "site.yml"), Image: "x"}
+	_, cleanup, err = buildContainerPlan(inProject)
+	cleanup()
+	if err != nil {
+		t.Errorf("a project's playbook without the fact: error = %v, want none", err)
+	}
+	_, cleanup, err = buildModulesPlan(Spec{Tool: run.ToolTerraform, Command: dir, Image: "x"})
+	cleanup()
+	if !errors.Is(err, ErrNamedPathBelowAdmin) {
+		t.Errorf("module get of a named directory without the fact: error = %v, want ErrNamedPathBelowAdmin", err)
 	}
 }

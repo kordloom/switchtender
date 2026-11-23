@@ -120,6 +120,9 @@ CREATE TABLE IF NOT EXISTS runs (
 	-- Whether a Terraform or OpenTofu apply's own submission asked for approval, so the apply its
 	-- plan proposes is held. Set when the run is created and never cleared.
 	approval_requested INTEGER NOT NULL DEFAULT 0,
+	-- Set when an admin in person named the paths this row runs, so a run in an execution image may
+	-- take them from the control node rather than from a project.
+	paths_by_admin INTEGER NOT NULL DEFAULT 0,
 	-- The username of the account the requesting credential is bound to, which a policy's account
 	-- criterion matches. Copied to every run derived from the request.
 	account TEXT NOT NULL DEFAULT '',
@@ -200,6 +203,7 @@ ALTER TABLE runs ADD COLUMN IF NOT EXISTS diff_mode INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS claim_secret TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS use_fact_cache INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS paths_by_admin INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS fact_cache_timeout INTEGER NOT NULL DEFAULT 0;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_idempotency_key ON runs(idempotency_key) WHERE idempotency_key <> '';
 -- At most one unfinished provisioning callback run per template and host, the guard against two
@@ -397,6 +401,9 @@ CREATE TABLE IF NOT EXISTS schedules (
 	-- fire whose inventory matched no hosts is skipped rather than failed.
 	last_skip     TEXT NOT NULL DEFAULT '',
 	skipped_fires INTEGER NOT NULL DEFAULT 0,
+	-- Set when an admin in person named the paths this row runs, so a run in an execution image may
+	-- take them from the control node rather than from a project.
+	paths_by_admin INTEGER NOT NULL DEFAULT 0,
 	-- The occurrence a claim took for a fire whose run is not yet known to exist, and when it was
 	-- marked, by the database clock in Unix milliseconds. A sweep fires it again once it has been
 	-- marked too long, so a server that stops mid-fire leaves the occurrence late rather than lost.
@@ -411,6 +418,7 @@ ALTER TABLE schedules ADD COLUMN IF NOT EXISTS rrule TEXT NOT NULL DEFAULT '';
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS spring_forward TEXT NOT NULL DEFAULT '';
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS last_skip TEXT NOT NULL DEFAULT '';
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS skipped_fires INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS paths_by_admin INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS inflight_at TEXT;
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS inflight_ms BIGINT NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
@@ -507,7 +515,10 @@ CREATE TABLE IF NOT EXISTS templates (
 	allow_callbacks INTEGER NOT NULL DEFAULT 0,
 	host_config_key TEXT NOT NULL DEFAULT '',
 	callback_limit TEXT NOT NULL DEFAULT '',
-	awx_callback   INTEGER NOT NULL DEFAULT 0
+	awx_callback   INTEGER NOT NULL DEFAULT 0,
+	-- Set when an admin in person named the paths this row runs, so a run in an execution image may
+	-- take them from the control node rather than from a project.
+	paths_by_admin INTEGER NOT NULL DEFAULT 0
 );
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS notifications TEXT NOT NULL DEFAULT '';
@@ -523,6 +534,7 @@ ALTER TABLE templates ADD COLUMN IF NOT EXISTS diff_mode INTEGER NOT NULL DEFAUL
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS steps TEXT NOT NULL DEFAULT '';
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS limit_pattern TEXT NOT NULL DEFAULT '';
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS use_fact_cache INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE templates ADD COLUMN IF NOT EXISTS paths_by_admin INTEGER NOT NULL DEFAULT 0;
 -- Zero serves cached facts however old they are, which is what AWX does by default.
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS fact_cache_timeout INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS allow_callbacks INTEGER NOT NULL DEFAULT 0;

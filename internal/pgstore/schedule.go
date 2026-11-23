@@ -16,7 +16,7 @@ import (
 // scheduleColumns is the shared select list for schedule reads.
 const scheduleColumns = `id, name, cron, playbook, inventory, shards, steps, enabled,
 	created_at, next_run_at, last_run_at, last_run_id, template_id, timezone, org_id, created_by,
-	last_error, rrule, spring_forward, last_skip, skipped_fires`
+	last_error, rrule, spring_forward, last_skip, skipped_fires, paths_by_admin`
 
 // scheduleStore is a schedule.Store backed by the shared PostgreSQL database.
 type scheduleStore struct {
@@ -34,9 +34,9 @@ func (s *scheduleStore) Save(ctx context.Context, sc *schedule.Schedule) error {
 INSERT INTO schedules
 	(id, name, cron, playbook, inventory, shards, steps, enabled, created_at,
 	 next_run_at, last_run_at, last_run_id, template_id, timezone, org_id, created_by, last_error,
-	 rrule, spring_forward, last_skip, skipped_fires)
+	 rrule, spring_forward, last_skip, skipped_fires, paths_by_admin)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-	$21)
+	$21, $22)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, cron=excluded.cron, playbook=excluded.playbook,
 	inventory=excluded.inventory, shards=excluded.shards, steps=excluded.steps,
@@ -45,12 +45,12 @@ ON CONFLICT(id) DO UPDATE SET
 	template_id=excluded.template_id, timezone=excluded.timezone, org_id=excluded.org_id,
 	created_by=excluded.created_by, last_error=excluded.last_error, rrule=excluded.rrule,
 	spring_forward=excluded.spring_forward, last_skip=excluded.last_skip,
-	skipped_fires=excluded.skipped_fires`
+	skipped_fires=excluded.skipped_fires, paths_by_admin=excluded.paths_by_admin`
 	_, err = s.db.ExecContext(ctx, q,
 		sc.ID, sc.Name, sc.Cron, sc.Playbook, sc.Inventory, sc.Shards, string(steps),
 		boolInt(sc.Enabled), sqlutil.FormatTime(sc.CreatedAt), sqlutil.NullTime(sc.NextRunAt), sqlutil.NullTime(sc.LastRunAt),
 		sc.LastRunID, sc.TemplateID, sc.Timezone, sc.OrgID, sc.CreatedBy, sc.LastError, sc.RRule,
-		sc.SpringForward, sc.LastSkip, sc.SkippedFires,
+		sc.SpringForward, sc.LastSkip, sc.SkippedFires, boolInt(sc.PathsByAdmin),
 	)
 	if err != nil {
 		return fmt.Errorf("save schedule: %w", err)
@@ -109,14 +109,18 @@ func scanSchedule(sc scanner) (*schedule.Schedule, error) {
 		created string
 		nextRun sql.NullString
 		lastRun sql.NullString
+		// pathsByAdmin is whether an admin in person saved the schedule's paths.
+		pathsByAdmin int
 	)
 	if err := sc.Scan(&out.ID, &out.Name, &out.Cron, &out.Playbook, &out.Inventory, &out.Shards,
 		&steps, &enabled, &created, &nextRun, &lastRun, &out.LastRunID,
 		&out.TemplateID, &out.Timezone, &out.OrgID, &out.CreatedBy, &out.LastError,
-		&out.RRule, &out.SpringForward, &out.LastSkip, &out.SkippedFires); err != nil {
+		&out.RRule, &out.SpringForward, &out.LastSkip, &out.SkippedFires,
+		&pathsByAdmin); err != nil {
 		return nil, err
 	}
 	out.Enabled = enabled != 0
+	out.PathsByAdmin = pathsByAdmin != 0
 	if steps != "" {
 		if err := json.Unmarshal([]byte(steps), &out.Steps); err != nil {
 			return nil, err
@@ -152,13 +156,14 @@ UPDATE schedules SET
 	name=$1, cron=$2, playbook=$3, inventory=$4, shards=$5, steps=$6, enabled=$7, created_at=$8,
 	next_run_at=$9, last_run_at=$10, last_run_id=$11, template_id=$12, timezone=$13,
 	org_id=$14, created_by=$15, last_error=$16, rrule=$17, spring_forward=$18, last_skip=$19,
-	skipped_fires=$20
-WHERE id=$21`
+	skipped_fires=$20, paths_by_admin=$21
+WHERE id=$22`
 	res, err := s.db.ExecContext(ctx, q,
 		sc.Name, sc.Cron, sc.Playbook, sc.Inventory, sc.Shards, string(steps),
 		boolInt(sc.Enabled), sqlutil.FormatTime(sc.CreatedAt), sqlutil.NullTime(sc.NextRunAt),
 		sqlutil.NullTime(sc.LastRunAt), sc.LastRunID, sc.TemplateID, sc.Timezone, sc.OrgID,
-		sc.CreatedBy, sc.LastError, sc.RRule, sc.SpringForward, sc.LastSkip, sc.SkippedFires, sc.ID,
+		sc.CreatedBy, sc.LastError, sc.RRule, sc.SpringForward, sc.LastSkip, sc.SkippedFires,
+		boolInt(sc.PathsByAdmin), sc.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update schedule: %w", err)

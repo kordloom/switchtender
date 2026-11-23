@@ -63,7 +63,7 @@ var submitClasses = []struct {
 	{class: submitSecret, errs: []error{credential.ErrNoSecret, credential.ErrUnreadable}},
 	{class: submitPolicy, errs: []error{
 		dispatch.ErrPolicyDenied, dispatch.ErrQueueUnlicensed, dispatch.ErrAgentPathSplit,
-		dispatch.ErrHeldByPath,
+		dispatch.ErrHeldByPath, dispatch.ErrImagePathBelowAdmin,
 	}},
 	{class: submitContent, errs: []error{
 		inventory.ErrContentRead, dispatch.ErrImageUnpinned, dispatch.ErrCommitUnpinned,

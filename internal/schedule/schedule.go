@@ -111,6 +111,11 @@ type Schedule struct {
 	// own outage. What was missing is the record of who set it up, which is what an offboarding
 	// review actually needs in order to decide, so it is recorded and left at that.
 	CreatedBy string `json:"created_by,omitempty"`
+	// PathsByAdmin records that an admin in person saved this inline schedule's paths. A schedule
+	// fires with nobody present, so the saver stands in for the caller, and a run in an execution
+	// image mounts a named path only when this is set. A schedule that fires a template takes the
+	// template's own fact instead.
+	PathsByAdmin bool `json:"paths_by_admin,omitempty"`
 	// LastRunAt is when the schedule last fired.
 	LastRunAt *time.Time `json:"last_run_at,omitempty"`
 	// LastRunID is the run created by the most recent fire that created one.

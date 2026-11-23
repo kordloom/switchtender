@@ -173,6 +173,10 @@ type Spec struct {
 	// containerized run mounts an in-memory filesystem at the same path inside the container, so what
 	// the tool writes there stays in the container's memory. Empty keeps the temporary directory.
 	RunDir string
+	// PathsByAdmin reports that an admin in person named this run's paths. Without it a path the
+	// run named, the playbook's directory, the inventory, or a Terraform or OpenTofu directory with
+	// no project, is never mounted into an execution image.
+	PathsByAdmin bool
 	// InventoryStaged reports that Inventory is a file the dispatcher wrote for this run, a stored
 	// inventory, rather than a path the run named. A named inventory is judged against every
 	// protected path when it is mounted into an image.

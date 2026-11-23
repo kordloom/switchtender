@@ -81,6 +81,9 @@ func (d *Dispatcher) pinImage(ctx context.Context, r *run.Run) error {
 	// A project that cannot be read here leaves the server's default, as it always did: submission
 	// has already refused a run naming a project that does not exist.
 	r.Image, r.PullCredentialID, _ = d.runImage(ctx, r)
+	if err := refuseImagePaths(r); err != nil {
+		return err
+	}
 	pull, err := d.pullCredential(ctx, r.PullCredentialID)
 	if err != nil {
 		return err
@@ -223,4 +226,33 @@ func checkImagePin(r *run.Run, effective string) error {
 	}
 	return fmt.Errorf("%w: this run was approved to run in %s, and this executor would run it in %s",
 		ErrImagePin, approved, effective)
+}
+
+// refuseImagePaths returns ErrImagePathBelowAdmin when r will execute in an image, names its paths
+// on this server, and no admin in person named them. The executor holds the same rule where it
+// builds the container plan, which is the rule: a worker applies its own default image to a run sent
+// with none, which nothing here can know. This answers the sender at once when the image is already
+// known, the run's own, its template's, or this server's default.
+func refuseImagePaths(r *run.Run) error {
+	if r.Image == "" || r.PathsByAdmin || !namesHostPaths(r) {
+		return nil
+	}
+	return fmt.Errorf("%w. Add the repository as a project and name the directory inside it, or have "+
+		"an admin send it", ErrImagePathBelowAdmin)
+}
+
+// namesHostPaths reports whether r names paths on this server that an image run would mount: the
+// playbook and inventory of an Ansible run, or the directory of a Terraform or OpenTofu run, with no
+// project to contain them.
+func namesHostPaths(r *run.Run) bool {
+	if r.ProjectID != "" {
+		return false
+	}
+	switch run.NormalizeTool(r.Tool) {
+	case run.ToolAnsible:
+		return r.Playbook != "" || (r.Inventory != "" && r.InventoryID == "")
+	case run.ToolTerraform, run.ToolOpenTofu:
+		return r.Command != ""
+	}
+	return false
 }

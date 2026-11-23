@@ -34,6 +34,9 @@ var (
 	// ErrForbiddenMount is returned when a run would bind mount a sensitive host path, such as the
 	// filesystem root, a system directory, or the docker socket, into a container.
 	ErrForbiddenMount = errors.New("forbidden mount path")
+	// ErrNamedPathBelowAdmin is returned when a run below admin would mount a path it named on this
+	// server into an execution image. Such a run takes its paths from a project.
+	ErrNamedPathBelowAdmin = errors.New("a run in an execution image takes its paths from a project")
 	// ErrContainerDisabled is returned when a run needs a container image but container execution
 	// environments are not enabled on this executor.
 	ErrContainerDisabled = errors.New("container execution environments disabled: start with --allow-container-ee")

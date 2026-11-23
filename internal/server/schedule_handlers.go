@@ -180,6 +180,9 @@ func createScheduleHandler(store schedule.Store, templates template.Store, authz
 			CreatedBy: actorName(r),
 			// Empty is the cadence's default: jump for a cron expression, later for a rule.
 			SpringForward: scheduleSpringForward(req.SpringForward, ""),
+			// Read from the caller, never the body. The schedule fires with nobody present, so
+			// whoever saves its paths is the one who answers for them in an image.
+			PathsByAdmin: adminPerson(r) && req.TemplateID == "",
 		}
 		// A schedule that names no zone is read in this server's zone, and that zone is written onto
 		// it by name. Left unnamed, each server of a highly available pair read it in its own zone,
@@ -295,6 +298,9 @@ func updateScheduleHandler(store schedule.Store, templates template.Store, authz
 			CreatedBy: existing.CreatedBy,
 			// Kept through an edit that does not name it, like the enabled flag.
 			SpringForward: scheduleSpringForward(req.SpringForward, existing.SpringForward),
+			// Decided again by whoever saves now, so an edit below admin clears an admin's word on
+			// the paths even when the paths themselves are kept.
+			PathsByAdmin: adminPerson(r) && req.TemplateID == "",
 		}
 		// A stored schedule that names no zone, which only an earlier release writes, is read in
 		// schedule.UnnamedZone, so an edit that names none either writes that zone onto it rather

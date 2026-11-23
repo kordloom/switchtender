@@ -65,7 +65,7 @@ func TestClassifySubmitNamesEveryKnownError(t *testing.T) {
 		// held run that names its playbook by path.
 		WantClass: submitPolicy, Errs: []error{
 			dispatch.ErrPolicyDenied, dispatch.ErrQueueUnlicensed, dispatch.ErrAgentPathSplit,
-			dispatch.ErrHeldByPath,
+			dispatch.ErrHeldByPath, dispatch.ErrImagePathBelowAdmin,
 		},
 	}, { // Test 3: An inventory, image tag, or held run's commit that could not be read.
 		WantClass: submitContent, Errs: []error{

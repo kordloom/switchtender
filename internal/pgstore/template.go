@@ -17,7 +17,7 @@ const templateColumns = `id, name, project_id, playbook, inventory, inventory_id
 	pull_credential_id, org_id, notifications, selectable_credential_ids, timeout,
 	confirm_on_launch, tags, skip_tags, verbosity, forks, diff_mode, steps, limit_pattern,
 	use_fact_cache, fact_cache_timeout, allow_callbacks, host_config_key, callback_limit,
-	awx_callback`
+	awx_callback, paths_by_admin`
 
 // templateStore is a template.Store backed by the shared SQLite database.
 type templateStore struct {
@@ -46,9 +46,9 @@ INSERT INTO templates
 	 notifications, selectable_credential_ids, timeout, confirm_on_launch,
 	 tags, skip_tags, verbosity, forks, diff_mode, steps, limit_pattern,
 	 use_fact_cache, fact_cache_timeout, allow_callbacks, host_config_key, callback_limit,
-	 awx_callback)
+	 awx_callback, paths_by_admin)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-	$21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35)
+	$21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, project_id=excluded.project_id, playbook=excluded.playbook,
 	inventory=excluded.inventory, inventory_id=excluded.inventory_id, shards=excluded.shards,
@@ -63,7 +63,8 @@ ON CONFLICT(id) DO UPDATE SET
 	diff_mode=excluded.diff_mode, steps=excluded.steps, limit_pattern=excluded.limit_pattern,
 	use_fact_cache=excluded.use_fact_cache, fact_cache_timeout=excluded.fact_cache_timeout,
 	allow_callbacks=excluded.allow_callbacks, host_config_key=excluded.host_config_key,
-	callback_limit=excluded.callback_limit, awx_callback=excluded.awx_callback`
+	callback_limit=excluded.callback_limit, awx_callback=excluded.awx_callback,
+	paths_by_admin=excluded.paths_by_admin`
 	_, err = s.db.ExecContext(ctx, q,
 		t.ID, t.Name, t.ProjectID, t.Playbook, t.Inventory, t.InventoryID, t.Shards,
 		sqlutil.JoinIDs(t.CredentialIDs), string(vars), string(survey), t.Queue, sqlutil.FormatTime(t.CreatedAt),
@@ -72,7 +73,7 @@ ON CONFLICT(id) DO UPDATE SET
 		sqlutil.JoinIDs(t.Tags), sqlutil.JoinIDs(t.SkipTags), t.Verbosity, t.Forks,
 		sqlutil.BoolToInt(t.DiffMode), marshalSteps(t.Steps), t.Limit,
 		sqlutil.BoolToInt(t.UseFactCache), t.FactCacheTimeout, sqlutil.BoolToInt(t.AllowCallbacks),
-		t.HostConfigKey, t.CallbackLimit, sqlutil.BoolToInt(t.AWXCallback))
+		t.HostConfigKey, t.CallbackLimit, sqlutil.BoolToInt(t.AWXCallback), sqlutil.BoolToInt(t.PathsByAdmin))
 	if err != nil {
 		return fmt.Errorf("save template: %w", err)
 	}
@@ -100,8 +101,8 @@ func (s *templateStore) Update(ctx context.Context, t *template.Template) error 
 	selectable_credential_ids=$18, timeout=$19, confirm_on_launch=$20,
 	tags=$21, skip_tags=$22, verbosity=$23, forks=$24, diff_mode=$25, steps=$26,
 	limit_pattern=$27, use_fact_cache=$28, fact_cache_timeout=$29, allow_callbacks=$30,
-	callback_limit=$31, awx_callback=$32
-	WHERE id=$33`
+	callback_limit=$31, awx_callback=$32, paths_by_admin=$33
+	WHERE id=$34`
 	res, err := s.db.ExecContext(ctx, q,
 		t.Name, t.ProjectID, t.Playbook, t.Inventory, t.InventoryID, t.Shards,
 		sqlutil.JoinIDs(t.CredentialIDs), string(vars), string(survey), t.Queue, t.Tool, t.Command,
@@ -110,7 +111,7 @@ func (s *templateStore) Update(ctx context.Context, t *template.Template) error 
 		sqlutil.JoinIDs(t.Tags), sqlutil.JoinIDs(t.SkipTags), t.Verbosity, t.Forks,
 		sqlutil.BoolToInt(t.DiffMode), marshalSteps(t.Steps), t.Limit,
 		sqlutil.BoolToInt(t.UseFactCache), t.FactCacheTimeout, sqlutil.BoolToInt(t.AllowCallbacks),
-		t.CallbackLimit, sqlutil.BoolToInt(t.AWXCallback), t.ID)
+		t.CallbackLimit, sqlutil.BoolToInt(t.AWXCallback), sqlutil.BoolToInt(t.PathsByAdmin), t.ID)
 	if err != nil {
 		return fmt.Errorf("update template: %w", err)
 	}
@@ -203,13 +204,15 @@ func scanTemplate(sc scanner) (*template.Template, error) {
 		factCache  int
 		callbacks  int
 		awxAlias   int
+		// pathsByAdmin is whether an admin in person named the template's paths.
+		pathsByAdmin int
 	)
 	if err := sc.Scan(&t.ID, &t.Name, &t.ProjectID, &t.Playbook, &t.Inventory, &t.InventoryID,
 		&t.Shards, &creds, &vars, &survey, &t.Queue, &created, &t.Tool, &t.Command,
 		&dryRun, &t.Image, &t.PullCredentialID, &t.OrgID, &notifs, &selectable, &t.Timeout,
 		&confirm, &tags, &skipTags, &t.Verbosity, &t.Forks, &diffMode, &steps, &t.Limit,
 		&factCache, &t.FactCacheTimeout, &callbacks, &t.HostConfigKey, &t.CallbackLimit,
-		&awxAlias); err != nil {
+		&awxAlias, &pathsByAdmin); err != nil {
 		return nil, err
 	}
 	t.DryRun = dryRun != 0
@@ -218,6 +221,7 @@ func scanTemplate(sc scanner) (*template.Template, error) {
 	t.UseFactCache = factCache != 0
 	t.AllowCallbacks = callbacks != 0
 	t.AWXCallback = awxAlias != 0
+	t.PathsByAdmin = pathsByAdmin != 0
 	t.Tags = sqlutil.SplitIDs(tags)
 	t.SkipTags = sqlutil.SplitIDs(skipTags)
 	t.CredentialIDs = sqlutil.SplitIDs(creds)

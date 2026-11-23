@@ -45,6 +45,10 @@ func buildContainerPlan(spec Spec) (containerPlan, func(), error) {
 	if err != nil {
 		return plan, cleanup, err
 	}
+	if err := refuseNamedBelowAdmin(spec, plan); err != nil {
+		cleanup()
+		return containerPlan{}, func() {}, err
+	}
 	// A credential injection writes a file on the host and points an environment variable at it. That
 	// variable crosses into the container unchanged, so without the mount the tool is handed a path
 	// that does not exist there and the credential simply fails to apply, which reads as a broken
@@ -68,6 +72,10 @@ func buildModulesPlan(spec Spec) (containerPlan, func(), error) {
 	plan, cleanup, err := toolContainerPlan(spec)
 	if err != nil {
 		return plan, cleanup, err
+	}
+	if err := refuseNamedBelowAdmin(spec, plan); err != nil {
+		cleanup()
+		return containerPlan{}, func() {}, err
 	}
 	bin := "terraform"
 	if tool == run.ToolOpenTofu {
@@ -194,6 +202,26 @@ func toolContainerPlan(spec Spec) (containerPlan, func(), error) {
 	}
 }
 
+// refuseNamedBelowAdmin returns ErrNamedPathBelowAdmin when plan mounts a path the run named and
+// no admin in person named it. The server decides the fact from the caller, but only the executor
+// knows the image, since a worker applies its own default image to a run sent with none, so the rule
+// is held here. A missing fact refuses, so a route that forgot to set it fails closed. The refusal
+// names the path and the image, because a person reads it on the failed run.
+func refuseNamedBelowAdmin(spec Spec, plan containerPlan) error {
+	if spec.PathsByAdmin {
+		return nil
+	}
+	for _, m := range plan.mounts {
+		if !m.named || m.path == "" {
+			continue
+		}
+		return fmt.Errorf("%w: %s is a path on this server and this run executes in image %s. "+
+			"Add the repository as a project and name the directory inside it, or have an admin "+
+			"send it", ErrNamedPathBelowAdmin, m.path, spec.Image)
+	}
+	return nil
+}
+
 // scriptToolPlan writes a script tool's inline source to a temp file, then builds a plan that mounts
 // the file and the checkout read-only and runs argv, which references the mounted path. It is shared
 // by the Python, Go, and PowerShell cases.
@@ -247,6 +275,9 @@ func buildShowPlan(spec Spec, planFile string) (containerPlan, func(), error) {
 	mounts := []planMount{{path: dir, named: spec.Dir == ""}, {path: planFile}}
 	for _, f := range spec.CredentialFiles {
 		mounts = append(mounts, planMount{path: f})
+	}
+	if err := refuseNamedBelowAdmin(spec, containerPlan{mounts: mounts}); err != nil {
+		return containerPlan{}, noCleanup, err
 	}
 	return containerPlan{
 		argv:     append([]string{bin}, terraformShowArgs(planFile)...),

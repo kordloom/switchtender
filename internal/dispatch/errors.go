@@ -57,6 +57,9 @@ var (
 	// ErrAgentPathSplit is returned when an agent's run asks for a split of an inventory named by a
 	// path. The split lists that path before the run exists, so nothing could hold it first.
 	ErrAgentPathSplit = errors.New("an agent cannot split an inventory named by path")
+	// ErrImagePathBelowAdmin is returned when a run that names paths on this server would execute in
+	// an execution image and no admin in person named them.
+	ErrImagePathBelowAdmin = errors.New("a run in an execution image takes its paths from a project")
 	// ErrNoSteps aliases the run-package error so callers matching dispatch.ErrNoSteps still match
 	// what run.ValidatePipeline returns. The pipeline validators moved to the run package, which owns
 	// the step type, so the dispatcher and the template layer validate through one definition.
