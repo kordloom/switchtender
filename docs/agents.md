@@ -111,8 +111,9 @@ review, fails the build when a new path appears without a test proving an agent 
    token minted without `--agent` gets no agent hold. A dry run waits too, since check mode and a
    plan still run code with this server's credentials, and a Terraform or OpenTofu apply takes two
    approvals: one before it plans, and one for the apply its plan proposes with the saved plan. To
-   let routine work through, write an exemption, a rule with `effect: exempt`, which Community
-   covers. An exemption that names the agent's `actor` label must also name the `account` its token
+   let routine work through, save it as a template and write an exemption, a rule with
+   `effect: exempt`, which Community covers. An exemption covers the agent's launch of a saved
+   template and never a run the agent composed itself. An exemption that names the agent's `actor` label must also name the `account` its token
    is bound to, since a label repeats across accounts. The receipt proves who approved each run or
    which rule exempted it. [Agent runs are held by
    default](policy.md#agent-runs-are-held-by-default) covers the exemption and what it risks.
@@ -190,8 +191,9 @@ its log, pull a run's evidence dossier, list recent runs, and list the workflow 
 waiting for a person. Every tool call is an ordinary authenticated API request under that same
 token, so it passes the same authorization, the same approval policy, and the same fail-closed audit
 append as a call from a person. A proposed run lands in the chain under the agent's account before
-it executes, and it waits for a human to release it, a dry run included, unless a rule with
-`effect: exempt` covers it.
+it executes, and it waits for a human to release it, a dry run included. A rule with
+`effect: exempt` lets an agent's launch of a saved template go ahead, and never a run the agent
+composed itself.
 
 The tool set is narrow on purpose. There is no approve tool, so an agent cannot release its own work
 however it is prompted, and no credential, account, token, grant, or policy tool, so it cannot widen

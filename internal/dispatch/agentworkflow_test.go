@@ -51,6 +51,8 @@ func TestAnAgentsWorkflowCannotApply(t *testing.T) {
 		Rules []*policy.Policy
 		// Person submits as a person rather than as the agent.
 		Person bool
+		// Whole submits the agent's workflow whole rather than launched from a saved workflow.
+		Whole bool
 		// DryRun submits the whole workflow as a dry run.
 		DryRun bool
 		// WantRefused names the step the refusal names, empty when the workflow is accepted.
@@ -79,6 +81,15 @@ func TestAnAgentsWorkflowCannotApply(t *testing.T) {
 		WantHeld: true,
 	}, { // Test 9: An exemption covering the agent's whole workflow lets it run.
 		Steps: []run.PipelineStep{build, apply}, Rules: []*policy.Policy{whole},
+	}, { // Test 10: The exemption for the apply step does not cover a workflow submitted whole.
+		Steps: []run.PipelineStep{build, apply}, Rules: []*policy.Policy{stepOnly}, Whole: true,
+		WantRefused: "apply",
+	}, { // Test 11: Nor does the exemption for the whole workflow.
+		Steps: []run.PipelineStep{build, apply}, Rules: []*policy.Policy{whole}, Whole: true,
+		WantRefused: "apply",
+	}, { // Test 12: A workflow submitted whole with no apply step is held despite the exemption.
+		Steps: []run.PipelineStep{build}, Rules: []*policy.Policy{whole}, Whole: true,
+		WantHeld: true,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -90,6 +101,9 @@ func TestAnAgentsWorkflowCannotApply(t *testing.T) {
 				WithPolicies(dispatchtest.RulesHolding(t, test.Rules...)), projects)
 			t.Cleanup(d.Close)
 			ctx, opts := boundAgent("dev-lead")
+			if test.Whole {
+				ctx, opts = composedAgent("dev-lead")
+			}
 			if test.Person {
 				ctx, opts = context.Background(), dispatchtest.PersonOpts()
 			}

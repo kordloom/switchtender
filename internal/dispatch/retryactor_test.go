@@ -72,7 +72,7 @@ func TestARetryOfSomebodyElsesRunIsJudgedOnWhoRetried(t *testing.T) {
 		t.Fatalf("invs.Save() error = %v", err)
 	}
 
-	// The agent's own run goes ahead under an exemption, since an agent's run is otherwise held by
+	// The agent's launch goes ahead under an exemption, since an agent's run is otherwise held by
 	// default and this one has to fail for a retry to exist.
 	if err := policies.Save(ctx, &policy.Policy{
 		ID: policy.NewID(), Name: "let the bot run", Actor: "release-bot", Account: "release-owner",
@@ -81,9 +81,10 @@ func TestARetryOfSomebodyElsesRunIsJudgedOnWhoRetried(t *testing.T) {
 		t.Fatalf("policies.Save() error = %v", err)
 	}
 
-	// An agent submits and the run fails.
+	// An agent launches a saved template, which the exemption can cover, and the run fails.
 	parent, err := d.SubmitSplit(ctx, "site.yml", "", 2, run.WithActor("release-bot"),
-		run.WithActorType("agent"), run.WithAccount("release-owner"), run.WithInventory(fleet.ID))
+		run.WithActorType("agent"), run.WithAccount("release-owner"), run.WithInventory(fleet.ID),
+		run.WithTemplate("tpl_site"))
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}

@@ -134,7 +134,8 @@ guessed from traffic:
   written, its dry runs included, since a check or a plan still runs code with the server's
   credentials. An agent's Terraform or OpenTofu apply takes two approvals: one before anything
   plans, and one for the apply its plan proposes, carrying the saved plan. A rule with
-  `effect: exempt` lifts that hold for the routine work it covers, and one that names the agent's
+  `effect: exempt` lifts that hold for an agent's launch of a saved template it covers, never for a
+  run the agent composed itself, and one that names the agent's
   `actor` label must also name the `account` its token is bound to
   ([Agent runs are held by default](docs/policy.md#agent-runs-are-held-by-default)). Rules can do
   what the default hold does not: refuse what an agent may never ask for, so no person can release

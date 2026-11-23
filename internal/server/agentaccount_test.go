@@ -40,10 +40,11 @@ func agentLabeledOn(t *testing.T, s *agentHoldServer, label, owner string) strin
 
 // TestAnExemptionCoversOneAccountsAgent is the label collision through the API, on every store.
 // Two agent tokens are labeled release-agent, one bound to dev-lead and one to ops-lead, and the
-// exemption names the label on dev-lead. The dev-lead agent's run goes ahead, and so do the runs
-// it causes indirectly: a rerun, a failed-host relaunch, a retry of a split with its shards, a
-// template launch, and a workflow with its steps. The ops-lead agent's identical requests are each
-// held by default, on an install of their own, since a rerun inside the dedupe window returns the
+// exemption names the label on dev-lead. The dev-lead agent's runs go ahead when they come from a
+// saved template: a rerun, a failed-host relaunch, and a retry of a split with its shards of a
+// person's template launch, and a template launch itself. A run the agent composes and a workflow
+// it submits whole have no template, so the exemption does not cover them and they are held. The
+// ops-lead agent's identical requests are each held by default, on an install of their own, since a rerun inside the dedupe window returns the
 // rerun already made. Every run records the account it was asked for under.
 //
 //nolint:funlen // Test function.
@@ -57,8 +58,11 @@ func TestAnExemptionCoversOneAccountsAgent(t *testing.T) {
 		Path string
 		// Body is the request body.
 		Body string
-	}{{ // Test 0: A run submitted directly.
-		Path: "/v1/runs", Body: `{"tool":"bash","command":"./deploy.sh"}`,
+		// Uncovered is whether the exemption does not cover the request, so it is held for the
+		// dev-lead agent as well.
+		Uncovered bool
+	}{{ // Test 0: A run submitted directly has no template, so the exemption does not cover it.
+		Path: "/v1/runs", Body: `{"tool":"bash","command":"./deploy.sh"}`, Uncovered: true,
 	}, { // Test 1: A rerun of a person's finished run.
 		Path: "/v1/runs/run_done/rerun", Body: `{}`,
 	}, { // Test 2: A relaunch of a person's failed hosts.
@@ -67,8 +71,8 @@ func TestAnExemptionCoversOneAccountsAgent(t *testing.T) {
 		Path: "/v1/runs/run_split/retry", Body: `{}`,
 	}, { // Test 4: A template launch.
 		Path: "/v1/templates/tpl_deploy/launch", Body: `{}`,
-	}, { // Test 5: A workflow submitted whole, whose steps are judged with it.
-		Path: "/v1/pipelines",
+	}, { // Test 5: A workflow submitted whole has no template, so it is held with its steps.
+		Uncovered: true, Path: "/v1/pipelines",
 		Body: `{"name":"release","steps":[{"name":"build","tool":"bash","command":"./build.sh"},` +
 			`{"name":"ship","tool":"bash","command":"./ship.sh"}]}`,
 	}}
@@ -102,16 +106,20 @@ func TestAnExemptionCoversOneAccountsAgent(t *testing.T) {
 							t.Fatalf("admin writing the exemption = %d: %s", code, got)
 						}
 						got := s.submit(t, token, http.MethodPost, test.Path, test.Body)
-						if held := got.Status == run.StatusPendingApproval; held != side.WantHeld {
-							t.Errorf("held = %v, want %v (held by %q)", held, side.WantHeld,
+						wantHeld, wantNote := side.WantHeld, side.WantNote
+						if test.Uncovered {
+							wantHeld, wantNote = true, policy.AgentDefaultName
+						}
+						if held := got.Status == run.StatusPendingApproval; held != wantHeld {
+							t.Errorf("held = %v, want %v (held by %q)", held, wantHeld,
 								got.HeldByPolicy)
 						}
 						if got.Actor != "release-agent" || got.Account != side.Owner {
 							t.Errorf("run names %s on %q, want release-agent on %q", got.Actor,
 								got.Account, side.Owner)
 						}
-						if !slices.Contains(got.PolicyNotes, side.WantNote) {
-							t.Errorf("notes = %q, want %q", got.PolicyNotes, side.WantNote)
+						if !slices.Contains(got.PolicyNotes, wantNote) {
+							t.Errorf("notes = %q, want %q", got.PolicyNotes, wantNote)
 						}
 						children, err := s.DB.runs.Shards(context.Background(), got.ID)
 						if err != nil {

@@ -389,8 +389,8 @@ func (d *Dispatcher) refuseAgentWorkflowApply(ctx context.Context, parent *run.R
 		d.recordRefusal(ctx, parent, policies, policy.AgentWorkflowApply())
 		return fmt.Errorf("%w: %w: step %q applies %s for an agent, and a workflow's approval "+
 			"does not show the plan a step applies. Ask for the apply as its own run, which plans "+
-			"first and waits for approval of the saved plan, or write a policy with effect exempt "+
-			"that covers the step", ErrPolicyDenied, ErrAgentWorkflowApply, names[i],
+			"first and waits for approval of the saved plan, or save the workflow and write a "+
+			"policy with effect exempt that covers the step", ErrPolicyDenied, ErrAgentWorkflowApply, names[i],
 			toolName(unit.Tool))
 	}
 	return nil

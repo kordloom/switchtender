@@ -23,9 +23,14 @@ const (
 	externalFinding = "data.external.x runs a program during plan (main.tf line 1)"
 )
 
-// agentRun returns a run the named agent token submitted.
+// routineTemplate is the saved template the tests' agent runs are launched from, since only a run
+// launched from a saved template can be exempt.
+const routineTemplate = "tpl_routine"
+
+// agentRun returns a run the named agent token launched from a saved template.
 func agentRun(name, tool, command string) *run.Run {
-	return &run.Run{Actor: name, ActorType: ActorKindAgent, Tool: tool, Command: command}
+	return &run.Run{Actor: name, ActorType: ActorKindAgent, Tool: tool, Command: command,
+		TemplateID: routineTemplate}
 }
 
 // personRun returns a run a signed-in person submitted.
@@ -203,7 +208,8 @@ func TestTheBuiltInAgentHold(t *testing.T) {
 	}, { // Test 20: An exemption scoped to agents covers a run carrying an agent's identity.
 		Policies: []*Policy{exemption("agents", func(p *Policy) { p.ActorKind = ActorKindAgent })},
 		Run: &run.Run{Actor: "system:scheduler", ActorType: "system", Tool: "bash",
-			Command: "deploy", Initiator: &run.Initiator{InitiatedBy: "bot"}},
+			Command: "deploy", Initiator: &run.Initiator{InitiatedBy: "bot"},
+			TemplateID: routineTemplate},
 		WantNote: `requested by an agent, exempt from the default hold by policy "agents"`,
 	}, { // Test 21: An exemption never holds a person's run it matches.
 		Policies: []*Policy{smoke}, Run: personRun("bash", "run smoke tests"),
@@ -480,5 +486,55 @@ func TestAFileExemptionLoadsOnCommunity(t *testing.T) {
 		if test.WantRefused && !strings.Contains(err.Error(), "switchtender.com/pricing") {
 			t.Errorf("test %d: refused for another reason: %v", testNum, err)
 		}
+	}
+}
+
+// TestAnExemptionCoversOnlyATemplateLaunch pins that an exemption lifts the built-in hold only on a
+// run launched from a saved template. An exemption matches a command's text and none of the
+// credentials a run carries, so an agent that composed its own run could pair the exempted command
+// with any stored credential, and a rule that holds still matches a run with no template.
+func TestAnExemptionCoversOnlyATemplateLaunch(t *testing.T) {
+	t.Parallel()
+	smoke := exemption("smoke", func(p *Policy) {
+		p.Actor, p.Account, p.Tool, p.CommandContains = "a", "acct", "bash", "./smoke.sh"
+	})
+	hold := &Policy{ID: "pol_bash", Name: "hold bash", Tool: "bash", MaxDestroy: DisabledMaxDestroy}
+	composed := func(template string) *run.Run {
+		return &run.Run{Actor: "a", ActorType: ActorKindAgent, Account: "acct", Tool: "bash",
+			Command: "./smoke.sh; env", CredentialIDs: []string{"cred_prod"}, TemplateID: template}
+	}
+	tests := []struct {
+		// Policies are the stored rules.
+		Policies []*Policy
+		// Run is the agent's run.
+		Run *run.Run
+		// WantHolds is whether the built-in hold holds the run.
+		WantHolds bool
+		// WantHeldBy is the label of the rule that holds the run, empty for none.
+		WantHeldBy string
+	}{{ // Test 0: An agent's own run carrying a production credential is held.
+		Policies: []*Policy{smoke}, Run: composed(""), WantHolds: true,
+		WantHeldBy: AgentDefaultName,
+	}, { // Test 1: The same run launched from a saved template goes ahead.
+		Policies: []*Policy{smoke}, Run: composed("tpl_smoke"),
+	}, { // Test 2: A rule that holds still matches a run with no template.
+		Policies: []*Policy{hold}, Run: composed(""), WantHolds: true, WantHeldBy: "hold bash",
+	}, { // Test 3: A rule that holds still holds a template launch an exemption lifts the default on.
+		Policies: []*Policy{smoke, hold}, Run: composed("tpl_smoke"), WantHeldBy: "hold bash",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			if got := AgentHolds(test.Policies, test.Run); got != test.WantHolds {
+				t.Errorf("AgentHolds() = %v, want %v", got, test.WantHolds)
+			}
+			got := ""
+			if p := Requiring(test.Policies, test.Run); p != nil {
+				got = p.Label()
+			}
+			if diff := cmp.Diff(test.WantHeldBy, got); diff != "" {
+				t.Errorf("held by mismatch (-want +got):\n%s", diff)
+			}
+		})
 	}
 }

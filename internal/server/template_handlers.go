@@ -678,7 +678,9 @@ func mergeCredentialIDs(base, extra []string) []string {
 // agentLaunchRefusal returns why an agent may not launch t as req asks, or the empty string when it
 // may. A person who launches a template may reshape it within their grants. An agent works from a
 // menu of templates an operator wrote, so it launches each one as written, and survey answers, a
-// narrower limit, a dry run, and labels are all it may add.
+// narrower limit, a dry run, and labels are all it may add. It may not take away a dry run the
+// template asks for: an exemption lifts the hold on an agent's launch of a saved template, and the
+// person who saved a preview did not write a real run.
 //
 // The MCP server refused everything else from the start, and the plain API accepted all of it from
 // the same agent token, so the narrowing held only for an agent that happened to connect over MCP.
@@ -700,6 +702,9 @@ func agentLaunchRefusal(r *http.Request, t *template.Template, req launchTemplat
 	case len(req.CredentialIDs) > 0:
 		return "an agent cannot choose a template's credentials, so credential_ids is refused. The " +
 			"template's own credentials apply."
+	case t.DryRun && req.DryRun != nil && !*req.DryRun:
+		return "an agent cannot turn a dry-run template into a real run, so dry_run false is " +
+			"refused. Launch it as a dry run, or ask an operator for a template that runs for real."
 	}
 	if req.Limit != nil {
 		if err := run.CheckLimitNarrows(t.Limit, *req.Limit); err != nil {

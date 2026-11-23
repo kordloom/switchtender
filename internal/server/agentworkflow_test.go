@@ -71,7 +71,8 @@ func proposeOverMCP(t *testing.T, s *agentHoldServer, token, tplID string) (stri
 // a finished workflow. Each is refused with a 403 saying why and what to do instead, and the
 // rerun is refused as it is for anybody, since a workflow reruns only from its saved workflow. The
 // controls are a person's identical request, which is accepted, the plan-only workflow, which an
-// agent may still submit and which is held as before, and an exemption covering the step.
+// agent may still submit and which is held as before, and an exemption covering the step, which
+// lets the saved workflow launch but does not cover the same workflow submitted whole.
 //
 //nolint:funlen // Test function.
 func TestAnAgentsWorkflowApplyIsRefusedOnEveryPath(t *testing.T) {
@@ -114,8 +115,12 @@ func TestAnAgentsWorkflowApplyIsRefusedOnEveryPath(t *testing.T) {
 		Path: "/v1/templates/tpl_plan/launch", Body: `{}`, WantCode: http.StatusAccepted,
 	}, { // Test 7: The same plan-only workflow through MCP is accepted.
 		MCP: "tpl_plan",
-	}, { // Test 8: An exemption covering the apply step lets the agent submit the workflow.
-		Path: "/v1/pipelines", Body: whole, Exemption: exempt, WantCode: http.StatusAccepted,
+	}, { // Test 8: An exemption covering the apply step lets the agent launch the saved workflow.
+		Path: "/v1/templates/tpl_apply/launch", Body: `{}`, Exemption: exempt,
+		WantCode: http.StatusAccepted,
+	}, { // Test 9: The same exemption does not cover the workflow submitted whole, the control.
+		Path: "/v1/pipelines", Body: whole, Exemption: exempt, WantCode: http.StatusForbidden,
+		WantRefusal: true,
 	}}
 	for _, backend := range agentHoldBackends() {
 		for testNum, test := range tests {

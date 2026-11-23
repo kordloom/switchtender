@@ -1449,9 +1449,13 @@ func TestEverySeededTemplateHasARunBehindIt(t *testing.T) {
 		t.Fatal("seedConfig() stored no templates")
 	}
 
-	source, err := os.ReadFile("demo.go")
-	if err != nil {
-		t.Fatalf("read demo.go: %v", err)
+	var source []byte
+	for _, name := range []string{"demo.go", "agent.go"} {
+		body, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		source = append(source, body...)
 	}
 	attributed := make(map[string]bool)
 	for _, m := range regexp.MustCompile(`ids\.id\(ids\.Templates, "([^"]+)"`).
