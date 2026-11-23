@@ -121,6 +121,10 @@ type Template struct {
 	Name string `json:"name"`
 	// ProjectID sources the playbook from a git project. Empty for local paths.
 	ProjectID string `json:"project_id,omitempty"`
+	// PathsByAdmin records that an admin in person saved this template's paths with no project. The
+	// server sets it from whoever saved the template, never from the request, and every run the
+	// template fires carries it, which decides whether those paths may be mounted into an image.
+	PathsByAdmin bool `json:"paths_by_admin,omitempty"`
 	// Playbook is the playbook path, relative to the project when one is set. Used by the Ansible tool.
 	Playbook string `json:"playbook"`
 	// Inventory is the inventory path, relative to the project when one is set.
@@ -689,6 +693,7 @@ func (t *Template) LaunchOptions() []run.SubmitOption {
 		run.WithForks(t.Forks),
 		run.WithDiffMode(t.DiffMode),
 		run.WithFactCache(t.UseFactCache, t.FactCacheTimeout),
+		run.WithPathsByAdmin(t.PathsByAdmin && t.ProjectID == ""),
 	}
 	if t.Limit != "" {
 		opts = append(opts, run.WithLimit(t.Limit))

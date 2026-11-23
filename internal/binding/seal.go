@@ -169,6 +169,9 @@ type Facts struct {
 	StepName string `json:"step_name"`
 	// RequireReason is the reason requirement a decision on the run must meet.
 	RequireReason string `json:"require_reason"`
+	// PathsByAdmin is whether an admin in person named the run's paths, which decides whether the
+	// executor mounts a path the run named into an execution image.
+	PathsByAdmin bool `json:"paths_by_admin"`
 	// CreatedAt is when the row was built, in UTC Unix seconds, zero for a row that records no time.
 	// PostgreSQL keeps microseconds and SQLite keeps what it is given, so a finer value would refuse
 	// an honest row read back.
@@ -415,7 +418,7 @@ func factsOf(r *run.Run) (Facts, error) {
 		Actor: r.Actor, ActorType: r.ActorType, ActorUserID: r.ActorUserID, Account: r.Account,
 		Queue: r.Queue, ProposedFrom: r.ProposedFrom, TemplateID: r.TemplateID, Source: r.Source,
 		SourceID: r.SourceID, Intent: r.Intent, StepName: r.StepName,
-		RequireReason: r.RequireReason, OrgID: r.OrgID, GitRef: r.GitRef,
+		RequireReason: r.RequireReason, PathsByAdmin: r.PathsByAdmin, OrgID: r.OrgID, GitRef: r.GitRef,
 	}
 	if !r.CreatedAt.IsZero() {
 		f.CreatedAt = r.CreatedAt.UTC().Unix()

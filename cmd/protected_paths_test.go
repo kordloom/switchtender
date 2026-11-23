@@ -66,7 +66,7 @@ func TestServeProtectedPathsRefuseEveryFileServeCreates(t *testing.T) {
 		files++
 		path := filepath.Join(dir, e.Name())
 		spec := roundhouse.Spec{Tool: run.ToolAnsible, Playbook: playbook, Inventory: path,
-			Image: protectedImage}
+			Image: protectedImage, PathsByAdmin: true}
 		if _, err := runner.Run(context.Background(), spec, os.Stderr); !errors.Is(err, roundhouse.ErrForbiddenMount) {
 			t.Errorf("inventory %s: Run() error = %v, want ErrForbiddenMount", e.Name(), err)
 		}
@@ -74,7 +74,7 @@ func TestServeProtectedPathsRefuseEveryFileServeCreates(t *testing.T) {
 	if files < 2 {
 		t.Fatalf("serve's wiring created %d files in %s, want the database and the token at least", files, dir)
 	}
-	tf := roundhouse.Spec{Tool: run.ToolTerraform, Command: dir, Image: protectedImage}
+	tf := roundhouse.Spec{Tool: run.ToolTerraform, Command: dir, Image: protectedImage, PathsByAdmin: true}
 	if _, err := runner.Run(context.Background(), tf, os.Stderr); !errors.Is(err, roundhouse.ErrForbiddenMount) {
 		t.Errorf("Terraform in the database's directory: Run() error = %v, want ErrForbiddenMount", err)
 	}
@@ -122,7 +122,8 @@ func TestWorkerProtectedPathsRefuseItsRoots(t *testing.T) {
 				if err := os.MkdirAll(root, 0o700); err != nil {
 					t.Fatal(err)
 				}
-				spec := roundhouse.Spec{Tool: run.ToolTerraform, Command: root, Image: protectedImage}
+				spec := roundhouse.Spec{Tool: run.ToolTerraform, Command: root, Image: protectedImage,
+					PathsByAdmin: true}
 				if _, err := runner.Run(context.Background(), spec, os.Stderr); !errors.Is(err, roundhouse.ErrForbiddenMount) {
 					t.Errorf("Terraform in %s: Run() error = %v, want ErrForbiddenMount", root, err)
 				}
@@ -132,7 +133,7 @@ func TestWorkerProtectedPathsRefuseItsRoots(t *testing.T) {
 				t.Fatal(err)
 			}
 			spec := roundhouse.Spec{Tool: run.ToolAnsible, Playbook: filepath.Join(infra, "site.yml"),
-				Inventory: workerDB, Image: protectedImage}
+				Inventory: workerDB, Image: protectedImage, PathsByAdmin: true}
 			_, err = runner.Run(context.Background(), spec, os.Stderr)
 			if test.WantDBFile == nil && errors.Is(err, roundhouse.ErrForbiddenMount) {
 				t.Errorf("database file as inventory: Run() error = %v, want no mount refusal", err)

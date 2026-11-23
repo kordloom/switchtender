@@ -221,6 +221,9 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		if req.ProjectID != "" {
 			opts = append(opts, run.WithProject(req.ProjectID))
 		}
+		// Only an admin in person may name paths on this server for a run in an execution image. The
+		// executor reads this where it builds the container plan, since only it knows the image.
+		opts = append(opts, run.WithPathsByAdmin(adminPerson(r) && req.ProjectID == ""))
 		if req.InventoryID != "" {
 			opts = append(opts, run.WithInventory(req.InventoryID))
 		}
@@ -347,6 +350,7 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 		if req.ProjectID != "" {
 			popts = append(popts, run.WithProject(req.ProjectID))
 		}
+		popts = append(popts, run.WithPathsByAdmin(adminPerson(r) && req.ProjectID == ""))
 		if req.Queue != "" {
 			if !admitQueue(w, log, req.Queue) {
 				return

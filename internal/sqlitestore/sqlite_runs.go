@@ -27,7 +27,8 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	template_id, inventory_resolution, sealed_vars, use_fact_cache, fact_cache_timeout, git_ref,
 	dry_run_scans, hold_note, sealed_digests, policy_notes, inventory_check, initiator,
 	require_reason, inventory_snapshot, inventory_sealed, resolved_hosts, plan_sha256, plan_sealed,
-	image_digest, decision_id, decision_claim, approval_requested, account, spec_seal, result_seal`
+	image_digest, decision_id, decision_claim, approval_requested, account, spec_seal, result_seal,
+	paths_by_admin`
 
 // Save inserts or replaces the run identified by r.ID. The cancel flag merges with MAX so a
 // replace from a stale snapshot cannot erase a cancel another process just requested.
@@ -48,8 +49,8 @@ INSERT INTO runs
 	 template_id, inventory_resolution, sealed_vars, use_fact_cache, fact_cache_timeout, git_ref,
 	 dry_run_scans, hold_note, sealed_digests, policy_notes, inventory_check, initiator,
 	 require_reason, inventory_snapshot, inventory_sealed, resolved_hosts, plan_sha256, plan_sealed,
-	 image_digest, approval_requested, account, spec_seal, result_seal)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	 image_digest, approval_requested, account, spec_seal, result_seal, paths_by_admin)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory,
 	status=CASE WHEN runs.status IN ('parked', 'deciding') AND excluded.status='pending_approval'
@@ -96,7 +97,8 @@ ON CONFLICT(id) DO UPDATE SET
 	approval_requested=MAX(runs.approval_requested, excluded.approval_requested),
 	account=excluded.account,
 	spec_seal=COALESCE(NULLIF(excluded.spec_seal, ''), runs.spec_seal),
-	result_seal=COALESCE(NULLIF(excluded.result_seal, ''), runs.result_seal)`
+	result_seal=COALESCE(NULLIF(excluded.result_seal, ''), runs.result_seal),
+	paths_by_admin=excluded.paths_by_admin`
 	// The sealed answers are written once, by the insert that created the run, and kept by every
 	// later save. A run decoded from JSON, which is how a relay worker and every API reader holds
 	// one, does not carry them, so a whole-row save from such a copy would otherwise erase the
@@ -131,6 +133,7 @@ ON CONFLICT(id) DO UPDATE SET
 		run.SnapshotColumn(r.InventorySnapshot), r.InventorySealed,
 		sqlutil.JSONStrings(r.ResolvedHosts), r.PlanSHA256, r.PlanSealed, r.ImageDigest,
 		sqlutil.BoolToInt(r.ApprovalRequested), r.Account, r.SpecSeal, r.ResultSeal,
+		sqlutil.BoolToInt(r.PathsByAdmin),
 	)
 	if err != nil {
 		if isCallbackConflict(err) {
@@ -476,6 +479,8 @@ func scanRun(s scanner) (*run.Run, error) {
 		sealed string
 		// factCache is the fact cache switch, stored as an integer like every other boolean on a run.
 		factCache int
+		// pathsByAdmin is whether an admin in person named the run's paths, stored as an integer.
+		pathsByAdmin int
 		// scans is what the gate's scan of a dry run read, stored as JSON.
 		scans string
 		// sealedDigests are the digests of the sealed answers' ciphertext, fixed when the run was
@@ -510,7 +515,7 @@ func scanRun(s scanner) (*run.Run, error) {
 		&scans, &r.HoldNote, &sealedDigests, &policyNotes, &inventoryCheck, &initiator,
 		&r.RequireReason, &snapshot, &r.InventorySealed, &resolvedHosts, &r.PlanSHA256,
 		&r.PlanSealed, &r.ImageDigest, &r.DecisionID, &r.DecisionClaim,
-		&approvalRequested, &r.Account, &r.SpecSeal, &r.ResultSeal); err != nil {
+		&approvalRequested, &r.Account, &r.SpecSeal, &r.ResultSeal, &pathsByAdmin); err != nil {
 		return nil, err
 	}
 	r.ApprovalRequested = approvalRequested != 0
@@ -570,6 +575,7 @@ func scanRun(s scanner) (*run.Run, error) {
 	r.DryRun = dryRun != 0
 	r.DiffMode = diffMode != 0
 	r.UseFactCache = factCache != 0
+	r.PathsByAdmin = pathsByAdmin != 0
 	r.Tags = sqlutil.SplitIDs(tags)
 	r.SkipTags = sqlutil.SplitIDs(skipTags)
 	r.CredentialIDs = sqlutil.SplitIDs(credIDs)

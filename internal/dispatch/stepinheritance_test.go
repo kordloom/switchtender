@@ -66,6 +66,7 @@ var stepFields = map[string]stepFieldRule{
 	"Forks":            carries,
 	"DiffMode":         carries,
 	"UseFactCache":     carries,
+	"PathsByAdmin":     carries,
 	"FactCacheTimeout": carries,
 	"Timeout":          carries,
 	"Queue":            carries,

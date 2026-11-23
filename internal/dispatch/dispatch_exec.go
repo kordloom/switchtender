@@ -407,7 +407,7 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 		Playbook: r.Playbook, Inventory: r.Inventory, Tool: r.Tool, Command: r.Command,
 		DryRun: dryRun, EventsPath: eventsPath, Limit: r.Limit, ExtraVars: r.ExtraVars,
 		Tags: r.Tags, SkipTags: r.SkipTags, Verbosity: r.Verbosity, Forks: r.Forks,
-		DiffMode: r.DiffMode, Image: r.Image,
+		DiffMode: r.DiffMode, Image: r.Image, PathsByAdmin: r.PathsByAdmin,
 	}
 	// The run's secrets come from this executor's store, or on a relay worker from what the control
 	// node sealed at claim. Whatever was opened is dropped on every return below.

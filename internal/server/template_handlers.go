@@ -336,6 +336,9 @@ func createTemplateHandler(store template.Store, creds credential.Store, sealer 
 			CreatedAt:    time.Now(),
 			UseFactCache: cs.useFactCache, FactCacheTimeout: cs.factCacheTimeout,
 			AllowCallbacks: cs.allowCallbacks, CallbackLimit: cs.callbackLimit,
+			// Who saved the paths is read from the caller and never from the body, so a save
+			// below admin, or one under a project, never carries an admin's word on them.
+			PathsByAdmin: adminPerson(r) && req.ProjectID == "",
 		}
 		// A new template has no AWX job template id: only an import binds one, and an id is never
 		// handed to a template created afterward.
@@ -504,6 +507,9 @@ func updateTemplateHandler(store template.Store, creds credential.Store, sealer 
 			UseFactCache: cs.useFactCache, FactCacheTimeout: cs.factCacheTimeout,
 			AllowCallbacks: cs.allowCallbacks, CallbackLimit: cs.callbackLimit,
 			AWXCallback: cs.awxCallback,
+			// The update writes the paths whole, so the fact is decided again by whoever saves
+			// them now. An operator's edit of an admin's template clears it.
+			PathsByAdmin: adminPerson(r) && req.ProjectID == "",
 		}
 		if msg, status := awxCallbackRefusal(r.Context(), store, id, existing, cs.awxCallback,
 			log); msg != "" {
@@ -876,6 +882,10 @@ func launchTemplateHandler(store template.Store, submitter Submitter, sealer *cr
 			run.WithActorAccount(actorAccount(r)),
 			run.WithActorType(actorType(r)),
 			run.WithLabels(launchReq.Labels),
+			// An admin launching in person stands behind the paths as saved. Anyone else runs them
+			// in an image only when an admin saved them, and a launch cannot override a path, so
+			// the saved fact is the whole answer for them.
+			run.WithPathsByAdmin(t.ProjectID == "" && (t.PathsByAdmin || adminPerson(r))),
 		)
 		if launchReq.Limit != nil && *launchReq.Limit != "" {
 			opts = append(opts, run.WithLimit(*launchReq.Limit))

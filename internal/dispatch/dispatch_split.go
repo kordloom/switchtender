@@ -677,6 +677,9 @@ func stepRun(parent *run.Run, step run.PipelineStep, idx, attempt int, vars map[
 	// A pipeline that asked for the fact cache asked for it on every Ansible step it runs.
 	child.UseFactCache = parent.UseFactCache
 	child.FactCacheTimeout = parent.FactCacheTimeout
+	// A step's paths are the workflow's, saved by whoever saved the workflow, so the fact that an
+	// admin in person named them is the workflow's too.
+	child.PathsByAdmin = parent.PathsByAdmin
 	// The rules that were in force when the pipeline was submitted. Recorded on every run precisely so
 	// that "no rule applied" and "there were no rules" do not leave the same trace, which they did for
 	// every step of every pipeline.

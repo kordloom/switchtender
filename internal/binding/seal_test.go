@@ -175,6 +175,8 @@ func TestVerifyRefusesEveryChangedField(t *testing.T) {
 		Field: "Facts.StepName", Mutate: func(r *Record) { r.Facts.StepName = "verify" },
 	}, { // Test 48: RequireReason.
 		Field: "Facts.RequireReason", Mutate: func(r *Record) { r.Facts.RequireReason = "" },
+	}, { // Test 48a: PathsByAdmin turned on.
+		Field: "Facts.PathsByAdmin", Mutate: func(r *Record) { r.Facts.PathsByAdmin = !r.Facts.PathsByAdmin },
 	}, { // Test 49: CreatedAt a second earlier.
 		Field: "Facts.CreatedAt", Mutate: func(r *Record) { r.Facts.CreatedAt-- },
 	}, { // Test 50: PlanDestroys removed.

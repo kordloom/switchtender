@@ -1135,7 +1135,7 @@ func migrateRuns(db *sql.DB) error {
 		return fmt.Errorf("add queued_at column: %w", err)
 	}
 	for _, column := range []string{"verbosity", "forks", "diff_mode", "distinct_approver",
-		"use_fact_cache", "fact_cache_timeout", "approval_requested"} {
+		"use_fact_cache", "fact_cache_timeout", "approval_requested", "paths_by_admin"} {
 		if _, err := db.Exec(
 			"ALTER TABLE runs ADD COLUMN " + column + " INTEGER NOT NULL DEFAULT 0"); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {
@@ -1540,6 +1540,7 @@ func migrateTemplates(db *sql.DB) error {
 		"ALTER TABLE templates ADD COLUMN steps TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE templates ADD COLUMN limit_pattern TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE templates ADD COLUMN use_fact_cache INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE templates ADD COLUMN paths_by_admin INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE templates ADD COLUMN fact_cache_timeout INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE templates ADD COLUMN allow_callbacks INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE templates ADD COLUMN host_config_key TEXT NOT NULL DEFAULT ''",
@@ -1566,6 +1567,7 @@ func migrateSchedules(db *sql.DB) error {
 		"spring_forward TEXT NOT NULL DEFAULT ''",
 		"last_skip TEXT NOT NULL DEFAULT ''",
 		"skipped_fires INTEGER NOT NULL DEFAULT 0",
+		"paths_by_admin INTEGER NOT NULL DEFAULT 0",
 	} {
 		if _, err := db.Exec("ALTER TABLE schedules ADD COLUMN " + column); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {

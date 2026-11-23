@@ -81,6 +81,8 @@ func TestCallerSuppliedRunPathsCannotMountHostSecrets(t *testing.T) {
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
 			t.Parallel()
+			// The mount guard is judged for an admin in person, whose named paths may reach an image.
+			test.Spec.PathsByAdmin = true
 			plan, cleanup, err := buildContainerPlan(test.Spec)
 			if err != nil {
 				cleanup()
