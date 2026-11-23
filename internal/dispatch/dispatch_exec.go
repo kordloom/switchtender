@@ -442,6 +442,7 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 		return fail(err)
 	}
 	spec.ExtraVars = varsWithSecrets(spec.ExtraVars, secretAnswers)
+	spec.UntemplatedVars = secretNames(secretAnswers)
 	// The run's own request can carry a secret the credential and inventory paths never see, so it is
 	// registered here with them rather than only once credentials resolve: output written before that
 	// point is masked too. Secret survey answers are masked unconditionally, whatever they are named.

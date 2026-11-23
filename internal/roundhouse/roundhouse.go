@@ -108,6 +108,10 @@ type Spec struct {
 	// ExtraVars are passed to ansible-playbook as one JSON --extra-vars argument so values keep
 	// their types.
 	ExtraVars map[string]any
+	// UntemplatedVars names the extra vars Ansible must never render, which are the run's secret
+	// survey answers. The vars file marks each one as text Ansible does not template, so an answer
+	// holding braces reaches the play exactly as typed. Every other tool gets the plain value.
+	UntemplatedVars []string
 	// ExtraVarsFiles are passed to ansible-playbook as --extra-vars @file arguments. They carry
 	// values that must stay off the command line, such as a become password.
 	ExtraVarsFiles []string
@@ -624,7 +628,7 @@ func materializeExtraVars(spec *Spec) (func(), error) {
 	if len(spec.ExtraVars) == 0 {
 		return noCleanup, nil
 	}
-	data, err := json.Marshal(spec.ExtraVars)
+	data, err := json.Marshal(untemplated(spec.ExtraVars, spec.UntemplatedVars))
 	if err != nil {
 		return noCleanup, fmt.Errorf("marshal extra vars: %w", err)
 	}
@@ -650,6 +654,27 @@ func materializeExtraVars(spec *Spec) (func(), error) {
 	spec.ExtraVarsFiles = append(spec.ExtraVarsFiles, f.Name())
 	spec.ExtraVars = nil
 	return cleanup, nil
+}
+
+// unsafeVarKey is the key Ansible's JSON loader reads as a value it never templates.
+const unsafeVarKey = "__ansible_unsafe"
+
+// untemplated returns vars with each string value that names lists wrapped as
+// {"__ansible_unsafe": value}, the form Ansible reads from a JSON vars file as text it never renders.
+// A secret answer is data: a password holding "{{" must reach the play as typed, and one holding a
+// lookup must not run it on the controller, in a dry run or in the held run an approver releases,
+// since nobody can read the value to approve it. vars itself is not written.
+func untemplated(vars map[string]any, names []string) map[string]any {
+	if len(names) == 0 {
+		return vars
+	}
+	out := maps.Clone(vars)
+	for _, name := range names {
+		if s, ok := out[name].(string); ok {
+			out[name] = map[string]string{unsafeVarKey: s}
+		}
+	}
+	return out
 }
 
 // maxLimitArg is the longest limit passed as one argument. Linux refuses any single argument longer

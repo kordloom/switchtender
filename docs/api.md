@@ -744,6 +744,11 @@ sealing a credential's secret gets. What follows from that:
   every other answer arrives: as an Ansible extra var, in `SWITCHTENDER_VARS` and its own
   `SWITCHTENDER_VAR_<name>` entry for a script, or as a `TF_VAR_` entry for Terraform and OpenTofu.
   A secret answer of the same name wins over a template extra var.
+- A secret answer is data. It reaches the tool exactly as typed, and Ansible never renders it: the
+  executor writes it to Ansible's vars file marked as text Ansible does not template, so a password
+  holding `{{` or `{%` arrives as those characters and a lookup written into one never runs. A
+  launch cannot put the same variable under `extra_vars` to get around this, since a launch that
+  names a survey variable there is refused.
 - The answer is masked in the run's log and its events wherever the tool prints it, whatever the
   variable is called, the way a credential's secret is. A value shorter than four characters is
   not masked, the same floor credentials have.

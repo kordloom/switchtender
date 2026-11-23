@@ -435,6 +435,34 @@ func TestLaunchCannotWriteAroundTheSurvey(t *testing.T) {
 	}
 }
 
+// TestLaunchCannotWriteAroundASecretSurveyField pins the same refusal for a secret question. A
+// secret answer reaches Ansible marked as text it never renders, and only the answer is marked, so
+// a launch that put the value under extra_vars instead would hand the play template code as an
+// ordinary variable. The launch answers 400 before anything reaches the dispatcher.
+func TestLaunchCannotWriteAroundASecretSurveyField(t *testing.T) {
+	t.Parallel()
+	store := template.NewMemStore()
+	if err := store.Save(context.Background(), &template.Template{
+		ID: "tpl_s", Name: "rotate", Playbook: "site.yml",
+		Survey:    []template.SurveyField{{Var: "pw", Label: "Password", Type: template.FieldSecret}},
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	sub := &fakeSubmitter{run: &run.Run{ID: "run_s"}}
+	handler := New(run.NewMemStore(), sub, zap.NewNop(), WithTemplates(store)).Handler()
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/templates/tpl_s/launch",
+		strings.NewReader(`{"extra_vars":{"pw":"{{ lookup('pipe','id') }}"}}`)))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "extra_vars sets pw") {
+		t.Fatalf("extra_vars naming a secret survey field = %d %s, want 400 naming pw",
+			rec.Code, rec.Body.String())
+	}
+	if sub.gotRun != nil {
+		t.Error("the launch reached the dispatcher")
+	}
+}
+
 // TestUpdateRefusesErasingAWorkflowGraph proves an edit of a saved workflow that carries no steps
 // is refused rather than silently replacing the pipeline with a single-playbook template. The
 // update writes the record whole, so without the refusal any dialog save destroyed the graph and

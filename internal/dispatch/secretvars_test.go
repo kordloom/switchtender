@@ -15,6 +15,7 @@ import (
 	"github.com/kordloom/switchtender/internal/dispatchtest"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/template"
 )
 
 // secretVarsSealer is one sealer for every test in this file, since deriving a key costs an
@@ -202,4 +203,133 @@ func TestEveryPipelineStepReceivesTheSecretAnswer(t *testing.T) {
 			t.Errorf("step %d received token = %v, want the workflow's answer", i, vars["token"])
 		}
 	}
+}
+
+// untemplatedRunner records each executed spec's untemplated names and the answer it carried, and
+// lists two hosts so a split has two shards.
+type untemplatedRunner struct {
+	// mu guards seen.
+	mu sync.Mutex
+	// seen holds each execution's untemplated names, keyed by its limit.
+	seen map[string][]string
+	// answers holds each execution's pw variable, keyed by its limit.
+	answers map[string]any
+}
+
+// Run records the spec.
+func (u *untemplatedRunner) Run(_ context.Context, spec roundhouse.Spec, _ io.Writer) (roundhouse.Result, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.seen == nil {
+		u.seen, u.answers = map[string][]string{}, map[string]any{}
+	}
+	u.seen[spec.Limit] = spec.UntemplatedVars
+	u.answers[spec.Limit] = spec.ExtraVars["pw"]
+	return roundhouse.Result{ExitCode: 0}, nil
+}
+
+// Hosts lists two hosts.
+func (u *untemplatedRunner) Hosts(context.Context, string, string) ([]string, error) {
+	return []string{"web1", "web2"}, nil
+}
+
+// got returns what the execution with limit carried.
+func (u *untemplatedRunner) got(limit string) ([]string, any, bool) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	names, ok := u.seen[limit]
+	return names, u.answers[limit], ok
+}
+
+// TestEveryRouteMarksSecretAnswersUntemplated pins that the spec of an Ansible run carrying a secret
+// answer names it as untemplated on every route that reaches execution: a launch, a schedule's
+// sealed default, a relaunch of failed hosts, and a split child. The vars file marks exactly these
+// names, so a route that dropped them would hand Ansible template code nobody approved.
+func TestEveryRouteMarksSecretAnswersUntemplated(t *testing.T) {
+	t.Parallel()
+	const answer = "{{ lookup('pipe','id') }}"
+	sealer := secretVarsSealer()
+	sealed, err := sealer.Seal(answer)
+	if err != nil {
+		t.Fatalf("Seal() error = %v", err)
+	}
+	ctx := context.Background()
+	want := []string{"pw"}
+	check := func(t *testing.T, runner *untemplatedRunner, limit string) {
+		t.Helper()
+		names, got, ok := runner.got(limit)
+		if !ok {
+			t.Fatalf("no execution with limit %q", limit)
+		}
+		if diff := cmp.Diff(want, names); diff != "" {
+			t.Errorf("UntemplatedVars mismatch (-want +got):\n%s", diff)
+		}
+		if got != answer {
+			t.Errorf("pw = %v, want the answer as typed", got)
+		}
+	}
+	newDispatcher := func(t *testing.T) (*Dispatcher, run.Store, *untemplatedRunner) {
+		t.Helper()
+		store, runner := run.NewMemStore(), &untemplatedRunner{}
+		d := New(store, runner, nil, WithCredentials(credential.NewMemStore(), sealer), WithNoJanitor())
+		t.Cleanup(d.Close)
+		return d, store, runner
+	}
+
+	t.Run("launch and relaunch", func(t *testing.T) {
+		t.Parallel()
+		d, store, runner := newDispatcher(t)
+		created, err := d.Submit(ctx, "site.yml", "inv", run.WithSealedVars(map[string]string{"pw": sealed}))
+		if err != nil {
+			t.Fatalf("Submit() error = %v", err)
+		}
+		done := dispatchtest.WaitTerminal(t, store, created.ID)
+		if done.Status != run.StatusSucceeded {
+			t.Fatalf("launch = %s (%s), want succeeded", done.Status, done.Error)
+		}
+		check(t, runner, "")
+		saveFinishedRun(t, store, done, []run.HostSummary{{Host: "web2", Failures: 1}})
+		relaunch, err := d.RelaunchFailedHosts(ctx, created.ID)
+		if err != nil {
+			t.Fatalf("RelaunchFailedHosts() error = %v", err)
+		}
+		if got := dispatchtest.WaitTerminal(t, store, relaunch.ID); got.Status != run.StatusSucceeded {
+			t.Fatalf("relaunch = %s (%s), want succeeded", got.Status, got.Error)
+		}
+		check(t, runner, "web2")
+	})
+
+	t.Run("schedule sealed default", func(t *testing.T) {
+		t.Parallel()
+		d, store, runner := newDispatcher(t)
+		tmpl := &template.Template{Playbook: "site.yml", Survey: []template.SurveyField{
+			{Var: "pw", Label: "Password", Type: template.FieldSecret, SealedDefault: sealed},
+		}}
+		opts, err := tmpl.UnattendedOptions()
+		if err != nil {
+			t.Fatalf("UnattendedOptions() error = %v", err)
+		}
+		created, err := d.Submit(ctx, "site.yml", "inv", append(opts, run.WithActorType("schedule"))...)
+		if err != nil {
+			t.Fatalf("Submit() error = %v", err)
+		}
+		if got := dispatchtest.WaitTerminal(t, store, created.ID); got.Status != run.StatusSucceeded {
+			t.Fatalf("scheduled run = %s (%s), want succeeded", got.Status, got.Error)
+		}
+		check(t, runner, "")
+	})
+
+	t.Run("split child", func(t *testing.T) {
+		t.Parallel()
+		d, store, runner := newDispatcher(t)
+		parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2, run.WithSealedVars(map[string]string{"pw": sealed}))
+		if err != nil {
+			t.Fatalf("SubmitSplit() error = %v", err)
+		}
+		if got := dispatchtest.WaitTerminal(t, store, parent.ID); got.Status != run.StatusSucceeded {
+			t.Fatalf("split = %s (%s), want succeeded", got.Status, got.Error)
+		}
+		check(t, runner, "web1")
+		check(t, runner, "web2")
+	})
 }
