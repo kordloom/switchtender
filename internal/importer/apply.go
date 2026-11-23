@@ -58,6 +58,9 @@ func (p *Plan) Apply(ctx context.Context, s ApplyStores) (created int, err error
 	if err := p.checkText(); err != nil {
 		return 0, err
 	}
+	// Before the host bound, so an inventory too large to store is left out with what names it
+	// rather than refusing the whole import. A plan the preview already passed through is unchanged.
+	p.SkipOversizedInventories()
 	if err := p.CheckHostBounds(); err != nil {
 		return 0, err
 	}

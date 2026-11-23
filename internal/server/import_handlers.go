@@ -198,6 +198,9 @@ func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusBadRequest, "could not read the export, check the format")
 			return
 		}
+		// An inventory too large to store is listed as skipped, with what names it, in the preview
+		// and left out of the apply.
+		plan.SkipOversizedInventories()
 
 		// The same summary the command line prints, so a migration decision made through the page
 		// rests on the same numbers as one made from a terminal.

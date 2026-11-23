@@ -783,7 +783,7 @@ either licensed or absent.</li>
 <tr>
 <td>POST</td>
 <td><code>/v1/inventories</code></td>
-<td>Store an inventory. Runs reference it by id anywhere. A body may be up to 26 MiB, the same as an import, so anything that imported can be edited; every other write is limited to 1 MiB, and a body over the limit answers 413 naming it.</td>
+<td>Store an inventory. Runs reference it by id anywhere. Its content may be up to 16 MiB, and past that the write answers 400 naming both sizes. The body may be up to 33 MiB, twice the content limit plus room for the other fields, so any content within the limit writes back whatever its JSON encoding. Every other write is limited to 1 MiB, and a body over the limit answers 413 naming it.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -798,7 +798,7 @@ either licensed or absent.</li>
 <tr>
 <td>PUT</td>
 <td><code>/v1/inventories/{id}</code></td>
-<td>Update a stored inventory. Creating, changing, or renaming a constructed inventory is for an admin only, whatever grant the caller holds, and anyone else is answered <code>403</code>.</td>
+<td>Update a stored inventory, under the same 16 MiB content limit and 33 MiB body limit as creating one. Creating, changing, or renaming a constructed inventory is for an admin only, whatever grant the caller holds, and anyone else is answered <code>403</code>.</td>
 </tr>
 <tr>
 <td>DELETE</td>

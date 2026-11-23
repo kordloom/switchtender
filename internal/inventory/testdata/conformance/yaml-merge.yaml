@@ -1,9 +1,10 @@
-# Anchors, aliases, and merge keys, with an explicit key winning over a merged one.
+# Anchors, aliases, and merge keys, with an explicit key winning over a merged one. The maps
+# w1 merges set no key in common, which every PyYAML release reads the same way.
 base_vars: &base
   region: us-east-1
   size: small
 extra_vars: &extra
-  size: large
+  tier: gold
   backup: true
 all:
   children:

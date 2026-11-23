@@ -267,3 +267,49 @@ func TestConformanceMatrixMatchesTheTestedReleases(t *testing.T) {
 			"(-want +got):\n%s", diff)
 	}
 }
+
+// pyyamlEnv names the PyYAML release a CI job installed beside ansible-core.
+const pyyamlEnv = "SWITCHTENDER_PYYAML"
+
+// mergeListWinners is the size Ansible gives w1 in needs-ansible-merge-list-shared-key.yaml under
+// each PyYAML release CI pins. The native engine hands that document to Ansible because these
+// differ. The day they agree this test fails, and the deferral is worth revisiting.
+var mergeListWinners = map[string]string{"6.0.3": "large", "6.0.4": "small"}
+
+// TestConformanceMergeListWinnerPerPyYAML reads the shared-key merge list with the real
+// ansible-inventory and requires the winner this job's PyYAML release is known to pick.
+func TestConformanceMergeListWinnerPerPyYAML(t *testing.T) {
+	t.Parallel()
+	pyyaml := os.Getenv(pyyamlEnv)
+	if pyyaml == "" {
+		// Only the conformance job pins PyYAML and names the release, so the full suite insists on
+		// the name there and nowhere else.
+		if os.Getenv(requireFullSuiteEnv) == "1" && os.Getenv(ansibleCoreEnv) != "" {
+			t.Fatalf("%s is set and %s names no PyYAML release", requireFullSuiteEnv, pyyamlEnv)
+		}
+		t.Skipf("%s names no PyYAML release; CI sets it beside the pin", pyyamlEnv)
+	}
+	want, ok := mergeListWinners[pyyaml]
+	if !ok {
+		t.Fatalf("no known merge list winner for PyYAML %s; add it to mergeListWinners", pyyaml)
+	}
+	if want == mergeListWinners["6.0.3"] && pyyaml != "6.0.3" {
+		t.Fatalf("PyYAML %s picks what 6.0.3 does, so the deferral may no longer be needed", pyyaml)
+	}
+	bin, _ := ansibleInventory(t)
+	raw, err := os.ReadFile(filepath.Join(conformanceDir, "needs-ansible-merge-list-shared-key.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := runAnsibleInventory(t, bin, string(raw))
+	if err != nil {
+		t.Fatalf("ansible-inventory: %v", err)
+	}
+	listing, err := ParseListing(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := listing.hostVars["w1"]["size"]; got != want {
+		t.Errorf("PyYAML %s gave w1 size %v, want %q\n%s", pyyaml, got, want, out)
+	}
+}

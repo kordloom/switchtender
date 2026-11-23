@@ -237,6 +237,9 @@ func runImportData(cmd *cobra.Command, data []byte, mapper mapFunc) error {
 	if err != nil {
 		return err
 	}
+	// The preview lists an inventory too large to store as skipped, with what names it, and so does
+	// the apply that follows it.
+	plan.SkipOversizedInventories()
 
 	out := cmd.OutOrStdout()
 	reportPlan(out, plan)
