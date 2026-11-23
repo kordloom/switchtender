@@ -151,6 +151,9 @@ type Needs struct {
 	Downloads int
 	// Other counts everything else the scan could not read, which no download changes.
 	Other int
+	// Modules names each registry and remote module the scan did not read, by its address and the
+	// source it names, so a hold can say what the run's own init will fetch.
+	Modules []string
 }
 
 // Scan reads the configuration in directory dir of fsys, and every module it calls, and returns
@@ -668,7 +671,10 @@ func (s *scan) resolve(parent, child call, m moduleBlock) (string, bool) {
 		return dir, true
 	}
 	if m.hasVersion && !m.versionKnown {
-		s.skip(what, "its version is only known when the run plans")
+		if s.unreadOnce(what, "its version is only known when the run plans") {
+			s.needs.Other++
+			s.needs.Modules = append(s.needs.Modules, what)
+		}
 		return "", false
 	}
 	s.loadManifest()
@@ -835,6 +841,7 @@ func (s *scan) skip(what, why string) {
 func (s *scan) missing(what, why string) {
 	if s.unreadOnce(what, why) {
 		s.needs.Downloads++
+		s.needs.Modules = append(s.needs.Modules, what)
 	}
 }
 

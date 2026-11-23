@@ -3,6 +3,7 @@ package dispatch
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -139,6 +140,9 @@ func (d *Dispatcher) decideHold(policies []*policy.Policy, r *run.Run) (gateVerd
 		v.Held = true
 		v.HeldByPolicy = maskPolicyText(gr, p.Label())
 		rec.HoldNote = agentHoldNote(policies, gr, exemptionHoldNote(policies, gr, p))
+		if policy.AgentPlansFirst(policies, gr) {
+			rec.HoldNote = withUnreadModules(rec.HoldNote, d.unreadModules(r))
+		}
 		// The label names the first rule for the evidence; the flag is the OR of every matching
 		// rule, and an explicitly requested distinct approver is never lowered by a policy.
 		v.RequireDistinctApprover = v.RequireDistinctApprover || policy.RequireDistinct(policies, gr)
@@ -162,6 +166,32 @@ func agentHoldNote(policies []*policy.Policy, gr *run.Run, note string) string {
 		return maskPolicyText(gr, why)
 	}
 	return note
+}
+
+// unreadModules returns the registry and remote modules of the Terraform or OpenTofu configuration
+// r would plan that the gate cannot read, by the scan that downloads nothing. It reads the project
+// at the commit the run is pinned to, or the working directory on this server.
+func (d *Dispatcher) unreadModules(r *run.Run) []string {
+	_, needs := scanConfigurationNeeds(r, d.checkoutReader())
+	return needs.Modules
+}
+
+// withUnreadModules appends to an agent's hold note each module the gate did not read.
+//
+// An agent's apply is held before anything plans, and its release is a release to plan, so the
+// approver decides before the run's own init fetches its registry and remote modules. Nothing in
+// the note said those modules existed, so an approver read a configuration of local modules as the
+// whole of what would run. The note is unchanged when every module was read.
+func withUnreadModules(note string, modules []string) string {
+	if len(modules) == 0 {
+		return note
+	}
+	list := "The gate did not read these modules: " + strings.Join(modules, ", ") +
+		". The run's own init resolves these when it starts."
+	if note == "" {
+		return list
+	}
+	return note + " " + list
 }
 
 // listPolicies returns the stored policies, or none when the dispatcher has no policy store. An

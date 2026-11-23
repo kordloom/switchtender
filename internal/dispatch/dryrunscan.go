@@ -50,38 +50,46 @@ func dryRunScan(r *run.Run, pb *run.PlaybookSignals, unread string, checkouts Ch
 // the working directory on this server for a run naming one by path. It downloads nothing, so a
 // registry or remote module is read only where a download already put it.
 func scanConfiguration(r *run.Run, checkouts CheckoutReader) run.DryRunScan {
+	out, _ := scanConfigurationNeeds(r, checkouts)
+	return out
+}
+
+// scanConfigurationNeeds is scanConfiguration that also says what the scan could not read,
+// including the registry and remote modules it left unread.
+func scanConfigurationNeeds(r *run.Run, checkouts CheckoutReader) (run.DryRunScan, tfscan.Needs) {
 	if r.ProjectID == "" {
 		return scanLocalConfiguration(r)
 	}
 	if checkouts == nil {
-		return unreadConfiguration(r, noCheckout)
+		return unreadConfiguration(r, noCheckout), tfscan.Needs{}
 	}
 	commit, which := commitToRead(r)
 	var out run.DryRunScan
+	var needs tfscan.Needs
 	read := false
 	err := checkouts.ReadCommit(r.ProjectID, commit, func(fsys fs.FS, sha string) error {
-		out = tfscan.Scan(fsys, projectDir(r.Command), tfscan.Options{Tool: r.Tool,
+		out, needs = tfscan.ScanNeeds(fsys, projectDir(r.Command), tfscan.Options{Tool: r.Tool,
 			Place: "the project"})
 		out.Source = readAt(sha, which)
 		read = true
 		return nil
 	})
 	if err != nil || !read {
-		return unreadConfiguration(r, "the project's checkout could not be read")
+		return unreadConfiguration(r, "the project's checkout could not be read"), tfscan.Needs{}
 	}
-	return out
+	return out, needs
 }
 
 // scanLocalConfiguration reads a configuration named by a working directory on this server. The
 // directory bounds what the scan reads, so a module outside it is listed as unread rather than
 // followed.
-func scanLocalConfiguration(r *run.Run) run.DryRunScan {
+func scanLocalConfiguration(r *run.Run) (run.DryRunScan, tfscan.Needs) {
 	root, _, err := openLocal(r.Command, false)
 	if err != nil {
-		return unreadConfiguration(r, unreadWhy(err, "not on this server"))
+		return unreadConfiguration(r, unreadWhy(err, "not on this server")), tfscan.Needs{}
 	}
 	defer func() { _ = root.Close() }()
-	return tfscan.Scan(root.FS(), ".", tfscan.Options{Tool: r.Tool, Place: "the working directory"})
+	return tfscan.ScanNeeds(root.FS(), ".", tfscan.Options{Tool: r.Tool, Place: "the working directory"})
 }
 
 // unreadConfiguration is the scan a plan records when its configuration could not be read at all.
