@@ -3,6 +3,7 @@ package inventory
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -42,10 +43,12 @@ func CheckContentSize(content string) error {
 
 // FormatMiB renders a byte count in MiB, whole when exact and to one decimal place otherwise.
 func FormatMiB(n int) string {
-	if n%(1<<20) == 0 {
-		return fmt.Sprintf("%d MiB", n>>20)
+	const mib = 1 << 20
+	digits := 1
+	if n%mib == 0 {
+		digits = 0
 	}
-	return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20))
+	return strconv.FormatFloat(float64(n)/mib, 'f', digits, 64) + " MiB"
 }
 
 // Host is one host an inventory names, with the variables set on the host itself.

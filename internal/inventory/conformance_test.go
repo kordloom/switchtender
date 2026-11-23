@@ -282,7 +282,9 @@ func TestConformanceMergeListWinnerPerPyYAML(t *testing.T) {
 	t.Parallel()
 	pyyaml := os.Getenv(pyyamlEnv)
 	if pyyaml == "" {
-		if os.Getenv(requireFullSuiteEnv) == "1" {
+		// Only the conformance job pins PyYAML and names the release, so the full suite insists on
+		// the name there and nowhere else.
+		if os.Getenv(requireFullSuiteEnv) == "1" && os.Getenv(ansibleCoreEnv) != "" {
 			t.Fatalf("%s is set and %s names no PyYAML release", requireFullSuiteEnv, pyyamlEnv)
 		}
 		t.Skipf("%s names no PyYAML release; CI sets it beside the pin", pyyamlEnv)
