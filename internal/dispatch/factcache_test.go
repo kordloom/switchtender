@@ -127,12 +127,14 @@ func TestFactCacheRoundTrip(t *testing.T) {
 	d := New(store, play.runner(), nil, WithAudits(audits), WithNoJanitor(),
 		WithInventories(inventories), WithFactCache(facts))
 	defer d.Close()
+	var launched []string
 	launch := func(opts ...run.SubmitOption) *run.Run {
 		t.Helper()
 		r, err := d.Submit(ctx, "site.yml", "", append(opts, run.WithInventory("inv_1"))...)
 		if err != nil {
 			t.Fatalf("Submit() error = %v", err)
 		}
+		launched = append(launched, r.ID)
 		return dispatchtest.WaitTerminal(t, store, r.ID)
 	}
 	cached := func() []string {
@@ -213,6 +215,11 @@ func TestFactCacheRoundTrip(t *testing.T) {
 	}
 	if strings.Contains(off.Warning, "fact cache") {
 		t.Errorf("a run with the cache off warns about it: %q", off.Warning)
+	}
+	// A run's outcome is committed after its terminal status is saved, so the evidence is read only
+	// once every run's outcome has landed.
+	for _, id := range launched {
+		waitOutcomeEntry(t, audits, id)
 	}
 	assertNoFactsInEvidence(t, ctx, store, audits)
 }
