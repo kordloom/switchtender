@@ -95,9 +95,13 @@ masker removes a secret that appears verbatim, which stops the ordinary accident
 variable. It is not a boundary against a script written to defeat it. Scope the operator token to
 the credentials it genuinely needs, and treat the ability to attach a credential to a run as
 equivalent to holding it.</p>
-<p>The operator role bounds what the door allows. An operator can submit, cancel, and retry runs and
-launch templates. It cannot approve runs, manage configuration, or read the audit page. Approving a
-held run is admin-only, so an operator-bound agent can never approve its own work.</p>
+<p>The operator role bounds what the API allows. Through the API an operator can submit, cancel, and
+retry runs and launch templates, and cannot approve runs, manage configuration, or read the audit
+page. Approving a held run is admin-only. Those are limits on API calls, not on what a run's code
+can do. A run with no execution image executes as the server's own account, and on the control
+node that account can read and write the database and read the producer key file. Anyone who can
+start such a run without a hold can do what that account can, approvals, roles, and the audit record
+included. An agent's run is held by default, so a person approves that code before it executes.</p>
 <p>Agents can propose changes. Only authorized humans can approve them. Separation of duties can
 require an independent human when policy demands it. An approval comes from a person's session, a
 person's own token, or a pull request comment from the forge account a person linked, never from an

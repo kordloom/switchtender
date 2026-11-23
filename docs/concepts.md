@@ -461,7 +461,9 @@ the configuration without it and downloads the modules afresh, and no setting ma
 it did not install. A module vendored into the repository and called by a local path is read like
 any other file.
 
-The run executes exactly the modules the gate read. A plan held for approval can wait days, and a
+When the gate downloaded a plan's modules, the run executes exactly the modules the gate read. An
+agent's run is not one: the gate downloads no module for it, so the run's own init resolves them
+when it starts, and the hold names each module nobody read. A plan held for approval can wait days, and a
 version constraint that allows more than one release could resolve to a newer one by then, so the
 gate records a digest of the module tree it read, the path and content of every file under
 `.terraform/modules`, and keeps a copy of the tree. The digest is part of the scan's evidence and of
