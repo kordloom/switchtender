@@ -3,6 +3,7 @@ package dispatch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,8 +12,13 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/dispatchtest"
+	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -23,6 +29,8 @@ import (
 type stepVarsRunner struct {
 	// publish is what build.yml prints with set_stats.
 	publish map[string]any
+	// onBuild, when set, runs after build.yml, before the next step starts.
+	onBuild func()
 	// mu guards received.
 	mu sync.Mutex
 	// received maps a step's playbook file name or tool to the extra vars it ran with.
@@ -42,6 +50,9 @@ func (r *stepVarsRunner) Run(_ context.Context, spec roundhouse.Spec, _ io.Write
 	}
 	r.received[key] = spec.ExtraVars
 	r.mu.Unlock()
+	if key == "build.yml" && r.onBuild != nil {
+		defer r.onBuild()
+	}
 	if key == "build.yml" && spec.EventsPath != "" {
 		data, err := json.Marshal(map[string]any{"type": "stats", "ts": 1719000000,
 			"outputs": r.publish})
@@ -220,15 +231,16 @@ func TestStepOutputRefusalKeepsApprovedVars(t *testing.T) {
 	parent := &run.Run{ExtraVars: map[string]any{"msg": "{{ greeting }}"}}
 	vars := map[string]any{"msg": "{{ greeting }}", "plain": "1"}
 	from := map[string]string{"plain": "build"}
-	if got := outputRefusal(run.PipelineStep{Name: "deploy"}, parent, vars, from); got != "" {
+	deploy := run.PipelineStep{Name: "deploy"}
+	if got := outputRefusal(deploy, parent, credentialVars{}, vars, from); got != "" {
 		t.Errorf("an approved var with template code was refused: %s", got)
 	}
 	from["msg"] = "build"
-	if got := outputRefusal(run.PipelineStep{Name: "gate", Type: run.StepApproval}, parent, vars,
-		from); got != "" {
+	if got := outputRefusal(run.PipelineStep{Name: "gate", Type: run.StepApproval}, parent,
+		credentialVars{}, vars, from); got != "" {
 		t.Errorf("an approval step was refused: %s", got)
 	}
-	if got := outputRefusal(run.PipelineStep{Name: "deploy"}, parent, vars, from); got == "" {
+	if got := outputRefusal(deploy, parent, credentialVars{}, vars, from); got == "" {
 		t.Error("a published value replaced an approved var at an Ansible step")
 	}
 }
@@ -267,7 +279,340 @@ func TestStepOutputRefusalApprovedNames(t *testing.T) {
 		From: map[string]string{"version": "build"},
 	}}
 	for testNum, test := range tests {
-		got := outputRefusal(test.Step, test.Parent, map[string]any{}, test.From)
+		got := outputRefusal(test.Step, test.Parent, credentialVars{}, map[string]any{}, test.From)
+		if test.Want == "" {
+			if got != "" {
+				t.Errorf("test %d: refused with %q, want no refusal", testNum, got)
+			}
+			continue
+		}
+		if !strings.Contains(got, test.Want) {
+			t.Errorf("test %d: reason = %q, want it to say %q", testNum, got, test.Want)
+		}
+	}
+}
+
+// credOutputType names the custom credential type a credential output test attaches.
+type credOutputType string
+
+// The two custom types: one that injects api_host as an Ansible extra var, and one that sets the
+// Terraform variable API_HOST as TF_VAR_API_HOST. A type names environment variables in capitals.
+const (
+	credOutputExtraVar credOutputType = "ctype_extra"
+	credOutputTFVar    credOutputType = "ctype_tfvar"
+)
+
+// credOutputStores holds the credential, type, and inventory stores a credential output test wires
+// into its dispatcher.
+type credOutputStores struct {
+	// creds holds the one credential, "prod-datadog".
+	creds credential.Store
+	// types holds both custom types.
+	types credential.TypeStore
+	// invs holds the inventory "inv_dd", which attaches the credential.
+	invs inventory.Store
+	// sealer seals the credential's fields.
+	sealer *credential.Sealer
+}
+
+// newCredOutputStores saves both custom types, the credential "prod-datadog" of type typ, and an
+// inventory that attaches it.
+func newCredOutputStores(t *testing.T, typ credOutputType) credOutputStores {
+	t.Helper()
+	ctx := context.Background()
+	st := credOutputStores{creds: credential.NewMemStore(), types: credential.NewMemTypeStore(),
+		invs: inventory.NewMemStore(), sealer: credential.NewSealer("pass", "salt")}
+	fields := []credential.Field{{Name: "host"}, {Name: "token", Secret: true}}
+	for _, ct := range []*credential.CredentialType{{
+		ID: string(credOutputExtraVar), Name: "Datadog", Fields: fields,
+		ExtraVarInjectors: map[string]string{"api_host": "{{host}}", "api_token": "{{token}}"},
+	}, {
+		ID: string(credOutputTFVar), Name: "Datadog for Terraform", Fields: fields,
+		EnvInjectors: map[string]string{
+			"TF_VAR_API_HOST": "{{host}}", "TF_VAR_API_TOKEN": "{{token}}",
+		},
+	}} {
+		if err := ct.Validate(); err != nil {
+			t.Fatalf("Validate(%s) error = %v", ct.ID, err)
+		}
+		if err := st.types.Save(ctx, ct); err != nil {
+			t.Fatalf("Save(%s) error = %v", ct.ID, err)
+		}
+	}
+	sealed, err := st.sealer.Seal(`{"host":"api.datadoghq.com","token":"dd-s3cret"}`)
+	if err != nil {
+		t.Fatalf("Seal() error = %v", err)
+	}
+	if err := st.creds.Save(ctx, &credential.Credential{ID: "cred_dd", Name: "prod-datadog",
+		TypeID: string(typ), Secret: sealed}); err != nil {
+		t.Fatalf("Save(credential) error = %v", err)
+	}
+	if err := st.invs.Save(ctx, &inventory.Inventory{ID: "inv_dd", Name: "fleet",
+		Content: "[all]\nlocalhost\n", CredentialIDs: []string{"cred_dd"}}); err != nil {
+		t.Fatalf("Save(inventory) error = %v", err)
+	}
+	return st
+}
+
+// TestStepOutputCredentialVars drives a workflow whose first step publishes values into a second
+// step while a custom credential injects api_host, on each of the three entries.
+//
+// Ansible reads the run's extra vars after a credential's vars file, and Terraform reads a run
+// var's TF_VAR_ entry after the credential environment, so a published api_host replaced the
+// credential's own and could send its token to a server the publishing host chose. A person's own
+// var still outranks the credential's, as in AWX, and a tool the credential does not inject into
+// takes the value.
+//
+//nolint:funlen // Test function.
+func TestStepOutputCredentialVars(t *testing.T) {
+	t.Parallel()
+	deploy := run.PipelineStep{Name: "deploy", Playbook: "deploy.yml"}
+	notify := run.PipelineStep{Name: "notify", Tool: run.ToolBash, Command: "notify"}
+	apply := run.PipelineStep{Name: "apply", Tool: run.ToolTerraform, Command: "infra"}
+	tests := []struct {
+		// Type is the custom type of the credential the workflow runs with.
+		Type credOutputType
+		// ByInventory attaches the credential through the workflow's inventory, not the workflow.
+		ByInventory bool
+		// DropType deletes the credential's type once the first step has run.
+		DropType bool
+		// Parent is the workflow's own extra vars.
+		Parent map[string]any
+		// Publish is what the first step publishes.
+		Publish map[string]any
+		// Next is the step that takes the published values.
+		Next run.PipelineStep
+		// WantStop is part of the workflow's error, empty when the next step runs.
+		WantStop string
+		// WantVars are vars the next step runs with.
+		WantVars map[string]any
+	}{{ // Test 0: A published name a credential injects stops the Ansible step and names it.
+		Type: credOutputExtraVar, Publish: map[string]any{"api_host": "evil.example"}, Next: deploy,
+		WantStop: `step "deploy" cannot take "api_host" from step "build": credential ` +
+			`"prod-datadog" injects a var of that name`,
+	}, { // Test 1: The same, with the credential attached through the inventory.
+		Type: credOutputExtraVar, ByInventory: true,
+		Publish: map[string]any{"api_host": "evil.example"}, Next: deploy,
+		WantStop: `credential "prod-datadog" injects a var of that name`,
+	}, { // Test 2: A name no credential injects reaches the Ansible step.
+		Type: credOutputExtraVar, Publish: map[string]any{"other": "1"}, Next: deploy,
+		WantVars: map[string]any{"other": "1"},
+	}, { // Test 3: The person's own var of that name runs, as in AWX.
+		Type: credOutputExtraVar, Parent: map[string]any{"api_host": "eu.datadoghq.com"},
+		Publish: map[string]any{"build_id": "7"}, Next: deploy,
+		WantVars: map[string]any{"api_host": "eu.datadoghq.com", "build_id": "7"},
+	}, { // Test 4: A bash step reads no credential vars file and takes the value.
+		Type: credOutputExtraVar, Publish: map[string]any{"api_host": "evil.example"}, Next: notify,
+		WantVars: map[string]any{"api_host": "evil.example"},
+	}, { // Test 5: A type that cannot be read refuses the step, whatever it publishes.
+		Type: credOutputExtraVar, DropType: true, Publish: map[string]any{"other": "1"},
+		Next: deploy, WantStop: `step "deploy" cannot take "other" from step "build": the ` +
+			`workflow's credentials could not be read`,
+	}, { // Test 6: A credential setting TF_VAR_API_HOST stops a Terraform step taking API_HOST.
+		Type: credOutputTFVar, Publish: map[string]any{"API_HOST": "evil.example"}, Next: apply,
+		WantStop: `step "apply" cannot take "API_HOST" from step "build": credential ` +
+			`"prod-datadog" injects TF_VAR_API_HOST`,
+	}, { // Test 7: A Terraform step takes API_HOSTNAME, which no credential sets.
+		Type: credOutputTFVar, Publish: map[string]any{"API_HOSTNAME": "evil.example"}, Next: apply,
+		WantVars: map[string]any{"API_HOSTNAME": "evil.example"},
+	}, { // Test 8: The match is exact, as Terraform's is, so api_host is another variable.
+		Type: credOutputTFVar, Publish: map[string]any{"api_host": "x"}, Next: apply,
+		WantVars: map[string]any{"api_host": "x"},
+	}, { // Test 9: A credential's TF_VAR_ name does not stop an Ansible step.
+		Type: credOutputTFVar, Publish: map[string]any{"API_HOST": "x"}, Next: deploy,
+		WantVars: map[string]any{"API_HOST": "x"},
+	}, { // Test 10: A credential's extra var does not stop a Terraform step.
+		Type: credOutputExtraVar, Publish: map[string]any{"api_host": "x"}, Next: apply,
+		WantVars: map[string]any{"api_host": "x"},
+	}}
+	for _, shape := range []stepOutputShape{outputsLinear, outputsDAG, outputsResume} {
+		for testNum, test := range tests {
+			t.Run(fmt.Sprintf("%s test %d", shape, testNum), func(t *testing.T) {
+				t.Parallel()
+				ctx := context.Background()
+				store := run.NewMemStore()
+				st := newCredOutputStores(t, test.Type)
+				runner := &stepVarsRunner{publish: test.Publish}
+				if test.DropType {
+					runner.onBuild = func() {
+						if err := st.types.Delete(ctx, string(test.Type)); err != nil {
+							t.Errorf("Delete(type) error = %v", err)
+						}
+					}
+				}
+				p := dispatchtest.LocalProject(t, map[string]string{
+					"build.yml":     "- hosts: all\n  tasks: []\n",
+					"deploy.yml":    "- hosts: all\n  tasks: []\n",
+					"infra/main.tf": "terraform {}\n"})
+				d := New(store, runner, nil, WithNoJanitor(), WithAudits(audit.NewMemStore()),
+					WithProjects(p.Store, p.Syncer), WithCredentials(st.creds, st.sealer),
+					WithCredentialTypes(st.types), WithInventories(st.invs))
+				t.Cleanup(d.Close)
+				opts := []run.SubmitOption{run.WithProject(p.ID), run.WithExtraVars(test.Parent)}
+				if test.ByInventory {
+					opts = append(opts, run.WithInventory("inv_dd"))
+				} else {
+					opts = append(opts, run.WithCredentialIDs([]string{"cred_dd"}))
+				}
+				parent, err := d.SubmitPipeline(ctx, "release", "inv",
+					stepOutputSteps(shape, test.Next), opts...)
+				if err != nil {
+					t.Fatalf("SubmitPipeline() error = %v", err)
+				}
+				if shape == outputsResume {
+					node := waitParked(t, store, parent.ID)
+					if _, err := d.DecideStep(ctx, node.ID, StepDecision{Approve: true,
+						By: outcome.Decider{Name: "approver", Type: "session"}}); err != nil {
+						t.Fatalf("DecideStep() error = %v", err)
+					}
+				}
+				got := dispatchtest.WaitTerminal(t, store, parent.ID)
+				nextKey := test.Next.Playbook
+				if nextKey == "" {
+					nextKey = test.Next.Tool
+				}
+				if _, built := runner.ran("build.yml"); !built {
+					t.Fatalf("the first step never ran (workflow %s: %s)", got.Status, got.Error)
+				}
+				vars, ran := runner.ran(nextKey)
+				if test.WantStop != "" {
+					if got.Status != run.StatusFailed {
+						t.Errorf("workflow status = %s, want failed", got.Status)
+					}
+					if !strings.Contains(got.Error, test.WantStop) {
+						t.Errorf("workflow error = %q, want it to say %q", got.Error, test.WantStop)
+					}
+					if ran {
+						t.Errorf("the next step ran with %v, want it never started", vars)
+					}
+					return
+				}
+				if got.Status != run.StatusSucceeded {
+					t.Fatalf("workflow status = %s (%s), want succeeded", got.Status, got.Error)
+				}
+				if !ran {
+					t.Fatal("the next step never ran")
+				}
+				for k, want := range test.WantVars {
+					if vars[k] != want {
+						t.Errorf("next step got %s = %v, want %v (all: %v)", k, vars[k], want, vars)
+					}
+				}
+			})
+		}
+	}
+}
+
+// TestInjectedVarNames confirms what the check reads from credential records and types: a custom
+// type's extra vars and TF_VAR_ names, from the workflow's credentials and its inventory's, nothing
+// from a built-in kind, and an error, never an empty set, when a record or type cannot be read.
+func TestInjectedVarNames(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newCredOutputStores(t, credOutputExtraVar)
+	if err := st.creds.Save(ctx, &credential.Credential{ID: "cred_tf", Name: "tf-datadog",
+		TypeID: string(credOutputTFVar)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.creds.Save(ctx, &credential.Credential{ID: "cred_env", Name: "cloud",
+		Kind: credential.KindEnv}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.creds.Save(ctx, &credential.Credential{ID: "cred_gone", Name: "orphan",
+		TypeID: "ctype_gone"}); err != nil {
+		t.Fatal(err)
+	}
+	full := &Dispatcher{credentials: st.creds, credentialTypes: st.types, inventories: st.invs}
+	tests := []struct {
+		D             *Dispatcher
+		Parent        *run.Run
+		WantAnsible   map[string]string
+		WantTerraform map[string]string
+		WantErr       string
+	}{{ // Test 0: No credentials, no names and no error.
+		D: full, Parent: &run.Run{},
+	}, { // Test 1: A custom type's extra vars, on the workflow.
+		D: full, Parent: &run.Run{CredentialIDs: []string{"cred_dd"}},
+		WantAnsible: map[string]string{"api_host": "prod-datadog", "api_token": "prod-datadog"},
+	}, { // Test 2: The same credential through the inventory.
+		D: full, Parent: &run.Run{InventoryID: "inv_dd"},
+		WantAnsible: map[string]string{"api_host": "prod-datadog", "api_token": "prod-datadog"},
+	}, { // Test 3: A custom type's TF_VAR_ names, without the prefix. A built-in kind adds none.
+		D: full, Parent: &run.Run{CredentialIDs: []string{"cred_tf", "cred_env"}},
+		WantTerraform: map[string]string{"API_HOST": "tf-datadog", "API_TOKEN": "tf-datadog"},
+	}, { // Test 4: A credential that is not in the store is an error.
+		D: full, Parent: &run.Run{CredentialIDs: []string{"cred_missing"}},
+		WantErr: "credential cred_missing",
+	}, { // Test 5: A type that is not in the store is an error.
+		D: full, Parent: &run.Run{CredentialIDs: []string{"cred_dd", "cred_gone"}},
+		WantErr: `credential "orphan": read type ctype_gone`,
+	}, { // Test 6: A custom type with no type store is an error.
+		D:      &Dispatcher{credentials: st.creds},
+		Parent: &run.Run{CredentialIDs: []string{"cred_dd"}}, WantErr: "none are configured",
+	}, { // Test 7: Credentials with no credential store are an error.
+		D: &Dispatcher{}, Parent: &run.Run{CredentialIDs: []string{"cred_dd"}},
+		WantErr: "no credential store",
+	}}
+	for testNum, test := range tests {
+		got := test.D.injectedVarNames(ctx, test.Parent)
+		if test.WantErr != "" {
+			if got.err == nil || !strings.Contains(got.err.Error(), test.WantErr) {
+				t.Errorf("test %d: err = %v, want it to say %q", testNum, got.err, test.WantErr)
+			}
+			continue
+		}
+		if got.err != nil {
+			t.Errorf("test %d: err = %v, want nil", testNum, got.err)
+		}
+		if diff := cmp.Diff(test.WantAnsible, got.ansible, cmpopts.EquateEmpty()); diff != "" {
+			t.Errorf("test %d: ansible names mismatch (-want +got):\n%s", testNum, diff)
+		}
+		if diff := cmp.Diff(test.WantTerraform, got.terraform, cmpopts.EquateEmpty()); diff != "" {
+			t.Errorf("test %d: terraform names mismatch (-want +got):\n%s", testNum, diff)
+		}
+	}
+}
+
+// TestCredentialVarsRefusal confirms which steps a credential's names refuse: Ansible by extra var,
+// Terraform and OpenTofu by TF_VAR_ name, never a bash step, and an unread set only on a tool a
+// credential injects into and only when the step takes a published value.
+func TestCredentialVarsRefusal(t *testing.T) {
+	t.Parallel()
+	creds := credentialVars{ansible: map[string]string{"api_host": "dd"},
+		terraform: map[string]string{"api_host": "dd-tf"}}
+	unread := credentialVars{err: errors.New("credential cred_x: not found")}
+	tests := []struct {
+		Creds credentialVars
+		Step  run.PipelineStep
+		From  map[string]string
+		Want  string
+	}{{ // Test 0: An OpenTofu step is held to the TF_VAR_ names, as Terraform is.
+		Creds: creds, Step: run.PipelineStep{Name: "apply", Tool: run.ToolOpenTofu},
+		From: map[string]string{"api_host": "build"},
+		Want: `step "apply" cannot take "api_host" from step "build": credential "dd-tf" injects ` +
+			`TF_VAR_api_host`,
+	}, { // Test 1: A Python step reads neither, so it is not refused.
+		Creds: creds, Step: run.PipelineStep{Name: "script", Tool: run.ToolPython},
+		From: map[string]string{"api_host": "build"},
+	}, { // Test 2: An unread set refuses an Ansible step that takes a published value.
+		Creds: unread, Step: run.PipelineStep{Name: "deploy"},
+		From: map[string]string{"other": "build"},
+		Want: `step "deploy" cannot take "other" from step "build": the workflow's credentials ` +
+			`could not be read to check that none of them injects that name (credential cred_x: ` +
+			`not found)`,
+	}, { // Test 3: An unread set does not refuse a bash step.
+		Creds: unread, Step: run.PipelineStep{Name: "notify", Tool: run.ToolBash},
+		From: map[string]string{"other": "build"},
+	}, { // Test 4: An unread set does not refuse a step that takes nothing published.
+		Creds: unread, Step: run.PipelineStep{Name: "deploy"}, From: map[string]string{},
+	}, { // Test 5: The approved name is named before the credential's, as the rule reads in order.
+		Creds: creds, Step: run.PipelineStep{Name: "deploy"},
+		From: map[string]string{"api_host": "build", "version": "build"},
+		Want: `cannot take "version" from step "build": the workflow was approved`,
+	}}
+	parent := &run.Run{ExtraVars: map[string]any{"version": "1.0"}}
+	for testNum, test := range tests {
+		got := outputRefusal(test.Step, parent, test.Creds, map[string]any{}, test.From)
 		if test.Want == "" {
 			if got != "" {
 				t.Errorf("test %d: refused with %q, want no refusal", testNum, got)

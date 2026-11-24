@@ -548,7 +548,7 @@ func (d *Dispatcher) runStepsLinear(ctx context.Context, parent *run.Run, steps 
 			res.canceled = true
 			return res
 		}
-		if reason := outputRefusal(step, parent, vars, from); reason != "" {
+		if reason := d.stepRefusal(ctx, step, parent, vars, from); reason != "" {
 			res.failed, res.reason = true, reason
 			return res
 		}

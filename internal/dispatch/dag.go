@@ -497,7 +497,7 @@ func (w *dagWalk) launch(ctx context.Context, i int) {
 	}
 	step := w.steps[i]
 	vars, from := w.inputsFor(i)
-	if reason := outputRefusal(step, w.parent, vars, from); reason != "" {
+	if reason := w.d.stepRefusal(ctx, step, w.parent, vars, from); reason != "" {
 		w.refuse(i, reason)
 		return
 	}

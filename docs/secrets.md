@@ -330,8 +330,10 @@ Create a credential of that type:
 
 The field values are sealed together as one encrypted object, the same as any other secret. At run
 time the type's injectors write its files and add the environment variables, and any extra vars go
-through a private file so they never reach the process argument list. A field the type does not
-declare is refused.
+through a private file so they never reach the process argument list. A value a workflow step
+publishes cannot replace what the type injects, so a step that would take a published value named
+like one of the type's extra vars, or, on a Terraform or OpenTofu step, like a variable the type
+sets through `TF_VAR_`, stops the workflow. A field the type does not declare is refused.
 
 Set new values on an existing typed credential with its fields, which replace every stored value at
 once:

@@ -764,7 +764,10 @@ reasonable. No Rundeck export writes one.</li>
 env, extra var, and file injectors, and each credential of it arrives as a credential of that type
 waiting for its field values. A type whose injectors use Jinja beyond a field or a file path, such
 as a filter or a condition, is refused with the reason, since a run here would receive the
-expression as literal text, and its credentials fall back to the kind mapping below.</li>
+expression as literal text, and its credentials fall back to the kind mapping below. In AWX a
+node's <code>set_stats</code> value replaced an extra var a custom credential injected, and here a step that
+would take such a value stops the workflow, while a var the workflow was launched with still
+outranks the credential's, as it did in AWX.</li>
 <li>A custom type that writes a file no env or extra var injector references comes across as it was,
 marked as imported from AWX. The report names the type and the file among the items worth
 reviewing, the server logs a warning naming both when the import is applied through it, and every
