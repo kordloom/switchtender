@@ -741,7 +741,7 @@ func (p *Plan) addWorkflow(wf awxWorkflow, name string, jobs awxJobs, now time.T
 		p.warn("workflow %q was not imported: %v", name, err)
 		return ""
 	}
-	vars, err := p.workflowVars(wf, jobNodes, jobs)
+	vars, nodeVars, err := p.workflowVars(wf, jobNodes, jobs)
 	if err != nil {
 		p.warn("workflow %q was not imported: %v", name, err)
 		return ""
@@ -783,6 +783,13 @@ func (p *Plan) addWorkflow(wf awxWorkflow, name string, jobs awxJobs, now time.T
 	}
 	tpl.Limit = limit
 	tpl.ExtraVars = vars
+	if len(nodeVars) > 0 {
+		p.warn("workflow %q gives every step the vars %s from its job templates or nodes. In AWX a "+
+			"step's set_stats value replaced a job template's var of the same name. Here a published "+
+			"value never replaces a var the workflow was approved with, so a step that publishes one "+
+			"of these names stops the workflow. Publish it under another name, or remove the var "+
+			"from the workflow, before its first run.", name, quotedList(nodeVars))
+	}
 	creds, widened := p.workflowCredentials(name, jobNodes, jobs, credentialIDs)
 	tpl.CredentialIDs = creds
 	if widened {
@@ -905,9 +912,13 @@ func workflowLimit(nodes []awxWorkflowNode, jobs awxJobs) (string, error) {
 // different values is a real conflict: one of them would run with the other's value and neither the
 // import nor the run would say so, and a variable is exactly the kind of thing that decides which
 // environment a playbook touches.
+//
+// nodeVars names, sorted, every key a job template or a node contributed, since those are the
+// names an upstream node's set_stats replaced in AWX and a published value may not replace here.
 func (p *Plan) workflowVars(wf awxWorkflow, nodes []awxWorkflowNode,
-	jobs awxJobs) (map[string]any, error) {
-	merged := map[string]any{}
+	jobs awxJobs) (merged map[string]any, nodeVars []string, err error) {
+	merged = map[string]any{}
+	fromNodes := map[string]bool{}
 	add := func(src string, in map[string]any) error {
 		for _, k := range slices.Sorted(maps.Keys(in)) {
 			if old, seen := merged[k]; seen && !reflect.DeepEqual(old, in[k]) {
@@ -921,21 +932,22 @@ func (p *Plan) workflowVars(wf awxWorkflow, nodes []awxWorkflowNode,
 
 	own, err := p.parseExtraVars(wf.ExtraVars, "the extra_vars of workflow "+quoteName(wf.Name))
 	if err != nil {
-		return nil, fmt.Errorf("its own extra_vars could not be parsed: %w", err)
+		return nil, nil, fmt.Errorf("its own extra_vars could not be parsed: %w", err)
 	}
 	if err := add("the workflow", own); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for _, n := range nodes {
 		jt := jobs.of(n.UnifiedJobTemplate)
 		tv, err := p.parseExtraVars(jt.ExtraVars, "the extra_vars of template "+quoteName(jt.Name))
 		if err != nil {
-			return nil, fmt.Errorf("the extra_vars of job template %q could not be parsed: %w",
+			return nil, nil, fmt.Errorf("the extra_vars of job template %q could not be parsed: %w",
 				jt.Name, err)
 		}
 		nv, err := parseNodeData(n.ExtraData)
 		if err != nil {
-			return nil, fmt.Errorf("the extra_data of node %s could not be parsed: %w", nodeLabel(n), err)
+			return nil, nil, fmt.Errorf("the extra_data of node %s could not be parsed: %w",
+				nodeLabel(n), err)
 		}
 		// AWX layers a node's own extra_data over its job template's vars, so within one node the
 		// node wins and that is settled before anything is compared. Only the value the node actually
@@ -944,10 +956,13 @@ func (p *Plan) workflowVars(wf awxWorkflow, nodes []awxWorkflowNode,
 		maps.Copy(effective, tv)
 		maps.Copy(effective, nv)
 		if err := add(fmt.Sprintf("node %s", nodeLabel(n)), effective); err != nil {
-			return nil, err
+			return nil, nil, err
+		}
+		for k := range effective {
+			fromNodes[k] = true
 		}
 	}
-	return merged, nil
+	return merged, slices.Sorted(maps.Keys(fromNodes)), nil
 }
 
 // parseNodeData reads a workflow node's extra_data, which AWX writes as a JSON object rather than
@@ -1171,4 +1186,14 @@ func approvalStepOf(label string, gate *awxApprovalTemplate) run.PipelineStep {
 	}
 	return run.PipelineStep{Name: label, Type: run.StepApproval, Description: description,
 		ApprovalTimeout: int(timeout)}
+}
+
+// quotedList quotes each name on one line and joins them, for a warning that lists names an export
+// supplied.
+func quotedList(names []string) string {
+	quoted := make([]string, len(names))
+	for i, n := range names {
+		quoted[i] = fmt.Sprintf("%q", oneLine(n))
+	}
+	return strings.Join(quoted, ", ")
 }

@@ -210,6 +210,37 @@ func TestWorkflowNodeExtraDataReachesTheTemplate(t *testing.T) {
 	if diff := cmp.Diff(want, workflowTemplate(t, plan).ExtraVars); diff != "" {
 		t.Errorf("node extra_data did not reach the template (-want +got):\n%s", diff)
 	}
+	// A step's published value may not replace these names here, where in AWX it replaced a job
+	// template's var, so the report names each one before the first run finds it.
+	wantWarn := `workflow "rollout" gives every step the vars "batch_size", "drain", "region" from ` +
+		`its job templates or nodes`
+	if !strings.Contains(strings.Join(plan.Warnings, "\n"), wantWarn) {
+		t.Errorf("warnings = %q, want one saying %q", plan.Warnings, wantWarn)
+	}
+}
+
+// TestWorkflowOwnVarsNeedNoPublishWarning checks a workflow whose vars are all its own is not warned
+// about published values, since in AWX a workflow's own var already beat a step's set_stats value.
+func TestWorkflowOwnVarsNeedNoPublishWarning(t *testing.T) {
+	t.Parallel()
+	export := `{
+	  "projects": [{"name": "infra", "scm_type": "git", "scm_url": "https://e.com/i.git"}],
+	  "job_templates": [` + jobTemplate("a", "") + `],
+	  "workflow_job_templates": [{
+	    "name": "rollout", "extra_vars": "region: us-east",
+	    "workflow_nodes": [{"id": 1, "identifier": "first", "unified_job_template": "a"}]
+	  }]
+	}`
+	plan, err := FromAWX([]byte(export), time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatalf("FromAWX() error = %v", err)
+	}
+	if got := workflowTemplate(t, plan).ExtraVars["region"]; got != "us-east" {
+		t.Fatalf("region = %v, want us-east", got)
+	}
+	if w := strings.Join(plan.Warnings, "\n"); strings.Contains(w, "from its job templates or nodes") {
+		t.Errorf("a workflow with only its own vars was warned: %q", plan.Warnings)
+	}
 }
 
 // TestWorkflowCredentialsUnionIsDisclosed checks the union of the nodes' credentials reaches the

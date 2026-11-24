@@ -542,6 +542,12 @@ import has none to re-enter and none to attach.
   decision. A node's retry count carries as its step's retries. An approval that approves itself
   when its timeout passes imports as one that takes its deny path instead, and an approval's context
   template is not imported. The report names both.
+- A workflow's vars, its job templates' extra vars, and its nodes' extra data import as one set
+  of vars every step shares. In AWX a node's `set_stats` value replaced a job template's var of the
+  same name. Here a published value never replaces a var the workflow was approved with, so a step
+  that publishes one of those names stops the workflow at the step that would take it. The report
+  names the vars that came from a job template or a node, so you can rename the published value or
+  remove the var before the first run.
 - A workflow's own schedules import onto the workflow template, so a graph that fired nightly in AWX
   keeps firing nightly here. The one case that does not carry is a workflow the import refused: with
   no template to fire, its schedules cannot import either, and the report says so by name and count

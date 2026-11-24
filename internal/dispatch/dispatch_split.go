@@ -548,7 +548,7 @@ func (d *Dispatcher) runStepsLinear(ctx context.Context, parent *run.Run, steps 
 			res.canceled = true
 			return res
 		}
-		if reason := outputRefusal(step, vars, from); reason != "" {
+		if reason := outputRefusal(step, parent, vars, from); reason != "" {
 			res.failed, res.reason = true, reason
 			return res
 		}
@@ -598,9 +598,8 @@ func cloneVars(vars map[string]any) map[string]any {
 // steps. A saved workflow template applies its survey answers to the pipeline parent, and without
 // this seed those answers reached no step and were silently dropped. A fresh map is returned each
 // call so a step mutating its inputs cannot reach the parent or another step. Dependency outputs are
-// copied on top of this, so a step's published output still overrides a parent var of the same name
-// for anything downstream, and outputRefusal judges every published value before an Ansible step
-// takes it.
+// copied on top of this, and outputRefusal judges every published key before a step takes it: a key
+// that names a parent var stops the workflow, so a published value never replaces an approved one.
 func baseStepVars(parent *run.Run) map[string]any {
 	vars := make(map[string]any, len(parent.ExtraVars))
 	maps.Copy(vars, parent.ExtraVars)

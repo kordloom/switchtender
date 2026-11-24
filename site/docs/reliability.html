@@ -252,7 +252,7 @@ page</a> describes approval steps in full.</p>
 log and matrix and none overwrite each other. Retries run back to back with no built-in delay, so a
 step that should pause between attempts sets that in its own logic. Values a step publishes with
 <code>set_stats</code> flow to the steps that depend on it, merged in dependency order, so a later step reads
-what an earlier one produced. A value one step publishes reaches later steps as data. A value that holds template code, or a name that begins with <code>ansible_</code>, stops the workflow at that step.</p>
+what an earlier one produced. A value one step publishes reaches later steps as data. A value that holds template code, or a name that begins with <code>ansible_</code>, stops the workflow at that step. So does a name the workflow already has a var for, even with the same value, since a published value cannot replace a value the workflow was approved with.</p>
 <h2 id="cancellation-reaches-the-whole-tree">Cancellation reaches the whole tree</h2>
 <p>Canceling a run signals its process group, not only the top process. On Unix the entire tree the
 tool spawned, the ssh connections, plugin processes, and child commands, receives the kill, with a

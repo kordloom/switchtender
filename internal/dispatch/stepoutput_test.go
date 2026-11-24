@@ -97,11 +97,14 @@ func stepOutputSteps(shape stepOutputShape, next run.PipelineStep) []run.Pipelin
 // A published value reached an Ansible step as an extra var, which Ansible renders on the
 // controller, so a value holding a lookup ran it there, and a key named ansible_ chose how the next
 // step connected. The workflow was approved with its own vars and never with these. A bash step
-// reads its vars as plain strings and still gets both.
+// reads its vars as plain strings and still gets both. A published key that names one of the
+// workflow's own vars replaced the approved value for every later step, whatever its tool, so it
+// stops the workflow, even when the value is the same.
 func TestStepOutputStaysData(t *testing.T) {
 	t.Parallel()
 	lookup := "{{ lookup('pipe','id') }}"
 	tests := []struct {
+		Parent    map[string]any
 		Publish   map[string]any
 		Next      run.PipelineStep
 		WantStop  string
@@ -127,6 +130,26 @@ func TestStepOutputStaysData(t *testing.T) {
 		Publish:  map[string]any{"hosts": []any{"web1", map[string]any{"name": lookup}}},
 		Next:     run.PipelineStep{Name: "deploy", Playbook: "deploy.yml"},
 		WantStop: `cannot take "hosts" from step "build"`,
+	}, { // Test 5: A published key that names an approved var stops the Ansible step.
+		Parent:   map[string]any{"version": "1.0"},
+		Publish:  map[string]any{"version": "2.0"},
+		Next:     run.PipelineStep{Name: "deploy", Playbook: "deploy.yml"},
+		WantStop: `step "deploy" cannot take "version" from step "build": the workflow was approved`,
+	}, { // Test 6: The same collision stops a bash step, which the template checks do not cover.
+		Parent:   map[string]any{"version": "1.0"},
+		Publish:  map[string]any{"version": "2.0"},
+		Next:     run.PipelineStep{Name: "notify", Tool: run.ToolBash, Command: "notify"},
+		WantStop: `step "notify" cannot take "version" from step "build"`,
+	}, { // Test 7: A published name the workflow was not approved with reaches the step beside it.
+		Parent:   map[string]any{"region": "us"},
+		Publish:  map[string]any{"version": "2.0"},
+		Next:     run.PipelineStep{Name: "deploy", Playbook: "deploy.yml"},
+		WantVars: map[string]any{"region": "us", "version": "2.0"},
+	}, { // Test 8: A published value equal to the approved one stops the workflow too.
+		Parent:   map[string]any{"version": "1.0"},
+		Publish:  map[string]any{"version": "1.0"},
+		Next:     run.PipelineStep{Name: "deploy", Playbook: "deploy.yml"},
+		WantStop: `cannot take "version" from step "build": the workflow was approved`,
 	}}
 	for _, shape := range []stepOutputShape{outputsLinear, outputsDAG, outputsResume} {
 		for testNum, test := range tests {
@@ -143,7 +166,8 @@ func TestStepOutputStaysData(t *testing.T) {
 					WithProjects(p.Store, p.Syncer))
 				t.Cleanup(d.Close)
 				parent, err := d.SubmitPipeline(ctx, "release", "inv",
-					stepOutputSteps(shape, test.Next), run.WithProject(p.ID))
+					stepOutputSteps(shape, test.Next), run.WithProject(p.ID),
+					run.WithExtraVars(test.Parent))
 				if err != nil {
 					t.Fatalf("SubmitPipeline() error = %v", err)
 				}
@@ -193,17 +217,65 @@ func TestStepOutputStaysData(t *testing.T) {
 // it, and an approval step takes nothing.
 func TestStepOutputRefusalKeepsApprovedVars(t *testing.T) {
 	t.Parallel()
+	parent := &run.Run{ExtraVars: map[string]any{"msg": "{{ greeting }}"}}
 	vars := map[string]any{"msg": "{{ greeting }}", "plain": "1"}
 	from := map[string]string{"plain": "build"}
-	if got := outputRefusal(run.PipelineStep{Name: "deploy"}, vars, from); got != "" {
+	if got := outputRefusal(run.PipelineStep{Name: "deploy"}, parent, vars, from); got != "" {
 		t.Errorf("an approved var with template code was refused: %s", got)
 	}
 	from["msg"] = "build"
-	if got := outputRefusal(run.PipelineStep{Name: "gate", Type: run.StepApproval}, vars,
+	if got := outputRefusal(run.PipelineStep{Name: "gate", Type: run.StepApproval}, parent, vars,
 		from); got != "" {
 		t.Errorf("an approval step was refused: %s", got)
 	}
-	if got := outputRefusal(run.PipelineStep{Name: "deploy"}, vars, from); got == "" {
-		t.Error("a published value with template code reached an Ansible step")
+	if got := outputRefusal(run.PipelineStep{Name: "deploy"}, parent, vars, from); got == "" {
+		t.Error("a published value replaced an approved var at an Ansible step")
+	}
+}
+
+// TestStepOutputRefusalApprovedNames confirms which names count as approved. A secret survey
+// answer is not in the parent's extra vars, since it is laid over a step's vars at execution, so
+// its name has to be read from the sealed names, or a published value of that name would pass the
+// check and then lose to the answer with no word.
+func TestStepOutputRefusalApprovedNames(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Parent *run.Run
+		Step   run.PipelineStep
+		From   map[string]string
+		Want   string
+	}{{ // Test 0: A secret survey answer's name is approved, for a Terraform step too.
+		Parent: &run.Run{SealedNames: []string{"db_password"}},
+		Step:   run.PipelineStep{Name: "apply", Tool: run.ToolTerraform},
+		From:   map[string]string{"db_password": "build"},
+		Want:   `step "apply" cannot take "db_password" from step "build": the workflow was approved`,
+	}, { // Test 1: A name only an earlier step published is not approved.
+		Parent: &run.Run{ExtraVars: map[string]any{"region": "us"}},
+		Step:   run.PipelineStep{Name: "apply", Tool: run.ToolTerraform},
+		From:   map[string]string{"version": "build"},
+	}, { // Test 2: The match is exact, as Ansible's own var names are.
+		Parent: &run.Run{ExtraVars: map[string]any{"Version": "1.0"}},
+		Step:   run.PipelineStep{Name: "notify", Tool: run.ToolBash},
+		From:   map[string]string{"version": "build"},
+	}, { // Test 3: The collision is named before an ansible_ key, so the reason says what replaced what.
+		Parent: &run.Run{ExtraVars: map[string]any{"target": "web"}},
+		Step:   run.PipelineStep{Name: "deploy"},
+		From:   map[string]string{"ansible_user": "build", "target": "build"},
+		Want:   `step "deploy" cannot take "target" from step "build"`,
+	}, { // Test 4: No parent, no approved names.
+		Step: run.PipelineStep{Name: "notify", Tool: run.ToolBash},
+		From: map[string]string{"version": "build"},
+	}}
+	for testNum, test := range tests {
+		got := outputRefusal(test.Step, test.Parent, map[string]any{}, test.From)
+		if test.Want == "" {
+			if got != "" {
+				t.Errorf("test %d: refused with %q, want no refusal", testNum, got)
+			}
+			continue
+		}
+		if !strings.Contains(got, test.Want) {
+			t.Errorf("test %d: reason = %q, want it to say %q", testNum, got, test.Want)
+		}
 	}
 }
