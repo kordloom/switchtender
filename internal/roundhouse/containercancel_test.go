@@ -99,3 +99,40 @@ func TestCanceledContainerIsStoppedThenRemovedWithRetries(t *testing.T) {
 			"container running the playbook while the run reads as canceled\n%s", n, calls)
 	}
 }
+
+// TestCanceledContainerStopGetsTheRunEnvironment pins the environment of the commands a cancel
+// starts. The stop and the removal were started with no environment of their own, so they
+// inherited the server's, master key and salt included, and an exec clears the non-dumpable flag,
+// so a host run of the same account could read the key from /proc/<pid>/environ while the stop
+// waited out its grace period. They get the run's filtered environment, as the client does.
+func TestCanceledContainerStopGetsTheRunEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	script := `#!/bin/sh
+[ "$1" = stub-warmup ] && exit 0
+env > ` + dir + `/"$1".env
+[ "$1" = run ] && sleep 30
+exit 0
+`
+	bin := filepath.Join(dir, "docker")
+	writeStub(t, bin, script)
+	t.Setenv("SERVER_ONLY_MARKER", "must-not-cross")
+
+	c := newContainerRunner(bin, "missing", false, []string{"PATH=" + os.Getenv("PATH")},
+		&pluginCache{}, DefaultContainerLimits())
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		cancel()
+	}()
+	_, _ = c.Run(ctx, Spec{Tool: "bash", Command: "echo hi", Image: "alpine:3"}, os.Stderr)
+
+	for _, sub := range []string{"run", "stop", "rm"} {
+		body, err := os.ReadFile(filepath.Join(dir, sub+".env"))
+		if err != nil {
+			t.Fatalf("the stub runtime never ran %q: %v", sub, err)
+		}
+		if strings.Contains(string(body), "SERVER_ONLY_MARKER") {
+			t.Errorf("%q inherited the server's environment:\n%s", sub, body)
+		}
+	}
+}
