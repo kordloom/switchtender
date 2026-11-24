@@ -594,7 +594,7 @@ an empty value when the run has none, so a module never meets a missing field.</
 </tr>
 <tr>
 <td><code>run.dry_run_findings</code></td>
-<td>For a dry run, why the gate's scan did not find it change free. For Ansible, each play, block, task, role, or include that sets <code>check_mode</code> to anything but true, and each play, task, or role dependency that uses a lookup the scan cannot clear, naming the file, and each plugin or module directory, <code>ansible.cfg</code>, or collections requirements file in the project, by its path. For Terraform and OpenTofu, each <code>external</code> or <code>aws_lambda_invocation</code> data source, and each <code>http</code> data source with a write method or a request body, by its address, naming the file and line. For both, whatever the scan could not read. Empty for a dry run read in full that found none of these, for a dry run of a tool nothing scans, and for any other run.</td>
+<td>For a dry run, why the gate's scan did not find it change free. For Ansible, each play, block, task, role, or include that sets <code>check_mode</code> to anything but true, and each play, task, or role dependency that uses a lookup the scan cannot clear, naming the file, and each plugin or module directory, <code>ansible.cfg</code>, or collections requirements file in the project, by its path, and each inventory setting that can choose a program the controller runs, or inventory file that is one, by the inventory that holds it. For Terraform and OpenTofu, each <code>external</code> or <code>aws_lambda_invocation</code> data source, and each <code>http</code> data source with a write method or a request body, by its address, naming the file and line. For both, whatever the scan could not read. Empty for a dry run read in full that found none of these, for a dry run of a tool nothing scans, and for any other run.</td>
 </tr>
 <tr>
 <td><code>run.change_free</code></td>
@@ -840,6 +840,16 @@ through parentheses all count.</li>
 <li>Each <code>library</code>, <code>module_utils</code>, or <code>*_plugins</code> directory, <code>ansible.cfg</code>, and requirements file
 that installs collections in the project, by its path, since Ansible loads code and settings from
 each without a task naming it.</li>
+<li>Each inventory setting that can choose a program the controller runs, by the inventory and the
+group or host that sets it: a connection or interpreter variable other than the user, host,
+port, become, and password settings, template code in a value, and a host or address that starts
+with a dash. An inventory file that is executable, is a symbolic link, or starts with <code>#!</code> counts
+as a program. The gate reads the inventory the run executes against: a file or directory in the
+project at the commit it runs, with the <code>group_vars</code> and <code>host_vars</code> beside it, one on this
+server, or a stored inventory's snapshot, a composed one as the result it composed. An inventory
+plugin configuration, a vaulted value, and a TOML inventory are unread. Nothing is refused when an
+inventory is saved, so an imported inventory that sets an interpreter still lands, and a dry run
+against it is held by a rule that excludes dry runs.</li>
 <li>Each <code>external</code> or <code>aws_lambda_invocation</code> data source, and each <code>http</code> data source whose method
 is anything but GET or HEAD or that carries a <code>request_body</code>, by its address, file, and line. A
 method the scan cannot read as a plain value counts as a write.</li>

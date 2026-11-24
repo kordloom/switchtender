@@ -96,6 +96,18 @@ type treeEntry struct {
 	hash plumbing.Hash
 	// dir reports that the entry is a directory.
 	dir bool
+	// exec reports that the entry is a file the commit stores as executable.
+	exec bool
+}
+
+// blobMode returns the permissions a file in a commit is described with: read for everyone, and
+// execute as well for a file the commit stores as executable, so a reader can tell a script Ansible
+// would run as a program from a file it would read.
+func blobMode(exec bool) fs.FileMode {
+	if exec {
+		return 0o555
+	}
+	return 0o444
 }
 
 // Open opens the file or directory at name, following symbolic links.
@@ -116,7 +128,7 @@ func (c *commitFS) Open(name string) (fs.File, error) {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 	}
 	return &commitFile{body: body, info: fileInfo{name: path.Base(name), size: blob.Size,
-		mode: 0o444}}, nil
+		mode: blobMode(entry.exec)}}, nil
 }
 
 // ReadDir lists the directory at name, following symbolic links to it, sorted by name. Each entry
@@ -143,8 +155,10 @@ func (c *commitFS) ReadDir(name string) ([]fs.DirEntry, error) {
 			mode = fs.ModeDir | 0o555
 		case filemode.Symlink:
 			mode = fs.ModeSymlink | 0o777
-		case filemode.Regular, filemode.Executable, filemode.Deprecated:
-			mode = 0o444
+		case filemode.Regular, filemode.Deprecated:
+			mode = blobMode(false)
+		case filemode.Executable:
+			mode = blobMode(true)
 		default:
 			continue
 		}
@@ -163,7 +177,7 @@ type commitDirEntry struct {
 	path string
 	// name is the entry's base name.
 	name string
-	// mode is the entry's type as the commit stores it, with read permissions.
+	// mode is the entry's type as the commit stores it, with read and execute permissions.
 	mode fs.FileMode
 }
 
@@ -192,7 +206,7 @@ func (c *commitFS) Stat(name string) (fs.FileInfo, error) {
 	if err != nil {
 		return nil, &fs.PathError{Op: "stat", Path: name, Err: err}
 	}
-	return fileInfo{name: path.Base(name), size: blob.Size, mode: 0o444}, nil
+	return fileInfo{name: path.Base(name), size: blob.Size, mode: blobMode(entry.exec)}, nil
 }
 
 // resolve walks name through the commit and returns the entry it ends at, following symbolic links.
@@ -250,7 +264,7 @@ func (c *commitFS) walk(current string) (treeEntry, string, error) {
 			}
 		case filemode.Regular, filemode.Executable, filemode.Deprecated:
 			if last {
-				return treeEntry{hash: entry.Hash}, "", nil
+				return treeEntry{hash: entry.Hash, exec: entry.Mode == filemode.Executable}, "", nil
 			}
 			return treeEntry{}, "", fs.ErrNotExist
 		default:
@@ -362,7 +376,7 @@ type fileInfo struct {
 	name string
 	// size is the content length in bytes, zero for a directory.
 	size int64
-	// mode carries the directory bit and read permissions.
+	// mode carries the directory bit and the read and execute permissions.
 	mode fs.FileMode
 }
 

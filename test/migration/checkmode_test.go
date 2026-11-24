@@ -9,8 +9,9 @@ import (
 
 // TestDryRunThatForcesRealWorkIsHeld is scenario twelve. AWX exports two check-mode templates: one
 // whose playbook marks a task check_mode: false, so its dry run still writes, and one that changes
-// nothing. A rule that exempts dry runs, written as a YAML exclude_dry_run rule, has to hold the
-// first and let the second through. The record of the held one has to say what the gate's scan read
+// nothing. A rule that exempts dry runs, written as a YAML exclude_dry_run rule, has to hold both:
+// the first for its task, and the second because its imported inventory sets a connection and an
+// interpreter, which the gate reads strictly. Neither writes before an approver releases it. The record of the held one has to say what the gate's scan read
 // and found, the hold has to name the two clean fixes, and the record has to say who released it.
 // The same rule written in Rego is checked by the paid build.
 func TestDryRunThatForcesRealWorkIsHeld(t *testing.T) {
@@ -41,9 +42,17 @@ func TestDryRunThatForcesRealWorkIsHeld(t *testing.T) {
 			s := in.startServer("a")
 
 			clean := in.launched(s, "operator", "preview clean", nil)
+			cleanHeld := in.waitStatus(s, clean.ID, "pending_approval")
+			if got := str(cleanHeld.Raw["dry_run_scans"]); !strings.Contains(got, "ansible_connection") {
+				t.Errorf("the clean dry run's dry_run_scans = %s, want the inventory's connection", got)
+			}
+			if got := in.marked("clean"); len(got) != 0 {
+				t.Fatalf("the held clean dry run wrote on %v before anyone approved it", got)
+			}
+			in.must(s, "approver", "POST", "/v1/runs/"+clean.ID+"/approve", nil, 200)
 			done := in.waitDone(s, clean.ID)
 			if done.Status != "succeeded" {
-				t.Fatalf("the change-free dry run = %s, want it to run unheld: %s", done.Status,
+				t.Fatalf("the approved clean dry run = %s, want it to succeed: %s", done.Status,
 					describe(done.Raw))
 			}
 			if got := in.marked("clean"); len(got) != 0 {
@@ -78,8 +87,9 @@ func TestDryRunThatForcesRealWorkIsHeld(t *testing.T) {
 
 			ev := in.checkEvidence(s, clean.ID, forced.ID)
 			requireRecord(t, ev.Receipts[clean.ID], recordWant{
-				Launcher: "operator-laptop", OnBehalfOf: "operator", Playbook: "mark.yml",
-				Hosts: []string{"web1"}, Rules: []string{test.WantRule},
+				Launcher: "operator-laptop", OnBehalfOf: "operator", Approver: "approver-laptop",
+				Playbook: "mark.yml",
+				Hosts:    []string{"web1"}, Rules: []string{test.WantRule},
 			})
 			rec := ev.Receipts[forced.ID]
 			requireRecord(t, rec, recordWant{

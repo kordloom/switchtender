@@ -191,6 +191,15 @@ code and settings from each of those without a task naming them. The scan reads 
 variable files are vault encrypted therefore gets no automatic plan. The scan still cannot judge
 provider or plugin code, which is why it is the second line.
 
+The review also reads the inventory the plan would run against, at the same head. A plan is
+refused when an inventory sets a connection or interpreter variable other than the user, host, port,
+become, and password settings, puts template code in a value, or names a host or address that starts
+with a dash, and when an inventory file is executable, is a symbolic link, or starts with `#!`. An
+interpreter or `ProxyCommand` setting has no fix but its removal, since the scan reads strictly. An
+inventory plugin configuration, a script, or a vaulted value is something only Ansible can resolve,
+so a template that plans against one needs a stored inventory that syncs from a source, whose hosts
+the review reads as data.
+
 A playbook that forces real tasks or fails any of those is not planned, since its plan would act
 from a branch nobody merged, and neither is a configuration that declares an `external` or
 `aws_lambda_invocation` data source, or an `http` data source whose method is anything but GET or

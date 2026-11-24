@@ -28,7 +28,9 @@ exactly those check runs. Ansible still runs any play, block, task, role, or inc
 `check_mode: false` for real under `--check`, and a `pipe` lookup runs its command on the controller
 while a template renders, under `--check` too. The gate reads for both before it treats a dry run as
 a preview, and a dry run that forces real work or runs a `pipe` lookup is held by a rule that
-excludes dry runs as though it were a real run. The hold names the task and the two clean fixes:
+excludes dry runs as though it were a real run. The gate reads the inventory the run executes
+against the same way, and a setting there that can choose a program the controller runs holds the
+dry run too. The hold names the task and the two clean fixes:
 rework it so check mode is safe, or drop `exclude_dry_run` from that rule. Other lookups and plugins
 run code on the controller too, and the scan does not judge them, so a rule that excludes dry runs
 trusts the playbooks it lets through. An agent's check run waits for a person whatever the scan
