@@ -461,12 +461,12 @@ func TestAWindowsServerDownloadsNothing(t *testing.T) {
 			if test.Precheck {
 				probe := &run.Run{ID: run.NewID(), Tool: run.ToolTerraform, Command: dir,
 					DryRun: true, Labels: map[string]string{run.LabelPullRequest: "7"}}
-				if scan, ok := dryRunScan(probe, nil, "", d.checkoutReader(), on); ok {
+				if scan, ok := dryRunScan(probe, nil, "", d.checkoutReader(), on, d.scanInventory); ok {
 					scans = []run.DryRunScan{scan}
 				}
 			} else {
 				scans = gradedFrom(&run.Run{ID: "run_host", Tool: run.ToolTerraform, Command: dir,
-					DryRun: true}, d.checkoutReader(), on).DryRunScans
+					DryRun: true}, d.checkoutReader(), on, d.scanInventory).DryRunScans
 			}
 			if n := len(get.handed()); n != test.WantFetches {
 				t.Errorf("the get was reached %d times, want %d", n, test.WantFetches)

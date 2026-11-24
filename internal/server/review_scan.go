@@ -114,6 +114,8 @@ func dryRunRefusal(scans []run.DryRunScan, tool string) (string, string) {
 				"data source that only reads, or review it with a template whose configuration " +
 				"declares none.",
 			"the configuration runs a program while it plans"
+	case inventoryHeld(entries):
+		return inventoryRefusal(entries, list, len(held.Findings) == 0)
 	case len(held.Findings) == 0:
 		return "This playbook could not be read in full before planning, so nothing shows a plan " +
 				"of it would leave hosts unchanged: " + list + ". Make what it pulls in readable to " +
@@ -126,4 +128,34 @@ func dryRunRefusal(scans []run.DryRunScan, tool string) (string, string) {
 			"check_mode: false or a pipe lookup, from what runs in this plan, or review it with a " +
 			"template whose playbook forces nothing.",
 		"the playbook runs tasks for real under check mode"
+}
+
+// inventoryHeld reports whether an Ansible plan's scan entries name its inventory or a connection
+// variable, whose fix is not the playbook's.
+func inventoryHeld(entries []string) bool {
+	for _, e := range entries {
+		if run.InventoryEntry(e) || run.ConnectionEntry(e) {
+			return true
+		}
+	}
+	return false
+}
+
+// inventoryRefusal is what a pull request is told when its Ansible plan is refused for what its
+// inventory or a connection variable sets, or for an inventory the gate could not read, with the
+// list of entries list and the fix that names. incomplete says the scan found nothing and could not
+// read everything.
+func inventoryRefusal(entries []string, list string, incomplete bool) (string, string) {
+	fix := run.AnsibleFix(entries, incomplete)
+	fix = strings.ToUpper(fix[:1]) + fix[1:]
+	if incomplete {
+		return "This plan's inventory could not be read in full before planning, so nothing shows " +
+				"a plan against it would leave hosts unchanged: " + list + ". " + fix + ", or review " +
+				"it with a template whose playbook and inventory the gate can read in full.",
+			"the inventory could not be read in full"
+	}
+	return "This plan's inventory or variables can choose a program the controller runs while it " +
+			"plans, so a plan of it would act from a branch nobody merged: " + list + ". " + fix +
+			", or review it with a template whose playbook and inventory force nothing.",
+		"the inventory or variables can run a program while it plans"
 }

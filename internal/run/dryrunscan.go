@@ -120,7 +120,11 @@ func (s DryRunScan) Entries() []string {
 	out := make([]string, 0, len(s.Findings)+len(s.Unread))
 	out = append(out, s.Findings...)
 	for _, unread := range s.Unread {
-		out = append(out, "could not read "+unread+", "+wordsFor(s.Tool).unread)
+		why := wordsFor(s.Tool).unread
+		if InventoryEntry(unread) {
+			why = inventoryUnreadWords
+		}
+		out = append(out, "could not read "+unread+", "+why)
 	}
 	return out
 }
@@ -393,12 +397,8 @@ func holdNote(r *Run, lead, second string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s: %s. ", lead, first)
 	switch {
-	case tool == ToolAnsible && incomplete:
-		fmt.Fprintf(&b, "Two clean fixes: make what the playbook pulls in readable to the gate, "+
-			"such as a role committed to the project or installed from its requirements file, or %s.",
-			drop)
 	case tool == ToolAnsible:
-		fmt.Fprintf(&b, "Two clean fixes: rework the task so check mode is safe, or %s.", drop)
+		fmt.Fprintf(&b, "Two clean fixes: %s, or %s.", AnsibleFix(entries, incomplete), drop)
 	case incomplete:
 		fmt.Fprintf(&b, "Two clean fixes: make every module the configuration calls readable to "+
 			"the gate, which downloads registry and remote modules with the run's own credentials "+

@@ -15,14 +15,15 @@ import (
 
 // dryRunScan returns the gate's scan of what the dry run r executes, and whether r is a run the
 // question applies to: an Ansible dry run, read through the scan of its playbook, or a Terraform or
-// OpenTofu plan, read through its configuration.
+// OpenTofu plan, read through its configuration. An Ansible dry run's inventory is read as well,
+// since what it sets runs on the controller before any task.
 //
 // A playbook or configuration that could not be read is an answer too. Nothing proves it runs
 // nothing for real, and the exemption a dry run earns rests on that proof, so the run is classified
 // as incomplete rather than change free. A pipeline's coordinator executes nothing of its own,
 // since its playbook field holds the pipeline's name, so its steps are scanned instead.
 func dryRunScan(r *run.Run, pb *run.PlaybookSignals, unread string, checkouts CheckoutReader,
-	plans planScanner) (run.DryRunScan, bool) {
+	plans planScanner, inventories inventoryScanner) (run.DryRunScan, bool) {
 	if r == nil || !r.DryRun || r.Kind == run.KindPipeline {
 		return run.DryRunScan{}, false
 	}
@@ -35,7 +36,7 @@ func dryRunScan(r *run.Run, pb *run.PlaybookSignals, unread string, checkouts Ch
 		if pb != nil {
 			scan = pb.DryRunScan()
 		}
-		return scan.WithExtraVars(r.ExtraVars), true
+		return scan.WithExtraVars(r.ExtraVars).WithInventory(inventories(r, checkouts)), true
 	case run.ToolTerraform, run.ToolOpenTofu:
 		if r.Command == "" {
 			return run.DryRunScan{}, false
@@ -178,7 +179,10 @@ func (d *Dispatcher) DryRunScansAt(ctx context.Context, r *run.Run) []run.DryRun
 	}
 	checkouts := d.checkoutReader()
 	pb, unread := scanRunPlaybook(&probe, checkouts)
-	scan, ok := dryRunScan(&probe, pb, unread, checkouts, d.scanPlan)
+	inventories := func(r *run.Run, c CheckoutReader) run.InventoryScan {
+		return d.scanInventoryAt(ctx, r, c)
+	}
+	scan, ok := dryRunScan(&probe, pb, unread, checkouts, d.scanPlan, inventories)
 	if !ok {
 		return nil
 	}

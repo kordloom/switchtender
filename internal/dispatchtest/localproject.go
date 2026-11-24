@@ -2,6 +2,7 @@ package dispatchtest
 
 import (
 	"context"
+	"maps"
 	"testing"
 	"time"
 
@@ -34,15 +35,25 @@ type Project struct {
 	Head string
 }
 
+// LocalInventory is the inventory file LocalProject commits.
+const LocalInventory = "hosts.ini"
+
 // LocalProject builds a git repository committing files on main, and a project named
 // LocalProjectID whose remote is that folder. A run an approval stands in front of must come from
 // a project, so a test that holds an Ansible or Terraform run names this one. A nil files commits
 // site.yml holding HeldPlaybook. The repository is built in this process and synced by the
 // in-process file transport, so no git binary is needed.
+//
+// The repository also commits the clean inventory hosts.ini, unless files names one, since the gate
+// reads the inventory a project run names and the tests name that one.
 func LocalProject(t *testing.T, files map[string]string) Project {
 	t.Helper()
 	if files == nil {
 		files = map[string]string{"site.yml": HeldPlaybook}
+	}
+	if _, ok := files[LocalInventory]; !ok {
+		files = maps.Clone(files)
+		files[LocalInventory] = "[web]\nweb01\n"
 	}
 	dir := t.TempDir()
 	WriteFiles(t, dir, files)

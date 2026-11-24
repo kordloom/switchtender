@@ -298,7 +298,8 @@ func TestAPipelineStepThatForcesRealTasksHoldsThePipeline(t *testing.T) {
 func TestAProjectDryRunIsReadAtTheCommitItRuns(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	repo := newTreeRepo(t, map[string]string{"site.yml": cleanPlaybook})
+	repo := newTreeRepo(t, map[string]string{"site.yml": cleanPlaybook,
+		dispatchtest.LocalInventory: "[web]\nweb01\n"})
 	syncer, err := project.NewSyncer(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewSyncer() error = %v", err)
