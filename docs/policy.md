@@ -464,7 +464,7 @@ an empty value when the run has none, so a module never meets a missing field.
 | `run.queue` | The worker queue the run is routed to. |
 | `run.project_id` | The git project the run reads from. |
 | `run.dry_run` | Whether the run was asked for as a no-change preview: the tool's dry-run flag, `--check` for Ansible. |
-| `run.dry_run_findings` | For a dry run, why the gate's scan did not find it change free. For Ansible, each play, block, task, role, or include that sets `check_mode` to anything but true, and each play, task, or role dependency that uses a lookup the scan cannot clear, naming the file, and each plugin or module directory, `ansible.cfg`, or collections requirements file in the project, by its path. For Terraform and OpenTofu, each `external` or `aws_lambda_invocation` data source, and each `http` data source with a write method or a request body, by its address, naming the file and line. For both, whatever the scan could not read. Empty for a dry run read in full that found none of these, for a dry run of a tool nothing scans, and for any other run. |
+| `run.dry_run_findings` | For a dry run, why the gate's scan did not find it change free. For Ansible, each play, block, task, role, or include that sets `check_mode` to anything but true, and each play, task, or role dependency that uses a lookup the scan cannot clear, naming the file, and each plugin or module directory, `ansible.cfg`, or collections requirements file in the project, by its path, and each inventory setting that can choose a program the controller runs, or inventory file that is one, by the inventory that holds it. For Terraform and OpenTofu, each `external` or `aws_lambda_invocation` data source, and each `http` data source with a write method or a request body, by its address, naming the file and line. For both, whatever the scan could not read. Empty for a dry run read in full that found none of these, for a dry run of a tool nothing scans, and for any other run. |
 | `run.change_free` | Whether the gate reads the run as a dry run that changes nothing: `dry_run` is true, `dry_run_findings` is empty, and the tool is one the gate scans or a built-in one whose dry run runs nothing. A dry run of a tool a plugin or the SDK added is never change free. |
 | `run.kind` | Empty for a plain run, or `split` or `pipeline` for a coordinator. |
 | `run.step_name` | The pipeline step's name, for a step. |
@@ -627,6 +627,16 @@ before it judges a dry run, and records what it found in `run.dry_run_findings`:
 - Each `library`, `module_utils`, or `*_plugins` directory, `ansible.cfg`, and requirements file
   that installs collections in the project, by its path, since Ansible loads code and settings from
   each without a task naming it.
+- Each inventory setting that can choose a program the controller runs, by the inventory and the
+  group or host that sets it: a connection or interpreter variable other than the user, host,
+  port, become, and password settings, template code in a value, and a host or address that starts
+  with a dash. An inventory file that is executable, is a symbolic link, or starts with `#!` counts
+  as a program. The gate reads the inventory the run executes against: a file or directory in the
+  project at the commit it runs, with the `group_vars` and `host_vars` beside it, one on this
+  server, or a stored inventory's snapshot, a composed one as the result it composed. An inventory
+  plugin configuration, a vaulted value, and a TOML inventory are unread. Nothing is refused when an
+  inventory is saved, so an imported inventory that sets an interpreter still lands, and a dry run
+  against it is held by a rule that excludes dry runs.
 - Each `external` or `aws_lambda_invocation` data source, and each `http` data source whose method
   is anything but GET or HEAD or that carries a `request_body`, by its address, file, and line. A
   method the scan cannot read as a plain value counts as a write.
