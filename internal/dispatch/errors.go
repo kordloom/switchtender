@@ -35,6 +35,9 @@ var (
 	// the file is missing, changed since it was bound, or does not open. The apply is refused rather
 	// than planned again.
 	ErrPlanFile = errors.New("plan file refused")
+	// ErrPublishedEnv is returned when a Terraform or OpenTofu workflow step would take a var another
+	// step published that replaces an environment entry the step's credentials set.
+	ErrPublishedEnv = errors.New("published var refused")
 	// ErrImagePin is returned when a run's container image does not match what was pinned when it was
 	// submitted, or when an image could not be pinned to the run at all.
 	ErrImagePin = errors.New("image pin refused")

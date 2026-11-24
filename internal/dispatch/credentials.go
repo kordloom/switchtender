@@ -495,6 +495,9 @@ func (d *Dispatcher) materializeFrom(ctx context.Context, src secretSource, r *r
 			}
 		}
 	}
+	if err := publishedEnvRefusal(ctx, src, r, spec); err != nil {
+		return cleanup, secrets, err
+	}
 	return cleanup, secrets, nil
 }
 
