@@ -127,7 +127,7 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--jwt-allow-any-audience` | `false` | Start JWT sign-in with no `--jwt-audience`. The audience is then not checked, so every token the issuer signs is accepted, including one minted for a different application at the same issuer. Set it only when the issuer serves this install alone. |
 | `--jwt-username-claim` | `sub` | Claim naming the account. |
 | `--jwt-groups-claim` | none | Claim holding the user's groups, used with `--jwt-role-map`. |
-| `--jwt-agent-claim` | `st_actor_type` | Claim that marks a token as an AI agent's when it holds the value `agent`. A marked token gets the agent ceiling: it can launch and propose work, but cannot manage identity, access, or secrets, and cannot approve its own held run. |
+| `--jwt-agent-claim` | `st_actor_type` | Claim that marks a token as an AI agent's when it holds the value `agent`. The claim may be a string or a list. A list that holds `agent` counts, and the match ignores case. A claim of any other shape is refused. A marked token gets the agent ceiling: it can launch and propose work, but cannot manage identity, access, or secrets, and cannot approve its own held run. |
 | `--jwt-role-map` | none | Map a token group to a role as `group=role`. Repeatable. |
 | `--jwt-default-role` | `viewer` | Role granted to an account created on first JWT sign-in. |
 | `--ai-provider` | none | Enable advisory AI features with a provider: `ollama`, `anthropic`, or `openai`. Empty leaves AI off. |
@@ -960,8 +960,7 @@ starts, so a typo never silently leaves an alert on its default or off.
 
 A relay worker runs in a segment the control node cannot reach, which means the least trusted machine
 in the estate holds a worker token. With a single `--worker-token`, that machine may name any queue
-it likes and lease from it, so a compromised host in a DMZ can take a production run and execute it
-with production credentials.
+it likes and lease from it, so a compromised host in a DMZ can take a production run and execute it.
 
 `--worker-pools` binds each token to the queues it may serve. The file stores the SHA-256 of each
 token, never the token itself, the same way a webhook secret is stored:
@@ -1048,6 +1047,9 @@ The rules it follows:
 - Delivery is off until a pool registers a key. A pool without one is sent nothing, and a run that
   needs a secret fails on its workers with a message naming the pool and how to register a key,
   which is what every relay worker did before delivery existed.
+- A pool with no delivery key cannot hand in a plan file, so it cannot complete a plan-gated apply.
+  Register a delivery key and list the pool's queues. A plan for a run on the default queue, which
+  the control node's own runner serves, is taken from no pool.
 - Only a pool bound to explicit queues is sent secrets. A pool's queues are the runs it can claim,
   and so the runs whose secrets its key unlocks, and a pool with no queues could claim anything. A
   pool file that gives a key to a pool with no `queues`, or the same key to two pools, stops the
