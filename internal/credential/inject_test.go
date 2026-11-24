@@ -3,6 +3,7 @@ package credential
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -196,5 +197,53 @@ func TestRegisterInjectorPanics(t *testing.T) {
 			}()
 			RegisterInjector(test.Kind, test.Inj)
 		})
+	}
+}
+
+// TestRegisteredInjectorsSetNoVars pins what a workflow's check of published step outputs reads
+// without opening a secret. It reads the var names a credential injects from a custom type's
+// injectors alone, so a registered injector must return no extra vars and set no TF_VAR_ name,
+// since either one is a name only the opened secret would show. A kind registered with no sample
+// here fails, so a new injector is checked before it ships.
+func TestRegisteredInjectorsSetNoVars(t *testing.T) {
+	t.Parallel()
+	samples := map[Kind]string{
+		KindAWS:    "access_key=AKIA\nsecret_key=SEKRIT\nsession_token=TOK\nregion=us-east-1",
+		KindAzure:  "client_id=CID\nsecret=CSEC\nsubscription_id=SUB\ntenant_id=TEN",
+		KindGCP:    `{"type":"service_account","project_id":"x"}`,
+		KindVMware: "host=vc01\nuser=root\npassword=pw\nvalidate_certs=false",
+		KindOpenStack: "auth_url=https://keystone:5000/v3\nusername=deploy\npassword=pw\n" +
+			"project_name=prod",
+		KindKubeconfig: "apiVersion: v1\nkind: Config\nclusters:\n- name: prod\n  cluster:\n" +
+			"    server: https://k8s.example.com\nusers:\n- name: deployer\n  user:\n" +
+			"    token: kube-token-s3cret\n",
+	}
+	for kind := range injectors {
+		secret, ok := samples[kind]
+		if !ok {
+			t.Errorf("kind %s is registered with no sample here, so its names are unchecked", kind)
+			continue
+		}
+		inj, err := Inject(kind, secret)
+		if err != nil {
+			t.Errorf("Inject(%s) error = %v", kind, err)
+			continue
+		}
+		if len(inj.ExtraVars) > 0 {
+			t.Errorf("Inject(%s) returned extra vars %v, want none", kind, inj.ExtraVars)
+		}
+		names := make([]string, 0, len(inj.Env))
+		for _, pair := range inj.Env {
+			name, _, _ := strings.Cut(pair, "=")
+			names = append(names, name)
+		}
+		for _, f := range inj.Files {
+			names = append(names, f.EnvVars...)
+		}
+		for _, name := range names {
+			if strings.HasPrefix(name, "TF_VAR_") {
+				t.Errorf("Inject(%s) sets %s, want no TF_VAR_ name", kind, name)
+			}
+		}
 	}
 }
