@@ -30,7 +30,7 @@ work. A finished split can retry only its failed shards.
 
 A pipeline runs playbook steps in order, or as a dependency graph when steps declare what they
 depend on. Each step is itself a run, so it gets the full matrix, events, and history. A step can
-retry on failure, and values a step publishes with `set_stats` flow to the steps that depend on it. A value one step publishes reaches later steps as data. A value that holds template code, or a name that begins with `ansible_`, stops the workflow at that step.
+retry on failure, and values a step publishes with `set_stats` flow to the steps that depend on it. A value one step publishes reaches later steps as data. A value that holds template code, or a name that begins with `ansible_`, stops the workflow at that step. So does a name the workflow already has a var for, even with the same value, since a published value cannot replace a value the workflow was approved with.
 
 ## Projects
 

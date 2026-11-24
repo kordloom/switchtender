@@ -361,9 +361,10 @@ func (w *dagWalk) settle(i int, status run.Status, out map[string]any) {
 // result does not depend on which branch finished first.
 //
 // The parent's own vars are the base every step starts from, so a workflow's survey answers reach
-// each step; a transitive dependency's outputs are layered on top in declaration order, so a
-// published output overrides a parent var of the same name and the result does not depend on which
-// branch finished first.
+// each step; a transitive dependency's outputs are layered on top in declaration order, so the
+// result does not depend on which branch finished first. A published output that names a parent var
+// is refused by outputRefusal before the step starts, so it never replaces a value the workflow was
+// approved with.
 //
 // from names the step that published each key, so outputRefusal can judge what a step published
 // apart from what the workflow was approved with. A finished step's outputs read back from its
@@ -496,7 +497,7 @@ func (w *dagWalk) launch(ctx context.Context, i int) {
 	}
 	step := w.steps[i]
 	vars, from := w.inputsFor(i)
-	if reason := outputRefusal(step, vars, from); reason != "" {
+	if reason := outputRefusal(step, w.parent, vars, from); reason != "" {
 		w.refuse(i, reason)
 		return
 	}
