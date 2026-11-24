@@ -12,7 +12,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/kordloom/switchtender/internal/util"
 )
@@ -124,16 +123,8 @@ func ResolveNative(content string) (*Listing, error) {
 // with no extension: the YAML plugin first, which reads JSON as well, and the INI plugin when the
 // YAML plugin declines the file.
 func nativeData(content string) (*invData, error) {
-	if !utf8.ValidString(content) {
-		return nil, needsAnsible("its content is not valid UTF-8")
-	}
-	if strings.HasPrefix(content, "\ufeff") {
-		return nil, needsAnsible("its content starts with a byte order mark")
-	}
-	// Ansible decrypts a file that starts with the vault header before any plugin reads it, and the
-	// header is matched at the first byte only, so the check here does not trim either.
-	if strings.HasPrefix(content, "$ANSIBLE_VAULT") {
-		return nil, needsAnsible("it is a whole file encrypted with Ansible Vault")
+	if err := readable(content); err != nil {
+		return nil, err
 	}
 	d := newInvData()
 	doc, err := loadInventoryDocument(content)

@@ -256,6 +256,14 @@ directory, no <code>ansible.cfg</code>, and no requirements file that installs c
 code and settings from each of those without a task naming them. The scan reads the playbook, what it imports and includes, its roles' tasks, handlers, dependencies, defaults, and vars, every <code>vars_files</code> and <code>include_vars</code> target, <code>group_vars</code> and <code>host_vars</code> in the repository, and every template source. A variable file it cannot read as plain data, a vault-encrypted one included, leaves the scan incomplete, so the dry run is not change free. A repository whose
 variable files are vault encrypted therefore gets no automatic plan. The scan still cannot judge
 provider or plugin code, which is why it is the second line.</p>
+<p>The review also reads the inventory the plan would run against, at the same head. A plan is
+refused when an inventory sets a connection or interpreter variable other than the user, host, port,
+become, and password settings, puts template code in a value, or names a host or address that starts
+with a dash, and when an inventory file is executable, is a symbolic link, or starts with <code>#!</code>. An
+interpreter or <code>ProxyCommand</code> setting has no fix but its removal, since the scan reads strictly. An
+inventory plugin configuration, a script, or a vaulted value is something only Ansible can resolve,
+so a template that plans against one needs a stored inventory that syncs from a source, whose hosts
+the review reads as data.</p>
 <p>A playbook that forces real tasks or fails any of those is not planned, since its plan would act
 from a branch nobody merged, and neither is a configuration that declares an <code>external</code> or
 <code>aws_lambda_invocation</code> data source, or an <code>http</code> data source whose method is anything but GET or

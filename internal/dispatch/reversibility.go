@@ -28,13 +28,13 @@ type CheckoutReader interface {
 // the run is about to be written and folded into the audit chain's content digest, so attaching a
 // derived field to the object being persisted would change what the receipt commits to.
 func (d *Dispatcher) graded(r *run.Run) *run.Run {
-	return gradedFrom(r, d.checkoutReader(), d.scanPlan)
+	return gradedFrom(r, d.checkoutReader(), d.scanPlan, d.scanInventory)
 }
 
 // gradedLocally grades r without reading any project checkout. It serves the plan gate's free
 // functions, whose runs are Terraform or OpenTofu applies, which name no playbook to read.
 func gradedLocally(r *run.Run) *run.Run {
-	return gradedFrom(r, nil, scanConfiguration)
+	return gradedFrom(r, nil, scanConfiguration, localInventory)
 }
 
 // planScanner reads the Terraform or OpenTofu configuration a dry run of r plans.
@@ -55,9 +55,10 @@ func (d *Dispatcher) checkoutReader() CheckoutReader {
 // an Ansible dry run whose playbook forces real work under check mode, or a Terraform or OpenTofu
 // plan whose configuration runs a program while it plans. The run that executes is untouched: it
 // still runs in its tool's no-change mode, and only the judgment about it changes.
-func gradedFrom(r *run.Run, checkouts CheckoutReader, plans planScanner) *run.Run {
+func gradedFrom(r *run.Run, checkouts CheckoutReader, plans planScanner,
+	inventories inventoryScanner) *run.Run {
 	pb, unread := scanRunPlaybook(r, checkouts)
-	scan, scanned := dryRunScan(r, pb, unread, checkouts, plans)
+	scan, scanned := dryRunScan(r, pb, unread, checkouts, plans, inventories)
 	if pb == nil && !scanned {
 		return r
 	}

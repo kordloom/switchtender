@@ -15,7 +15,7 @@ const (
 	// for work Ansible runs for real under --check.
 	CheckModeScanner = "ansible-check-mode"
 	// CheckModeScannerVersion is the revision of that reader's rules.
-	CheckModeScannerVersion = 2
+	CheckModeScannerVersion = 3
 )
 
 // DryRunScan returns what the playbook scan found, as the gate records it for an Ansible dry run.
