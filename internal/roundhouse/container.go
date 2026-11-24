@@ -255,11 +255,19 @@ func (c *containerRunner) runPlanTo(ctx context.Context, spec Spec, plan contain
 		// host gets processKillGrace after SIGTERM; in a container it got none, so a canceled
 		// terraform died holding its state lock and every later plan or apply blocked until somebody
 		// ran force-unlock by hand. A stop that fails falls through to the removal below.
+		//
+		// Both commands get the run's filtered environment, as the client does. With none set they
+		// inherited the server's own, master key and salt included, and an exec clears the
+		// non-dumpable flag, so a host run of the same account could read the key from
+		// /proc/<pid>/environ for the whole stop grace period.
 		stop := exec.Command(c.runtime, "stop", "--time",
 			strconv.Itoa(int(containerStopGrace/time.Second)), name)
+		stop.Env = runEnv
 		_ = stop.Run()
 		for attempt := 0; attempt < containerKillAttempts; attempt++ {
-			if err := exec.Command(c.runtime, "rm", "-f", name).Run(); err == nil {
+			rm := exec.Command(c.runtime, "rm", "-f", name)
+			rm.Env = runEnv
+			if err := rm.Run(); err == nil {
 				return
 			}
 			// The wait is not interruptible by the run finishing: the container outlives the client,
