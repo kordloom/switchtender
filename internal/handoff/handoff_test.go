@@ -50,7 +50,8 @@ func testPayload(runID string) *Payload {
 		Credentials: []*Credential{ssh, oidc},
 		Types: []*credential.CredentialType{{ID: "ctype_a", Name: "Datadog",
 			Fields: []credential.Field{{Name: "api_key", Secret: true}}}},
-		Answers: map[string]string{"db_password": "survey-answer-value"},
+		Answers:      map[string]string{"db_password": "survey-answer-value"},
+		ApprovedVars: []string{"region"}, VarsApproved: true,
 	}
 }
 

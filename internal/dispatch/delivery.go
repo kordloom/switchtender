@@ -63,6 +63,9 @@ type secretSource interface {
 	// planFile returns the plan file the gated apply r carries out, held to the digest r binds, or
 	// why it cannot be had.
 	planFile(ctx context.Context, r *run.Run) ([]byte, error)
+	// approvedVars returns the var names r's parent was approved with, and false when they cannot be
+	// had, in which case every var of r counts as published.
+	approvedVars(ctx context.Context, r *run.Run) ([]string, bool)
 	// wipe drops every opened value the source still holds.
 	wipe()
 }
@@ -151,6 +154,11 @@ func (s storeSource) inventorySnapshot(_ context.Context, r *run.Run) (string, e
 // planFile opens the gated apply's sealed plan file with this executor's key.
 func (s storeSource) planFile(_ context.Context, r *run.Run) ([]byte, error) {
 	return s.d.openPlanFile(r)
+}
+
+// approvedVars reads r's parent from this executor's run store.
+func (s storeSource) approvedVars(ctx context.Context, r *run.Run) ([]string, bool) {
+	return s.d.approvedVarNames(ctx, r)
 }
 
 // wipe has nothing to drop: a store-backed executor opens each value at the moment it is applied.
@@ -367,6 +375,16 @@ func (s *deliveredSource) planFile(ctx context.Context, _ *run.Run) ([]byte, err
 	return slices.Clone(p.PlanFile), nil
 }
 
+// approvedVars returns the names the control node read from r's parent at claim. A delivery that
+// carries none, or one that cannot be opened, reports false.
+func (s *deliveredSource) approvedVars(ctx context.Context, _ *run.Run) ([]string, bool) {
+	p, err := s.load(ctx)
+	if err != nil || p == nil || !p.VarsApproved {
+		return nil, false
+	}
+	return slices.Clone(p.ApprovedVars), true
+}
+
 // wipe drops the opened delivery. Anything asked of the source afterward is refused rather than
 // opened a second time.
 func (s *deliveredSource) wipe() {
@@ -510,6 +528,9 @@ func (d *Dispatcher) OpenSecrets(ctx context.Context, r *run.Run) (*handoff.Payl
 			return fail(perr)
 		}
 		p.PlanFile = plan
+	}
+	if publishedEnvApplies(r) {
+		p.ApprovedVars, p.VarsApproved = d.approvedVarNames(ctx, r)
 	}
 	if leases.empty() {
 		return p, nil, nil

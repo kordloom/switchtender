@@ -335,6 +335,13 @@ publishes cannot replace what the type injects, so a step that would take a publ
 like one of the type's extra vars, or, on a Terraform or OpenTofu step, like a variable the type
 sets through `TF_VAR_`, stops the workflow. A field the type does not declare is refused.
 
+The same holds for every credential's environment, an `env` credential's `KEY=VALUE` lines
+included. Terraform and OpenTofu read a run's vars after the credential environment, so a
+Terraform or OpenTofu step that would take a published var whose `TF_VAR_` name the step's
+credentials already set stops before it starts, on the server and on a relay worker alike. A var
+the workflow was launched with still outranks the credential's, and a published name that is not a
+Terraform variable name is refused.
+
 Set new values on an existing typed credential with its fields, which replace every stored value at
 once:
 

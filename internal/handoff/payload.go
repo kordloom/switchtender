@@ -38,6 +38,12 @@ type Payload struct {
 	// PlanFile is the opened plan file a gated terraform or opentofu apply carries out. A plan file
 	// holds the values the configuration was planned with, sensitive ones included.
 	PlanFile []byte `json:"-"`
+	// ApprovedVars names the extra vars and secret survey answers the parent of a workflow step was
+	// approved with, so a worker can tell them from the vars another step published.
+	ApprovedVars []string `json:"approved_vars,omitempty"`
+	// VarsApproved reports whether ApprovedVars was filled. A payload without it makes every var of
+	// the step a published one.
+	VarsApproved bool `json:"vars_approved,omitempty"`
 }
 
 // Credential is one opened credential.
@@ -191,6 +197,10 @@ type wirePayload struct {
 	Inventory string `json:"inventory,omitempty"`
 	// PlanFile is the plan file a gated apply carries out.
 	PlanFile []byte `json:"plan_file,omitempty"`
+	// ApprovedVars names the vars the step's parent was approved with.
+	ApprovedVars []string `json:"approved_vars,omitempty"`
+	// VarsApproved reports whether ApprovedVars was filled.
+	VarsApproved bool `json:"vars_approved,omitempty"`
 }
 
 // wireCredential is one credential inside the seal.
@@ -208,6 +218,7 @@ func marshalPayload(p *Payload) ([]byte, error) {
 	w := wirePayload{
 		RunID: p.RunID, DryRun: p.DryRun, CredentialIDs: p.CredentialIDs, Types: p.Types,
 		Answers: p.Answers, Inventory: p.Inventory, PlanFile: p.PlanFile,
+		ApprovedVars: p.ApprovedVars, VarsApproved: p.VarsApproved,
 	}
 	for _, c := range p.Credentials {
 		if c == nil {
@@ -234,6 +245,7 @@ func unmarshalPayload(raw []byte) (*Payload, error) {
 	p := &Payload{
 		RunID: w.RunID, DryRun: w.DryRun, CredentialIDs: w.CredentialIDs, Types: w.Types,
 		Answers: w.Answers, Inventory: w.Inventory, PlanFile: w.PlanFile,
+		ApprovedVars: w.ApprovedVars, VarsApproved: w.VarsApproved,
 	}
 	for _, c := range w.Credentials {
 		p.Credentials = append(p.Credentials, &Credential{Record: c.Record, Value: c.Value,
